@@ -2,15 +2,24 @@
 
 ## Overview
 
-This plan defines key interfaces first, enabling parallel development of the compiler modules. The strategy is to lock down the data structure contracts early, then allow teams to work independently on each compilation phase.
+This plan defines an iterative approach to parallel compiler development. Initial interfaces provide starting points, not fixed contracts. Parallel work streams develop independently, modifying interfaces as needed. After the first iteration, teams reconcile interface changes collaboratively before a second iteration with agreed-upon contracts.
 
-## Phase 1: Core Interface Definitions (Week 1)
+## Core Interfaces (Starting Point)
 
-These interfaces must be defined and agreed upon **before** parallel implementation begins. All are specified in shared header files that multiple modules depend on.
+These interfaces provide initial contracts for parallel development. Teams are expected to modify them as needed during iteration 1, then reconcile changes before iteration 2.
 
-### 1.1 Token Interface (`src/token.h`)
+**Key Principles**:
+- Prefer caller-provided memory (init, not create)
+- No struct hiding - all fields visible
+- Structured allocation patterns (arenas, segmented slabs)
+- String pool for all identifiers and names
+- Hierarchical scopes (blocks, functions, modules)
+- No forward declarations needed
+- Analysis starts from exported functions downward
 
-**Purpose**: Contract between lexer and parser
+### 1.1 Lexer Interface (`src/lexer.h`)
+
+**Purpose**: Streaming tokenization for parser consumption
 
 **Key Data Structures**:
 ```c
@@ -31,20 +40,29 @@ typedef enum {
     TOKEN_FOR, TOKEN_SWITCH, TOKEN_CASE, TOKEN_DEFAULT,
     TOKEN_BREAK, TOKEN_CONTINUE, TOKEN_PACKED, TOKEN_VOLATILE,
     TOKEN_EMBED_FILE, TOKEN_STRUCT, TOKEN_ENUM, TOKEN_UNION,
+    TOKEN_IN, TOKEN_WHILE,
 
     // Operators
-    TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH, /* ... */
+    TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH, TOKEN_PERCENT,
+    TOKEN_AMPERSAND, TOKEN_PIPE, TOKEN_CARET, TOKEN_TILDE,
+    TOKEN_LSHIFT, TOKEN_RSHIFT,
+    TOKEN_AMP_AMP, TOKEN_PIPE_PIPE, TOKEN_BANG,
+    TOKEN_LT, TOKEN_GT, TOKEN_LT_EQ, TOKEN_GT_EQ, TOKEN_EQ_EQ, TOKEN_BANG_EQ,
+    TOKEN_EQ, TOKEN_PLUS_EQ, TOKEN_MINUS_EQ, TOKEN_STAR_EQ, TOKEN_SLASH_EQ,
 
     // Delimiters
-    TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, /* ... */
+    TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE,
+    TOKEN_LBRACKET, TOKEN_RBRACKET,
+    TOKEN_DOT, TOKEN_ARROW, TOKEN_COLON, TOKEN_SEMICOLON,
+    TOKEN_COMMA, TOKEN_DOT_DOT,
 
     TOKEN_EOF,
     TOKEN_ERROR
 } TokenKind;
 
-typedef struct {
+typedef struct Token {
     TokenKind kind;
-    const char* start;      // Pointer to source text
+    const char* start;      // Pointer into source text
     size_t length;
     uint32_t line;
     uint32_t column;
@@ -53,31 +71,69 @@ typedef struct {
     union {
         uint64_t int_value;
         struct {
-            const char* str_value;
+            const char* str_value;  // Pointer into string pool
             size_t str_length;
         };
     } literal;
 } Token;
 
-typedef struct {
-    Token* tokens;
-    size_t count;
-    size_t capacity;
-} TokenStream;
+typedef struct Lexer {
+    const char* source;
+    size_t source_len;
+    const char* filename;
+
+    const char* current;
+    uint32_t line;
+    uint32_t column;
+
+    Token current_token;
+    bool has_error;
+} Lexer;
 ```
 
 **Interface Functions**:
 ```c
-// Lexer produces
-TokenStream* lex_source(const char* source, size_t length, const char* filename);
+// Initialize lexer with caller-provided memory
+void lexer_init(Lexer* lexer, const char* source, size_t len, const char* filename);
 
-// Parser consumes
-void token_stream_free(TokenStream* stream);
+// Get next token (parser calls this repeatedly)
+Token lexer_next_token(Lexer* lexer);
+
+// Peek at current token without advancing
+Token lexer_peek(Lexer* lexer);
 ```
 
 ---
 
-### 1.2 AST Interface (`src/ast.h`)
+### 1.2 Parser Interface (`src/parser.h`)
+
+**Purpose**: Lemon-based LALR(1) parser that constructs AST via callbacks
+
+**Parser Implementation**: Uses SQLite's Lemon parser generator (https://sqlite.org/src/doc/trunk/doc/lemon.html)
+
+**Interface Functions**:
+```c
+typedef struct Parser {
+    Lexer* lexer;
+    void* lemon_parser;  // Opaque Lemon parser state
+    AstNode* root;       // Completed AST root
+    Arena* ast_arena;    // Arena for AST allocation
+    bool has_error;
+} Parser;
+
+// Initialize parser with caller-provided memory
+void parser_init(Parser* parser, Lexer* lexer, Arena* ast_arena);
+
+// Parse and return root AST node
+AstNode* parser_parse(Parser* parser);
+
+// Called by Lemon on token match
+void parser_on_match(Parser* parser, /* Lemon callback args */);
+```
+
+---
+
+### 1.3 AST Interface (`src/ast.h`)
 
 **Purpose**: Contract between parser and semantic analysis phases
 
@@ -149,19 +205,47 @@ typedef struct AstNode {
 
 **Interface Functions**:
 ```c
-// Parser produces
-AstNode* parse(TokenStream* tokens);
+// Utilities for semantic analysis
+void ast_print_debug(AstNode* node, FILE* out);
+void ast_walk(AstNode* node, void (*visitor)(AstNode*, void*), void* ctx);
+```
 
-// Semantic analysis consumes
-void ast_free(AstNode* node);
+**Note**: AST nodes allocated in parser's arena, no individual free needed.
 
-// Utilities
-void ast_print_debug(AstNode* node);
+---
+
+### 1.4 String Pool Interface (`src/string_pool.h`)
+
+**Purpose**: Centralized string interning for all identifiers and names
+
+**Key Data Structures**:
+```c
+typedef struct StringPool {
+    char* buffer;        // Segmented slab allocation
+    size_t used;
+    size_t capacity;
+
+    // TODO: Later convert to trie for faster lookups
+    const char** strings;
+    size_t string_count;
+} StringPool;
+```
+
+**Interface Functions**:
+```c
+// Initialize with caller-provided memory
+void string_pool_init(StringPool* pool, Arena* arena);
+
+// Intern a string (returns pointer to pooled copy)
+const char* string_pool_intern(StringPool* pool, const char* str, size_t len);
+
+// Lookup existing string (returns NULL if not found)
+const char* string_pool_lookup(StringPool* pool, const char* str, size_t len);
 ```
 
 ---
 
-### 1.3 Type System Interface (`src/type.h`)
+### 1.5 Type System Interface (`src/type.h`)
 
 **Purpose**: Shared type representation across all semantic phases
 
@@ -230,9 +314,12 @@ typedef struct SymbolTable SymbolTable;
 
 **Interface Functions**:
 ```c
-Type* type_create_primitive(TypeKind kind);
-Type* type_create_array(Type* elem, size_t length);
-Type* type_create_slice(Type* elem);
+// Type builders (allocate from arena)
+void type_init_primitive(Type* t, TypeKind kind, Arena* arena);
+void type_init_array(Type* t, Type* elem, size_t length, Arena* arena);
+void type_init_slice(Type* t, Type* elem, Arena* arena);
+
+// Type utilities
 bool type_equals(Type* a, Type* b);
 size_t type_sizeof(Type* t);
 size_t type_alignof(Type* t);
@@ -240,12 +327,22 @@ size_t type_alignof(Type* t);
 
 ---
 
-### 1.4 Symbol Table Interface (`src/symbol.h`)
+### 1.6 Symbol Table Interface (`src/symbol.h`)
 
-**Purpose**: Name resolution and scope management
+**Purpose**: Hierarchical name resolution and scope management
+
+**Scope Hierarchy**: Module → Function → Block (nested)
+
+**No Forward Declarations**: Single-pass resolution is sufficient.
 
 **Key Data Structures**:
 ```c
+typedef enum {
+    SCOPE_MODULE,
+    SCOPE_FUNCTION,
+    SCOPE_BLOCK,
+} ScopeKind;
+
 typedef enum {
     SYMBOL_FUNCTION,
     SYMBOL_TYPE,
@@ -256,7 +353,7 @@ typedef enum {
 
 typedef struct Symbol {
     SymbolKind kind;
-    const char* name;
+    const char* name;        // Pointer into string pool
     Type* type;
     bool is_public;
     SourceLocation defined_at;
@@ -276,25 +373,29 @@ typedef struct Symbol {
     } data;
 } Symbol;
 
-typedef struct SymbolTable {
-    struct SymbolTable* parent;  // For nested scopes
+typedef struct Scope {
+    ScopeKind kind;
+    struct Scope* parent;  // NULL for module scope
     Symbol** symbols;
-    size_t count;
-    size_t capacity;
-} SymbolTable;
+    size_t symbol_count;
+    size_t symbol_capacity;
+} Scope;
 ```
 
 **Interface Functions**:
 ```c
-SymbolTable* symbol_table_create(SymbolTable* parent);
-void symbol_table_insert(SymbolTable* table, Symbol* sym);
-Symbol* symbol_table_lookup(SymbolTable* table, const char* name);
-Symbol* symbol_table_lookup_local(SymbolTable* table, const char* name);
+// Initialize scope with caller-provided memory
+void scope_init(Scope* scope, ScopeKind kind, Scope* parent, Arena* arena);
+
+// Symbol operations
+void scope_insert(Scope* scope, Symbol* sym, Arena* arena);
+Symbol* scope_lookup(Scope* scope, const char* name);          // Search up hierarchy
+Symbol* scope_lookup_local(Scope* scope, const char* name);    // Current scope only
 ```
 
 ---
 
-### 1.5 IR Interface (`src/ir.h`)
+### 1.7 IR Interface (`src/ir.h`)
 
 **Purpose**: Contract between lowering and code generation
 
@@ -347,8 +448,8 @@ typedef struct IrNode {
 
 **Interface Functions**:
 ```c
-// Lower produces
-IrNode* lower_ast(AstNode* ast, SymbolTable* symbols);
+// Lowering allocates IR from arena
+IrNode* ir_alloc_node(IrNodeKind kind, Arena* arena);
 
 // Codegen consumes
 void codegen_emit(IrNode* ir, FILE* out);
@@ -356,9 +457,11 @@ void codegen_emit(IrNode* ir, FILE* out);
 
 ---
 
-### 1.6 Coroutine Metadata Interface (`src/coro_metadata.h`)
+### 1.8 Coroutine Metadata Interface (`src/coro_metadata.h`)
 
 **Purpose**: State machine transformation information
+
+**Analysis Strategy**: Start from exported (`pub`) functions and analyze call chains downward. This enables full-program coroutine analysis without requiring forward declarations.
 
 **Key Data Structures**:
 ```c
@@ -398,16 +501,14 @@ typedef struct CoroMetadata {
 
 **Interface Functions**:
 ```c
-// Coro analyzer produces
-CoroMetadata* analyze_coroutine(AstNode* function, SymbolTable* symbols);
-
-// Lower consumes
-void coro_metadata_free(CoroMetadata* meta);
+// Coro analyzer produces (allocated from arena)
+void coro_metadata_init(CoroMetadata* meta, AstNode* function, Arena* arena);
+void coro_analyze_function(AstNode* function, Scope* scope, CoroMetadata* meta, Arena* arena);
 ```
 
 ---
 
-### 1.7 Error Reporting Interface (`src/error.h`)
+### 1.9 Error Reporting Interface (`src/error.h`)
 
 **Purpose**: Consistent error handling across all phases
 
@@ -437,90 +538,155 @@ typedef struct ErrorList {
 
 **Interface Functions**:
 ```c
-ErrorList* error_list_create();
+// Initialize with caller-provided memory
+void error_list_init(ErrorList* list, Arena* arena);
+
+// Add errors (messages stored in arena)
 void error_list_add(ErrorList* list, ErrorKind kind, SourceLocation loc,
                     const char* fmt, ...);
+
+// Reporting
 void error_list_print(ErrorList* list, FILE* out);
 bool error_list_has_errors(ErrorList* list);
 ```
 
 ---
 
-## Phase 2: Parallel Module Implementation (Weeks 2-6)
+### 1.10 Arena Allocator Interface (`src/arena.h`)
 
-Once interfaces are locked, these modules can be developed **in parallel** by different teams/individuals:
+**Purpose**: Fast, structured allocation for compiler phases
 
-### Track A: Frontend (Lexer + Parser)
-**Dependencies**: `token.h`, `ast.h`, `error.h`
+**Key Data Structures**:
+```c
+typedef struct ArenaBlock {
+    struct ArenaBlock* next;
+    size_t used;
+    size_t capacity;
+    char data[];
+} ArenaBlock;
 
-**Modules**:
-- `src/lexer.c` - Tokenization
-- `src/parser.c` - LALR(1) parsing
+typedef struct Arena {
+    ArenaBlock* current;
+    ArenaBlock* first;
+    size_t block_size;
+} Arena;
+```
 
-**Deliverables**:
-- Unit tests for lexer (all token types, edge cases)
-- Unit tests for parser (all AST node types)
-- Example source files that parse successfully
+**Interface Functions**:
+```c
+// Initialize arena with initial block size
+void arena_init(Arena* arena, size_t block_size);
 
-**Team Size**: 1-2 people
+// Allocate from arena (never fails, grows automatically)
+void* arena_alloc(Arena* arena, size_t size, size_t alignment);
 
----
-
-### Track B: Semantic Analysis (Resolver + Type Checker)
-**Dependencies**: `ast.h`, `symbol.h`, `type.h`, `error.h`
-
-**Modules**:
-- `src/resolver.c` - Module resolution, import handling, symbol tables
-- `src/typeck.c` - Type checking, type inference
-
-**Deliverables**:
-- Unit tests for symbol resolution
-- Unit tests for type checking (all types, error cases)
-- Integration tests with parser output
-
-**Team Size**: 2 people (1 per module)
+// Free entire arena (all blocks at once)
+void arena_free(Arena* arena);
+```
 
 ---
 
-### Track C: Coroutine Analysis
-**Dependencies**: `ast.h`, `symbol.h`, `type.h`, `coro_metadata.h`, `error.h`
+## Parallel Work Streams
 
-**Modules**:
-- `src/coro_analyze.c` - CFG building, liveness analysis, frame layout
+These modules can be developed in parallel, with each stream owning and modifying their dependent interfaces during iteration 1.
 
-**Deliverables**:
-- Unit tests for suspend point detection
-- Unit tests for liveness analysis
-- Unit tests for frame size calculation
-- Test cases with known coroutine sizes
+### Stream 1: Lexer
+**Owns**: `lexer.h`, `token.h` (Token definition)
+**Depends On**: `string_pool.h`, `error.h`
 
-**Team Size**: 1-2 people (complex module)
+**Implementation**:
+- `src/lexer.c` - UTF-8 tokenization with streaming interface
+- Support all token types, literals, operators
+- Integrate with string pool for identifiers
+
+**Testing**:
+- Unit tests for all token types
+- Edge cases: underscores in numbers, escape sequences, Unicode
+- Error recovery
 
 ---
 
-### Track D: IR Lowering
-**Dependencies**: `ast.h`, `ir.h`, `coro_metadata.h`, `symbol.h`, `type.h`
+### Stream 2: Parser
+**Owns**: `parser.h`, `ast.h`
+**Depends On**: `lexer.h`, `arena.h`, `error.h`
+
+**Implementation**:
+- `grammar.y` - Lemon grammar specification
+- `src/parser.c` - Lemon integration and AST construction callbacks
+- Build complete AST with source locations
+
+**Testing**:
+- Unit tests for all AST node types
+- Parse valid programs
+- Error recovery and helpful messages
+- Mock lexer for parser-only tests
+
+---
+
+### Stream 3: Semantic Analysis
+**Owns**: `symbol.h`, `type.h`
+**Depends On**: `ast.h`, `string_pool.h`, `arena.h`, `error.h`
 
 **Modules**:
+- `src/resolver.c` - Build scopes, resolve names, handle imports
+- `src/typeck.c` - Type checking and inference
+
+**Implementation**:
+- Build hierarchical scopes (module → function → block)
+- Type inference for literals and local variables
+- Result type checking
+- All names interned in string pool
+
+**Testing**:
+- Unit tests for scope hierarchy
+- Type checking tests (valid and error cases)
+- Mock ASTs for isolated testing
+
+---
+
+### Stream 4: Coroutine Analysis
+**Owns**: `coro_metadata.h`
+**Depends On**: `ast.h`, `symbol.h`, `type.h`, `arena.h`, `error.h`
+
+**Implementation**:
+- `src/coro_analyze.c` - CFG construction, liveness analysis, frame layout
+- Start from exported functions, analyze call chains downward
+- Compute suspend points
+- Liveness analysis across suspend points
+- Tagged union frame layout (one struct per state with live vars)
+- Frame size calculation
+
+**Testing**:
+- Unit tests for CFG construction
+- Liveness analysis tests with known results
+- Frame size verification tests
+- Mock typed ASTs for testing
+
+---
+
+### Stream 5: IR Lowering
+**Owns**: `ir.h`
+**Depends On**: `ast.h`, `type.h`, `symbol.h`, `coro_metadata.h`, `arena.h`
+
+**Implementation**:
 - `src/lower.c` - AST → IR transformation
   - Coroutine state machine transformation
-  - Error handling lowering (try/catch)
-  - Cleanup lowering (defer/errdefer)
-  - Computed goto pattern lowering
+  - Error handling (try/catch → if/goto)
+  - Cleanup (defer/errdefer)
+  - Computed goto patterns
 
-**Deliverables**:
-- Unit tests for each lowering transformation
-- Integration tests with typeck output
-- Verify IR structure matches spec
-
-**Team Size**: 2 people
+**Testing**:
+- Unit tests for each transformation
+- Verify IR structure
+- Mock ASTs and coroutine metadata
 
 ---
 
-### Track E: Code Generation
-**Dependencies**: `ir.h`, `type.h`, `coro_metadata.h`
+### Stream 6: Code Generation
+**Owns**: None (consumer only)
+**Depends On**: `ir.h`, `type.h`, `coro_metadata.h`
 
-**Modules**:
+**Implementation**:
 - `src/codegen.c` - IR → C11 code generation
   - Type translation (stdint.h mapping)
   - Function generation
@@ -528,156 +694,163 @@ Once interfaces are locked, these modules can be developed **in parallel** by di
   - `#line` directive insertion
   - Identifier prefixing (`__u_`)
 
-**Deliverables**:
+**Testing**:
 - Unit tests for C generation
-- Verify C code compiles with `-Wall -Werror -Wextra -std=c11`
-- Round-trip tests (compile generated C, run tests)
-
-**Team Size**: 2 people
+- Verify C code compiles: `-Wall -Werror -Wextra -std=c11 -ffreestanding`
+- Round-trip tests (compile + run)
+- Mock IR for testing
 
 ---
 
-### Track F: Core Utilities & Testing Infrastructure
-**Dependencies**: All interface headers
+### Stream 7: Core Infrastructure
+**Owns**: `arena.h`, `string_pool.h`, `error.h`
+**Depends On**: None
 
-**Modules**:
-- `src/arena.c` - Arena allocator for compiler
-- `src/util.c` - String handling, file I/O
-- `test/test_harness.c` - Testing framework
-- `test/mock_platform.c` - Mock async runtime for testing
+**Implementation**:
+- `src/arena.c` - Arena allocator with segmented blocks
+- `src/string_pool.c` - String interning (later: trie)
+- `src/error.c` - Error reporting and formatting
+- `test/test_harness.c` - Testing utilities
+- `test/mock_platform.c` - Mock async runtime
+
+**Testing**:
+- Arena allocation tests
+- String pool interning tests
+- Mock implementations for other streams
+
+---
+
+## Iterative Development Strategy
+
+### Iteration 1: Independent Development
+
+**Goal**: Each stream implements their module(s) and modifies interfaces as needed.
+
+**Approach**:
+1. Start with initial interfaces as defined above
+2. Each stream "owns" their interfaces and can modify freely
+3. Use mock implementations of dependencies
+4. Focus on correctness within module
+5. Track interface changes in version control
 
 **Deliverables**:
-- Testing utilities usable by all tracks
-- Memory leak detection
-- Mock platform for async testing
-
-**Team Size**: 1 person
-
----
-
-## Phase 3: Integration & Testing (Week 7)
-
-All tracks merge. Integration testing begins:
-
-### 3.1 End-to-End Pipeline Tests
-- Source → Tokens → AST → Typed AST → IR → C → Compiled binary
-- Test with all language features
-- Verify coroutine transformations are correct
-
-### 3.2 Compliance Testing
-- Verify C output compiles with strict flags
-- Test on multiple architectures (x86_64, ARM, RISC-V)
-- Freestanding mode verification
-
-### 3.3 Performance & Size Testing
-- Measure coroutine frame sizes
-- Verify against hand-computed sizes
-- Benchmark compilation speed
+- Working implementation of each module
+- Unit tests passing
+- List of interface changes made
+- Mock implementations for dependencies
 
 ---
 
-## Critical Path & Ordering
+### Interface Reconciliation: Collaborative Convergence
+
+**Goal**: Merge interface changes from all streams into agreed-upon contracts.
+
+**Process**:
+1. Each stream presents their interface modifications
+2. Identify conflicts (multiple streams modified same interface differently)
+3. Discuss trade-offs and design choices
+4. Agree on unified interface for each header
+5. Document rationale for major decisions
+
+**Key Questions**:
+- Which changes improve usability?
+- Which changes reduce complexity?
+- Are there incompatible changes that need resolution?
+- Can we simplify further?
+
+**Deliverables**:
+- Agreed-upon interface headers (committed to main)
+- Design decisions document
+- Migration guide for iteration 2
+
+---
+
+### Iteration 2: Integration
+
+**Goal**: Update implementations to work with reconciled interfaces and integrate into pipeline.
+
+**Approach**:
+1. Each stream updates their implementation for new interfaces
+2. Remove mocks, use real implementations
+3. End-to-end integration testing begins
+4. Fix integration bugs
+5. Optimize and refactor
+
+**Testing**:
+- Full pipeline: Source → Tokens → AST → Typed AST → IR → C → Binary
+- All language features
+- Coroutine transformations
+- Multiple architectures (x86_64, ARM, RISC-V)
+- Compliance (freestanding C11)
+- Memory leak checks
+
+**Deliverables**:
+- Integrated compiler pipeline
+- Comprehensive test suite
+- Documentation
+- Example programs
+
+---
+
+## Pipeline Dependencies
+
+While streams work independently, there's a natural data flow:
 
 ```
-Phase 1 (Week 1): Define ALL interfaces
-    ↓
-Phase 2 (Weeks 2-6): Parallel implementation
-    Track A (Frontend) → Track B (Semantic) → Track C (Coro) → Track D (Lower) → Track E (Codegen)
-    Track F (Utilities) - Supports all tracks
-    ↓
-Phase 3 (Week 7): Integration & testing
+Stream 7 (Infrastructure)
+    ├── Arena, StringPool, Errors
+    │
+    ├─> Stream 1 (Lexer) ─> Tokens
+    │       │
+    │       └─> Stream 2 (Parser) ─> AST
+    │               │
+    │               └─> Stream 3 (Semantic) ─> Typed AST + Symbols
+    │                       │
+    │                       ├─> Stream 4 (Coro Analysis) ─> Metadata
+    │                       │       │
+    │                       └───────┴─> Stream 5 (Lowering) ─> IR
+    │                                       │
+    │                                       └─> Stream 6 (Codegen) ─> C code
 ```
 
-**Parallelization Dependencies**:
-- Track A must complete before Track B can test end-to-end
-- Track B must complete before Track C can test
-- Track C must complete before Track D can test
-- Track D must complete before Track E can test
-- BUT: All can be developed simultaneously using mock inputs
+During iteration 1, each stream uses mocks for dependencies.
+During iteration 2, streams integrate using real implementations.
 
 ---
 
 ## Development Guidelines
 
-### 1. Interface Stability
-- Once Phase 1 interfaces are committed, **no breaking changes** without team agreement
-- Use semantic versioning for interface headers
-- Any additions must be backward compatible
+### During Iteration 1
 
-### 2. Mock-Driven Development
-Each track creates **mock implementations** of dependencies:
-- Track B creates mock tokens to test resolver without lexer
-- Track C creates mock typed ASTs to test analysis
-- Track E creates mock IR to test codegen
+1. **Interface Ownership**: Modify your owned interfaces freely to suit your needs
+2. **Mock Dependencies**: Create simple mocks for testing (don't wait for other streams)
+3. **Document Changes**: Track all interface modifications with rationale
+4. **Test Thoroughly**: Unit tests should achieve >80% coverage
+5. **Stay Simple**: Prefer simple solutions over complex abstractions
 
-### 3. Continuous Integration
-- Every commit must pass:
-  - Unit tests for that module
-  - Integration tests if dependencies are ready
-  - C compilation of generated code (for codegen)
-  - Memory leak checks (valgrind)
+### During Reconciliation
 
-### 4. Documentation
-Each module must have:
-- Header documentation (Doxygen style)
-- Implementation notes
-- Test coverage report
+1. **Open Communication**: Explain why you made each change
+2. **Be Flexible**: Others may have better solutions
+3. **Find Common Ground**: Look for designs that satisfy all needs
+4. **Document Decisions**: Record why final design was chosen
 
----
+### During Iteration 2
 
-## Risk Mitigation
-
-### Risk 1: Interface Design Flaws
-**Mitigation**: Week 1 includes review period. All teams must sign off on interfaces before Phase 2 starts.
-
-### Risk 2: Integration Issues
-**Mitigation**: Weekly integration testing starting Week 3 (even with partial implementations).
-
-### Risk 3: Coroutine Analysis Complexity
-**Mitigation**: Track C gets 2 people. Start with simple cases (no nested calls, no complex control flow).
-
-### Risk 4: Code Generation Bugs
-**Mitigation**: Extensive round-trip testing. Compile generated C, run tests, compare results.
-
----
-
-## Milestone Checklist
-
-### Week 1: Interface Definition
-- [ ] `token.h` reviewed and committed
-- [ ] `ast.h` reviewed and committed
-- [ ] `type.h` reviewed and committed
-- [ ] `symbol.h` reviewed and committed
-- [ ] `ir.h` reviewed and committed
-- [ ] `coro_metadata.h` reviewed and committed
-- [ ] `error.h` reviewed and committed
-- [ ] All teams sign off on interfaces
-
-### Week 2-6: Parallel Implementation
-- [ ] Track A: Lexer complete with tests
-- [ ] Track A: Parser complete with tests
-- [ ] Track B: Resolver complete with tests
-- [ ] Track B: Type checker complete with tests
-- [ ] Track C: Coroutine analyzer complete with tests
-- [ ] Track D: IR lowering complete with tests
-- [ ] Track E: Code generator complete with tests
-- [ ] Track F: Testing infrastructure complete
-
-### Week 7: Integration
-- [ ] Full pipeline compiles simple programs
-- [ ] Full pipeline compiles programs with coroutines
-- [ ] Generated C compiles with strict flags
-- [ ] Memory leak free
-- [ ] Documentation complete
+1. **Adapt Quickly**: Update your implementation for new interfaces
+2. **Help Others**: Integration issues affect everyone
+3. **Test Integration**: Don't just test your module, test the pipeline
+4. **Fix Bugs Fast**: Integration bugs block everyone
 
 ---
 
 ## Success Criteria
 
-The parallel implementation is successful when:
+The parallel implementation succeeds when:
 
 1. **Correctness**: All test programs compile and run correctly
 2. **Compliance**: Generated C compiles with `-Wall -Werror -Wextra -std=c11 -ffreestanding`
-3. **Portability**: Code works on x86_64, ARM, and RISC-V
-4. **Performance**: Coroutine frames use only live variables (verified)
+3. **Portability**: Works on x86_64, ARM, and RISC-V
+4. **Performance**: Coroutine frames contain only live variables
 5. **Maintainability**: Clean interfaces, documented code, >80% test coverage
+6. **Completeness**: All language features implemented
