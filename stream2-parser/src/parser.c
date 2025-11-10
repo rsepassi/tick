@@ -46,6 +46,16 @@ AstNode* parser_parse(Parser* parser) {
             break;
         }
 
+        // Don't feed TOKEN_EOF to parser - Lemon expects 0 for end-of-input
+        if (token.kind == TOKEN_EOF) {
+            break;
+        }
+
+        // Skip special tokens that should never be sent to the parser
+        if (token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EMBED_FILE) {
+            continue;
+        }
+
         // Feed token to Lemon parser
         Parse(parser->lemon_parser, token.kind, token, parser);
 
@@ -53,9 +63,9 @@ AstNode* parser_parse(Parser* parser) {
             break;
         }
 
-    } while (token.kind != TOKEN_EOF);
+    } while (true);
 
-    // Signal end of input
+    // Signal end of input with token code 0
     if (!parser->has_error) {
         Parse(parser->lemon_parser, 0, token, parser);
     }
@@ -120,7 +130,7 @@ typedef struct AstNodeList {
     size_t capacity;
 } AstNodeList;
 
-static AstNodeList* node_list_create(Parser* parser) {
+__attribute__((unused)) static AstNodeList* node_list_create(Parser* parser) {
     AstNodeList* list = (AstNodeList*)arena_alloc(parser->ast_arena,
         sizeof(AstNodeList), _Alignof(AstNodeList));
     if (!list) return NULL;
@@ -133,7 +143,7 @@ static AstNodeList* node_list_create(Parser* parser) {
     return list;
 }
 
-static void node_list_append(Parser* parser, AstNodeList* list, AstNode* node) {
+__attribute__((unused)) static void node_list_append(Parser* parser, AstNodeList* list, AstNode* node) {
     if (!list || !node) return;
 
     if (list->count >= list->capacity) {
@@ -157,7 +167,7 @@ typedef struct AstParamList {
     size_t capacity;
 } AstParamList;
 
-static AstParamList* param_list_create(Parser* parser) {
+__attribute__((unused)) static AstParamList* param_list_create(Parser* parser) {
     AstParamList* list = (AstParamList*)arena_alloc(parser->ast_arena,
         sizeof(AstParamList), _Alignof(AstParamList));
     if (!list) return NULL;
@@ -170,7 +180,7 @@ static AstParamList* param_list_create(Parser* parser) {
     return list;
 }
 
-static void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc) {
+__attribute__((unused)) static void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc) {
     if (!list) return;
 
     if (list->count >= list->capacity) {
@@ -197,7 +207,7 @@ typedef struct AstFieldList {
     size_t capacity;
 } AstFieldList;
 
-static AstFieldList* field_list_create(Parser* parser) {
+__attribute__((unused)) static AstFieldList* field_list_create(Parser* parser) {
     AstFieldList* list = (AstFieldList*)arena_alloc(parser->ast_arena,
         sizeof(AstFieldList), _Alignof(AstFieldList));
     if (!list) return NULL;
@@ -210,7 +220,7 @@ static AstFieldList* field_list_create(Parser* parser) {
     return list;
 }
 
-static void field_list_append(Parser* parser, AstFieldList* list, const char* name, AstNode* type, SourceLocation loc) {
+__attribute__((unused)) static void field_list_append(Parser* parser, AstFieldList* list, const char* name, AstNode* type, SourceLocation loc) {
     if (!list) return;
 
     if (list->count >= list->capacity) {
@@ -237,7 +247,7 @@ typedef struct AstEnumValueList {
     size_t capacity;
 } AstEnumValueList;
 
-static AstEnumValueList* enum_value_list_create(Parser* parser) {
+__attribute__((unused)) static AstEnumValueList* enum_value_list_create(Parser* parser) {
     AstEnumValueList* list = (AstEnumValueList*)arena_alloc(parser->ast_arena,
         sizeof(AstEnumValueList), _Alignof(AstEnumValueList));
     if (!list) return NULL;
@@ -250,7 +260,7 @@ static AstEnumValueList* enum_value_list_create(Parser* parser) {
     return list;
 }
 
-static void enum_value_list_append(Parser* parser, AstEnumValueList* list, const char* name, AstNode* value, SourceLocation loc) {
+__attribute__((unused)) static void enum_value_list_append(Parser* parser, AstEnumValueList* list, const char* name, AstNode* value, SourceLocation loc) {
     if (!list) return;
 
     if (list->count >= list->capacity) {
@@ -277,7 +287,7 @@ typedef struct AstSwitchCaseList {
     size_t capacity;
 } AstSwitchCaseList;
 
-static AstSwitchCaseList* switch_case_list_create(Parser* parser) {
+__attribute__((unused)) static AstSwitchCaseList* switch_case_list_create(Parser* parser) {
     AstSwitchCaseList* list = (AstSwitchCaseList*)arena_alloc(parser->ast_arena,
         sizeof(AstSwitchCaseList), _Alignof(AstSwitchCaseList));
     if (!list) return NULL;
@@ -297,7 +307,7 @@ typedef struct AstStructInitList {
     size_t capacity;
 } AstStructInitList;
 
-static AstStructInitList* struct_init_list_create(Parser* parser) {
+__attribute__((unused)) static AstStructInitList* struct_init_list_create(Parser* parser) {
     AstStructInitList* list = (AstStructInitList*)arena_alloc(parser->ast_arena,
         sizeof(AstStructInitList), _Alignof(AstStructInitList));
     if (!list) return NULL;
@@ -310,7 +320,7 @@ static AstStructInitList* struct_init_list_create(Parser* parser) {
     return list;
 }
 
-static void struct_init_list_append(Parser* parser, AstStructInitList* list, const char* field_name, AstNode* value) {
+__attribute__((unused)) static void struct_init_list_append(Parser* parser, AstStructInitList* list, const char* field_name, AstNode* value) {
     if (!list) return;
 
     if (list->count >= list->capacity) {

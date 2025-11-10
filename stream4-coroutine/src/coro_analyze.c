@@ -510,6 +510,7 @@ void cfg_print_debug(CFG* cfg, FILE* out) {
 // ============================================================================
 
 void block_compute_gen_kill(BasicBlock* block, CFG* cfg, Arena* arena) {
+    (void)cfg; // Currently unused
     // Gen = variables used before being defined in this block
     // Kill = variables defined in this block
 
@@ -664,6 +665,7 @@ size_t compute_struct_size(StateField* fields, size_t count) {
 }
 
 void coro_compute_frame_layout(CoroMetadata* meta, Arena* arena) {
+    (void)arena; // Currently unused
     // Tag is a uint32_t for state discriminator
     meta->tag_size = sizeof(uint32_t);
     meta->tag_offset = 0;
@@ -710,6 +712,7 @@ void coro_compute_frame_layout(CoroMetadata* meta, Arena* arena) {
 // ============================================================================
 
 void coro_metadata_init(CoroMetadata* meta, AstNode* function, Arena* arena) {
+    (void)arena; // Currently unused
     meta->function_name = function->data.function_decl.name;
     meta->function_node = function;
     meta->cfg = NULL;

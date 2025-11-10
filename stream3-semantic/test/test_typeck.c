@@ -47,15 +47,18 @@ static AstNode* make_node(AstNodeKind kind, Arena* arena) {
 static AstNode* make_module(const char* name, AstNode** decls, size_t decl_count, Arena* arena) {
     AstNode* node = make_node(AST_MODULE, arena);
     node->data.module.name = name;
-    node->data.module.declarations = decls;
+    node->data.module.decls = decls;
     node->data.module.decl_count = decl_count;
     return node;
 }
 
 // Helper: Create primitive type node
+// Note: Type nodes use AstTypeNode struct, cast AstNode for compatibility
 static AstNode* make_prim_type(const char* name, Arena* arena) {
     AstNode* node = make_node(AST_TYPE_PRIMITIVE, arena);
-    node->data.type_primitive.name = name;
+    // Cast to AstTypeNode to access type-specific data
+    AstTypeNode* type_node = (AstTypeNode*)node;
+    type_node->data.primitive.name = name;
     return node;
 }
 
@@ -66,38 +69,36 @@ static AstNode* make_typed_function(const char* name, AstParam* params, size_t p
     node->data.function_decl.name = name;
     node->data.function_decl.params = params;
     node->data.function_decl.param_count = param_count;
-    node->data.function_decl.return_type_node = return_type;
+    node->data.function_decl.return_type = return_type;
     node->data.function_decl.body = body;
-    node->data.function_decl.is_public = true;
-    node->data.function_decl.is_async = false;
+    node->data.function_decl.is_pub = true;
     return node;
 }
 
 // Helper: Create struct with fields
-static AstNode* make_struct_with_fields(const char* name, AstStructField* fields,
+static AstNode* make_struct_with_fields(const char* name, AstField* fields,
                                        size_t field_count, Arena* arena) {
     AstNode* node = make_node(AST_STRUCT_DECL, arena);
     node->data.struct_decl.name = name;
     node->data.struct_decl.fields = fields;
     node->data.struct_decl.field_count = field_count;
-    node->data.struct_decl.is_public = true;
+    node->data.struct_decl.is_pub = true;
     node->data.struct_decl.is_packed = false;
-    node->data.struct_decl.alignment = 0;
     return node;
 }
 
 // Helper: Create literal
 static AstNode* make_int_literal(int64_t value, Arena* arena) {
     AstNode* node = make_node(AST_LITERAL_EXPR, arena);
-    node->data.literal_expr.lit_kind = LIT_INT;
-    node->data.literal_expr.int_value = value;
+    node->data.literal_expr.literal_kind = LITERAL_INT;
+    node->data.literal_expr.value.int_value = value;
     return node;
 }
 
 static AstNode* make_bool_literal(bool value, Arena* arena) {
     AstNode* node = make_node(AST_LITERAL_EXPR, arena);
-    node->data.literal_expr.lit_kind = LIT_BOOL;
-    node->data.literal_expr.bool_value = value;
+    node->data.literal_expr.literal_kind = LITERAL_BOOL;
+    node->data.literal_expr.value.bool_value = value;
     return node;
 }
 
@@ -113,17 +114,17 @@ static AstNode* make_binary(BinaryOp op, AstNode* left, AstNode* right, Arena* a
 // Helper: Create block
 static AstNode* make_block(AstNode** stmts, size_t stmt_count, Arena* arena) {
     AstNode* node = make_node(AST_BLOCK_STMT, arena);
-    node->data.block_stmt.statements = stmts;
+    node->data.block_stmt.stmts = stmts;
     node->data.block_stmt.stmt_count = stmt_count;
     return node;
 }
 
 // Helper: Create let statement
-static AstNode* make_let_typed(const char* name, AstNode* type_node, AstNode* init, Arena* arena) {
+static AstNode* make_let_typed(const char* name, AstNode* type_node, AstNode* init_expr, Arena* arena) {
     AstNode* node = make_node(AST_LET_STMT, arena);
-    node->data.let_stmt.name = name;
-    node->data.let_stmt.type_node = type_node;
-    node->data.let_stmt.initializer = init;
+    node->data.let_decl.name = name;
+    node->data.let_decl.type = type_node;
+    node->data.let_decl.init = init_expr;
     return node;
 }
 
@@ -338,8 +339,8 @@ TEST(variable_inference) {
     assert(!error_list_has_errors(&errors));
 
     // Verify variable type was inferred
-    assert(let->data.let_stmt.type != NULL);
-    assert(let->data.let_stmt.type == TYPE_I64_SINGLETON);
+    assert(let->data.let_decl.type != NULL);
+    assert(let->data.let_decl.type == TYPE_I64_SINGLETON);
 
     arena_free(&arena);
 }
@@ -379,8 +380,8 @@ TEST(explicit_type_match) {
     assert(!error_list_has_errors(&errors));
 
     // Verify variable has correct type
-    assert(let->data.let_stmt.type != NULL);
-    assert(let->data.let_stmt.type == TYPE_I64_SINGLETON);
+    assert(let->data.let_decl.type != NULL);
+    assert(let->data.let_decl.type == TYPE_I64_SINGLETON);
 
     arena_free(&arena);
 }
@@ -434,13 +435,11 @@ TEST(struct_type) {
     symbol_table_init(&symtab, &arena);
 
     // Create: struct Point { x: i32, y: i32 }
-    AstStructField* fields = arena_alloc(&arena, sizeof(AstStructField) * 2, 8);
+    AstField* fields = arena_alloc(&arena, sizeof(AstField) * 2, 8);
     fields[0].name = "x";
-    fields[0].type_node = make_prim_type("i32", &arena);
-    fields[0].is_public = true;
+    fields[0].type = make_prim_type("i32", &arena);
     fields[1].name = "y";
-    fields[1].type_node = make_prim_type("i32", &arena);
-    fields[1].is_public = true;
+    fields[1].type = make_prim_type("i32", &arena);
 
     AstNode* struct_node = make_struct_with_fields("Point", fields, 2, &arena);
 

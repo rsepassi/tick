@@ -473,6 +473,20 @@ TEST(ir_lower_function_with_coro_metadata) {
     meta->suspend_count = 2;
     meta->state_count = 2;
 
+    // Allocate suspend points
+    meta->suspend_points = arena_alloc(&arena, sizeof(SuspendPoint) * 2, 8);
+    meta->suspend_points[0].state_id = 0;
+    meta->suspend_points[0].live_var_count = 0;
+    meta->suspend_points[1].state_id = 1;
+    meta->suspend_points[1].live_var_count = 0;
+
+    // Allocate state structs
+    meta->state_structs = arena_alloc(&arena, sizeof(StateStruct) * 2, 8);
+    meta->state_structs[0].state_id = 0;
+    meta->state_structs[0].field_count = 0;
+    meta->state_structs[1].state_id = 1;
+    meta->state_structs[1].field_count = 0;
+
     AstNode* func_node = mock_ast_function("async_func", &arena);
     IrFunction* ir_func = ir_lower_function(func_node, meta, &arena);
 
@@ -543,6 +557,9 @@ TEST(ir_lower_ast_module) {
     AstNode* module_node = arena_alloc(&arena, sizeof(AstNode), 8);
     memset(module_node, 0, sizeof(AstNode));
     module_node->kind = AST_MODULE;
+    module_node->data.module.name = "test_module";
+    module_node->data.module.decls = NULL;
+    module_node->data.module.decl_count = 0;
 
     IrModule* module = ir_lower_ast(module_node, &arena);
 

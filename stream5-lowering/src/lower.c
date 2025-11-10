@@ -525,7 +525,7 @@ static void lower_if_stmt(LowerContext* ctx, AstNode* stmt) {
     ir_function_add_block(ctx->current_function, then_block, ctx->arena);
 
     // Lower then block
-    IrBasicBlock* saved_block = ctx->current_block;
+    IrBasicBlock* saved_block __attribute__((unused)) = ctx->current_block;
     ctx->current_block = then_block;
     lower_stmt(ctx, stmt->data.if_stmt.then_block);
 
@@ -625,7 +625,7 @@ static void lower_switch_stmt(LowerContext* ctx, AstNode* stmt) {
     assert(stmt->kind == AST_SWITCH_STMT);
 
     // Lower switch value
-    IrValue* value = lower_expr(ctx, NULL); // TODO: Get value from stmt
+    IrValue* value __attribute__((unused)) = lower_expr(ctx, NULL); // TODO: Get value from stmt
 
     // Create merge block
     IrBasicBlock* merge = ir_function_new_block(ctx->current_function,

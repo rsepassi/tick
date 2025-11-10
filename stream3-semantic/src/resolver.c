@@ -64,6 +64,7 @@ Scope* scope_new(SymbolTable* table, ScopeKind kind, Scope* parent, const char* 
 }
 
 void scope_init(Scope* scope, ScopeKind kind, Scope* parent, Arena* arena) {
+    (void)arena; // Currently unused
     scope->kind = kind;
     scope->parent = parent;
     scope->symbols = NULL;

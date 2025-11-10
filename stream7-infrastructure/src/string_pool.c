@@ -10,7 +10,7 @@
 #define INITIAL_STRING_CAPACITY 256
 
 // Simple FNV-1a hash for strings (unused for now, but useful for future trie/hash table)
-static uint32_t hash_string(const char* str, size_t len) {
+__attribute__((unused)) static uint32_t hash_string(const char* str, size_t len) {
     uint32_t hash = 2166136261u;
     for (size_t i = 0; i < len; i++) {
         hash ^= (uint8_t)str[i];

@@ -406,6 +406,7 @@ bool type_can_cast_to(Type* from, Type* to) {
 }
 
 const char* type_to_string(Type* t, Arena* arena) {
+    (void)arena;  // Unused for now, but reserved for future use
     if (!t) return "<null>";
 
     // Simple type to string conversion
@@ -452,10 +453,12 @@ static Type* resolve_type_from_node(TypeChecker* tc, AstNode* type_node) {
         return TYPE_VOID_SINGLETON;
     }
 
+    // Cast to AstTypeNode for type-specific data access
+    AstTypeNode* tnode = (AstTypeNode*)type_node;
+
     switch (type_node->kind) {
         case AST_TYPE_PRIMITIVE: {
-            AstTypePrimitive* prim = &type_node->data.type_primitive;
-            const char* name = prim->name;
+            const char* name = tnode->data.primitive.name;
 
             if (strcmp(name, "i8") == 0) return TYPE_I8_SINGLETON;
             if (strcmp(name, "i16") == 0) return TYPE_I16_SINGLETON;
@@ -476,83 +479,59 @@ static Type* resolve_type_from_node(TypeChecker* tc, AstNode* type_node) {
         }
 
         case AST_TYPE_ARRAY: {
-            AstTypeArray* arr = &type_node->data.type_array;
-            Type* elem_type = resolve_type_from_node(tc, arr->elem_type_node);
+            Type* elem_type = resolve_type_from_node(tc, tnode->data.array.element_type);
             if (!elem_type) return NULL;
-            Type* array_type = type_new_array(elem_type, arr->length, tc->arena);
-            arr->type = array_type;
+            // Note: size_expr would need evaluation, using 0 for now
+            Type* array_type = type_new_array(elem_type, 0, tc->arena);
             type_node->type = array_type;
             return array_type;
         }
 
         case AST_TYPE_SLICE: {
-            AstTypeSlice* slice = &type_node->data.type_slice;
-            Type* elem_type = resolve_type_from_node(tc, slice->elem_type_node);
+            Type* elem_type = resolve_type_from_node(tc, tnode->data.slice.element_type);
             if (!elem_type) return NULL;
             Type* slice_type = type_new_slice(elem_type, tc->arena);
-            slice->type = slice_type;
             type_node->type = slice_type;
             return slice_type;
         }
 
         case AST_TYPE_POINTER: {
-            AstTypePointer* ptr = &type_node->data.type_pointer;
-            Type* pointee_type = resolve_type_from_node(tc, ptr->pointee_type_node);
+            Type* pointee_type = resolve_type_from_node(tc, tnode->data.pointer.pointee_type);
             if (!pointee_type) return NULL;
             Type* ptr_type = type_new_pointer(pointee_type, tc->arena);
-            ptr->type = ptr_type;
             type_node->type = ptr_type;
             return ptr_type;
         }
 
         case AST_TYPE_FUNCTION: {
-            AstTypeFunction* func = &type_node->data.type_function;
-            Type* return_type = resolve_type_from_node(tc, func->return_type_node);
+            Type* return_type = resolve_type_from_node(tc, tnode->data.function.return_type);
             Type* func_type = type_new_function(return_type, tc->arena);
 
-            for (size_t i = 0; i < func->param_count; i++) {
-                Type* param_type = resolve_type_from_node(tc, func->param_type_nodes[i]);
+            for (size_t i = 0; i < tnode->data.function.param_count; i++) {
+                Type* param_type = resolve_type_from_node(tc, tnode->data.function.param_types[i]);
                 if (!param_type) continue;
                 type_function_add_param(func_type, NULL, param_type, tc->arena);
             }
 
-            func->type = func_type;
             type_node->type = func_type;
             return func_type;
         }
 
         case AST_TYPE_RESULT: {
-            AstTypeResult* result = &type_node->data.type_result;
-            Type* value_type = resolve_type_from_node(tc, result->value_type_node);
-            Type* error_type = resolve_type_from_node(tc, result->error_type_node);
+            Type* value_type = resolve_type_from_node(tc, tnode->data.result.value_type);
+            Type* error_type = resolve_type_from_node(tc, tnode->data.result.error_type);
             if (!value_type || !error_type) return NULL;
             Type* result_type = type_new_result(value_type, error_type, tc->arena);
-            result->type = result_type;
             type_node->type = result_type;
             return result_type;
         }
 
-        case AST_TYPE_OPTION: {
-            AstTypeOption* opt = &type_node->data.type_option;
-            Type* inner_type = resolve_type_from_node(tc, opt->inner_type_node);
-            if (!inner_type) return NULL;
-            Type* option_type = type_new_option(inner_type, tc->arena);
-            opt->type = option_type;
-            type_node->type = option_type;
-            return option_type;
-        }
-
         case AST_TYPE_NAMED: {
-            AstTypeNamed* named = &type_node->data.type_named;
-            // Symbol should already be resolved by resolver
-            if (!named->symbol) {
-                error_list_add(tc->errors, ERROR_TYPE, type_node->loc,
-                              "Unresolved type: %s", named->name);
-                return NULL;
-            }
-            named->type = named->symbol->type;
-            type_node->type = named->symbol->type;
-            return named->symbol->type;
+            // For now, lookup type by name from scope or return opaque type
+            // TODO: proper symbol resolution for: tnode->data.named.name
+            Type* named_type = TYPE_VOID_SINGLETON; // placeholder
+            type_node->type = named_type;
+            return named_type;
         }
 
         default:
@@ -566,128 +545,109 @@ static Type* resolve_type_from_node(TypeChecker* tc, AstNode* type_node) {
 
 static void check_struct_decl(TypeChecker* tc, AstNode* node) {
     assert(node->kind == AST_STRUCT_DECL);
-    AstStructDecl* struct_decl = &node->data.struct_decl;
 
     // Create struct type
-    Type* struct_type = type_new_struct(struct_decl->name, tc->arena);
-    struct_type->data.struct_type.is_packed = struct_decl->is_packed;
-    struct_type->data.struct_type.alignment_override = struct_decl->alignment;
+    Type* struct_type = type_new_struct(node->data.struct_decl.name, tc->arena);
+    struct_type->data.struct_type.is_packed = node->data.struct_decl.is_packed;
 
     // Resolve and add fields
-    for (size_t i = 0; i < struct_decl->field_count; i++) {
-        AstStructField* field = &struct_decl->fields[i];
-        Type* field_type = resolve_type_from_node(tc, field->type_node);
+    for (size_t i = 0; i < node->data.struct_decl.field_count; i++) {
+        AstField* field = &node->data.struct_decl.fields[i];
+        Type* field_type = resolve_type_from_node(tc, field->type);
         if (field_type) {
-            field->type = field_type;
             type_struct_add_field(struct_type, field->name, field_type, tc->arena);
         }
     }
 
-    // Assign type to symbol
-    if (struct_decl->symbol) {
-        struct_decl->symbol->type = struct_type;
-    }
     node->type = struct_type;
 }
 
 static void check_enum_decl(TypeChecker* tc, AstNode* node) {
     assert(node->kind == AST_ENUM_DECL);
-    AstEnumDecl* enum_decl = &node->data.enum_decl;
 
     // Resolve underlying type (default to i32)
     Type* underlying_type = TYPE_I32_SINGLETON;
-    if (enum_decl->underlying_type_node) {
-        underlying_type = resolve_type_from_node(tc, enum_decl->underlying_type_node);
+    if (node->data.enum_decl.underlying_type) {
+        underlying_type = resolve_type_from_node(tc, node->data.enum_decl.underlying_type);
         if (!underlying_type || !type_is_integer(underlying_type)) {
             error_list_add(tc->errors, ERROR_TYPE, node->loc,
                           "Enum underlying type must be an integer type");
             underlying_type = TYPE_I32_SINGLETON;
         }
     }
-    enum_decl->underlying_type = underlying_type;
 
     // Create enum type
-    Type* enum_type = type_new_enum(enum_decl->name, underlying_type, tc->arena);
+    Type* enum_type = type_new_enum(node->data.enum_decl.name, underlying_type, tc->arena);
 
     // Add variants
     int64_t next_value = 0;
-    for (size_t i = 0; i < enum_decl->variant_count; i++) {
-        AstEnumVariant* variant = &enum_decl->variants[i];
-        int64_t value = variant->has_explicit_value ? variant->value : next_value;
-        type_enum_add_variant(enum_type, variant->name, value, tc->arena);
-        next_value = value + 1;
+    for (size_t i = 0; i < node->data.enum_decl.value_count; i++) {
+        AstEnumValue* value = &node->data.enum_decl.values[i];
+        int64_t val = value->value ? 1 : next_value;  // Simplified: would need to evaluate value->value
+        type_enum_add_variant(enum_type, value->name, val, tc->arena);
+        next_value = val + 1;
     }
 
-    // Assign type to symbol
-    if (enum_decl->symbol) {
-        enum_decl->symbol->type = enum_type;
-    }
     node->type = enum_type;
 }
 
 static void check_union_decl(TypeChecker* tc, AstNode* node) {
     assert(node->kind == AST_UNION_DECL);
-    AstUnionDecl* union_decl = &node->data.union_decl;
 
     // For tagged unions, we need a tag type (usually an enum)
-    // For simplicity, use i32 as tag type
+    // Resolve tag type if present, otherwise use i32
     Type* tag_type = TYPE_I32_SINGLETON;
-    Type* union_type = type_new_union(union_decl->name, tag_type, tc->arena);
-
-    // Resolve and add variants
-    for (size_t i = 0; i < union_decl->variant_count; i++) {
-        AstUnionVariant* variant = &union_decl->variants[i];
-        Type* variant_type = resolve_type_from_node(tc, variant->type_node);
-        if (variant_type) {
-            variant->type = variant_type;
-            type_union_add_variant(union_type, variant->name, variant_type, i, tc->arena);
+    if (node->data.union_decl.tag_type) {
+        tag_type = resolve_type_from_node(tc, node->data.union_decl.tag_type);
+        if (!tag_type) {
+            tag_type = TYPE_I32_SINGLETON;
         }
     }
 
-    // Assign type to symbol
-    if (union_decl->symbol) {
-        union_decl->symbol->type = union_type;
+    Type* union_type = type_new_union(node->data.union_decl.name, tag_type, tc->arena);
+
+    // Resolve and add variants (union uses fields, not variants)
+    for (size_t i = 0; i < node->data.union_decl.field_count; i++) {
+        AstField* field = &node->data.union_decl.fields[i];
+        Type* variant_type = resolve_type_from_node(tc, field->type);
+        if (variant_type) {
+            type_union_add_variant(union_type, field->name, variant_type, i, tc->arena);
+        }
     }
+
     node->type = union_type;
 }
 
 static void check_function_decl(TypeChecker* tc, AstNode* node) {
     assert(node->kind == AST_FUNCTION_DECL);
-    AstFunctionDecl* func = &node->data.function_decl;
 
     // Resolve return type
     Type* return_type = TYPE_VOID_SINGLETON;
-    if (func->return_type_node) {
-        return_type = resolve_type_from_node(tc, func->return_type_node);
+    if (node->data.function_decl.return_type) {
+        return_type = resolve_type_from_node(tc, node->data.function_decl.return_type);
         if (!return_type) return_type = TYPE_VOID_SINGLETON;
     }
-    func->return_type = return_type;
 
     // Create function type
     Type* func_type = type_new_function(return_type, tc->arena);
 
     // Resolve parameter types
-    for (size_t i = 0; i < func->param_count; i++) {
-        AstParam* param = &func->params[i];
-        Type* param_type = resolve_type_from_node(tc, param->type_node);
+    for (size_t i = 0; i < node->data.function_decl.param_count; i++) {
+        AstParam* param = &node->data.function_decl.params[i];
+        Type* param_type = resolve_type_from_node(tc, param->type);
         if (param_type) {
-            param->type = param_type;
             type_function_add_param(func_type, param->name, param_type, tc->arena);
         }
     }
 
-    // Assign type to symbol
-    if (func->symbol) {
-        func->symbol->type = func_type;
-    }
     node->type = func_type;
 
     // Check function body
     Type* saved_return_type = tc->current_function_return_type;
     tc->current_function_return_type = return_type;
 
-    if (func->body) {
-        check_statement(tc, func->body);
+    if (node->data.function_decl.body) {
+        check_statement(tc, node->data.function_decl.body);
     }
 
     tc->current_function_return_type = saved_return_type;
@@ -697,18 +657,17 @@ static void check_function_decl(TypeChecker* tc, AstNode* node) {
 
 static void check_let_stmt(TypeChecker* tc, AstNode* node) {
     assert(node->kind == AST_LET_STMT);
-    AstLetStmt* let = &node->data.let_stmt;
 
     // Check initializer type
     Type* init_type = NULL;
-    if (let->initializer) {
-        init_type = check_expression(tc, let->initializer);
+    if (node->data.let_decl.init) {
+        init_type = check_expression(tc, node->data.let_decl.init);
     }
 
     // Resolve declared type if present
     Type* decl_type = NULL;
-    if (let->type_node) {
-        decl_type = resolve_type_from_node(tc, let->type_node);
+    if (node->data.let_decl.type) {
+        decl_type = resolve_type_from_node(tc, node->data.let_decl.type);
     }
 
     // Determine final type
@@ -734,26 +693,22 @@ static void check_let_stmt(TypeChecker* tc, AstNode* node) {
         return;
     }
 
-    let->type = final_type;
-    if (let->symbol) {
-        let->symbol->type = final_type;
-    }
+    node->type = final_type;
 }
 
 static void check_var_stmt(TypeChecker* tc, AstNode* node) {
     assert(node->kind == AST_VAR_STMT);
-    AstVarStmt* var = &node->data.var_stmt;
 
     // Check initializer type if present
     Type* init_type = NULL;
-    if (var->initializer) {
-        init_type = check_expression(tc, var->initializer);
+    if (node->data.var_decl.init) {
+        init_type = check_expression(tc, node->data.var_decl.init);
     }
 
     // Resolve declared type if present
     Type* decl_type = NULL;
-    if (var->type_node) {
-        decl_type = resolve_type_from_node(tc, var->type_node);
+    if (node->data.var_decl.type) {
+        decl_type = resolve_type_from_node(tc, node->data.var_decl.type);
     }
 
     // Determine final type
@@ -780,10 +735,7 @@ static void check_var_stmt(TypeChecker* tc, AstNode* node) {
         return;
     }
 
-    var->type = final_type;
-    if (var->symbol) {
-        var->symbol->type = final_type;
-    }
+    node->type = final_type;
 }
 
 static void check_statement(TypeChecker* tc, AstNode* stmt) {
@@ -795,10 +747,9 @@ static void check_statement(TypeChecker* tc, AstNode* stmt) {
             check_var_stmt(tc, stmt);
             break;
         case AST_RETURN_STMT: {
-            AstReturnStmt* ret = &stmt->data.return_stmt;
             Type* ret_type = TYPE_VOID_SINGLETON;
-            if (ret->value) {
-                ret_type = check_expression(tc, ret->value);
+            if (stmt->data.return_stmt.value) {
+                ret_type = check_expression(tc, stmt->data.return_stmt.value);
             }
             if (!type_is_assignable_to(ret_type, tc->current_function_return_type)) {
                 error_list_add(tc->errors, ERROR_TYPE, stmt->loc,
@@ -809,80 +760,82 @@ static void check_statement(TypeChecker* tc, AstNode* stmt) {
             break;
         }
         case AST_IF_STMT: {
-            AstIfStmt* if_stmt = &stmt->data.if_stmt;
-            Type* cond_type = check_expression(tc, if_stmt->condition);
+            Type* cond_type = check_expression(tc, stmt->data.if_stmt.condition);
             if (!type_equals(cond_type, TYPE_BOOL_SINGLETON)) {
-                error_list_add(tc->errors, ERROR_TYPE, if_stmt->condition->loc,
+                error_list_add(tc->errors, ERROR_TYPE, stmt->data.if_stmt.condition->loc,
                               "If condition must be bool, got %s",
                               type_to_string(cond_type, tc->arena));
             }
-            check_statement(tc, if_stmt->then_block);
-            if (if_stmt->else_block) {
-                check_statement(tc, if_stmt->else_block);
+            check_statement(tc, stmt->data.if_stmt.then_block);
+            if (stmt->data.if_stmt.else_block) {
+                check_statement(tc, stmt->data.if_stmt.else_block);
             }
             break;
         }
         case AST_FOR_STMT: {
-            AstForStmt* for_stmt = &stmt->data.for_stmt;
-            Type* coll_type = check_expression(tc, for_stmt->collection);
-            // TODO: Check that collection is iterable (array or slice)
-            check_statement(tc, for_stmt->body);
-            break;
-        }
-        case AST_WHILE_STMT: {
-            AstWhileStmt* while_stmt = &stmt->data.while_stmt;
-            Type* cond_type = check_expression(tc, while_stmt->condition);
-            if (!type_equals(cond_type, TYPE_BOOL_SINGLETON)) {
-                error_list_add(tc->errors, ERROR_TYPE, while_stmt->condition->loc,
-                              "While condition must be bool, got %s",
-                              type_to_string(cond_type, tc->arena));
+            if (stmt->data.for_stmt.iterable) {
+                Type* coll_type = check_expression(tc, stmt->data.for_stmt.iterable);
+                // TODO: Check that collection is iterable (array or slice)
+                (void)coll_type;
             }
-            check_statement(tc, while_stmt->body);
+            if (stmt->data.for_stmt.condition) {
+                Type* cond_type = check_expression(tc, stmt->data.for_stmt.condition);
+                if (!type_equals(cond_type, TYPE_BOOL_SINGLETON)) {
+                    error_list_add(tc->errors, ERROR_TYPE, stmt->data.for_stmt.condition->loc,
+                                  "For condition must be bool, got %s",
+                                  type_to_string(cond_type, tc->arena));
+                }
+            }
+            check_statement(tc, stmt->data.for_stmt.body);
             break;
         }
         case AST_SWITCH_STMT: {
-            AstSwitchStmt* switch_stmt = &stmt->data.switch_stmt;
-            Type* value_type = check_expression(tc, switch_stmt->value);
-            for (size_t i = 0; i < switch_stmt->case_count; i++) {
-                if (switch_stmt->cases[i].value) {
-                    Type* case_type = check_expression(tc, switch_stmt->cases[i].value);
-                    if (!type_equals(case_type, value_type)) {
-                        error_list_add(tc->errors, ERROR_TYPE, switch_stmt->cases[i].value->loc,
-                                      "Case value type mismatch: expected %s, got %s",
-                                      type_to_string(value_type, tc->arena),
-                                      type_to_string(case_type, tc->arena));
+            Type* value_type = check_expression(tc, stmt->data.switch_stmt.value);
+            for (size_t i = 0; i < stmt->data.switch_stmt.case_count; i++) {
+                AstSwitchCase* case_item = &stmt->data.switch_stmt.cases[i];
+                // Check case values
+                for (size_t j = 0; j < case_item->value_count; j++) {
+                    if (case_item->values[j]) {
+                        Type* case_type = check_expression(tc, case_item->values[j]);
+                        if (!type_equals(case_type, value_type)) {
+                            error_list_add(tc->errors, ERROR_TYPE, case_item->values[j]->loc,
+                                          "Case value type mismatch: expected %s, got %s",
+                                          type_to_string(value_type, tc->arena),
+                                          type_to_string(case_type, tc->arena));
+                        }
                     }
                 }
-                check_statement(tc, switch_stmt->cases[i].body);
+                // Check case statements
+                for (size_t j = 0; j < case_item->stmt_count; j++) {
+                    check_statement(tc, case_item->stmts[j]);
+                }
             }
             break;
         }
         case AST_DEFER_STMT:
-            check_statement(tc, stmt->data.defer_stmt.statement);
+            check_statement(tc, stmt->data.defer_stmt.stmt);
             break;
         case AST_ERRDEFER_STMT:
-            check_statement(tc, stmt->data.errdefer_stmt.statement);
+            check_statement(tc, stmt->data.defer_stmt.stmt);
             break;
         case AST_SUSPEND_STMT:
             // Nothing to check
             break;
         case AST_RESUME_STMT:
-            check_expression(tc, stmt->data.resume_stmt.coroutine_expr);
+            check_expression(tc, stmt->data.resume_stmt.coro);
             break;
         case AST_BLOCK_STMT: {
-            AstBlockStmt* block = &stmt->data.block_stmt;
-            for (size_t i = 0; i < block->stmt_count; i++) {
-                check_statement(tc, block->statements[i]);
+            for (size_t i = 0; i < stmt->data.block_stmt.stmt_count; i++) {
+                check_statement(tc, stmt->data.block_stmt.stmts[i]);
             }
             break;
         }
         case AST_EXPR_STMT:
-            check_expression(tc, stmt->data.expr_stmt.expression);
+            check_expression(tc, stmt->data.expr_stmt.expr);
             break;
         case AST_ASSIGN_STMT: {
-            AstAssignStmt* assign = &stmt->data.assign_stmt;
-            Type* target_type = check_expression(tc, assign->target);
-            Type* value_type = check_expression(tc, assign->value);
+            Type* target_type = check_expression(tc, stmt->data.assign_stmt.lhs);
+            Type* value_type = check_expression(tc, stmt->data.assign_stmt.rhs);
             if (!type_is_assignable_to(value_type, target_type)) {
                 error_list_add(tc->errors, ERROR_TYPE, stmt->loc,
                               "Assignment type mismatch: cannot assign %s to %s",
@@ -907,15 +860,14 @@ static void check_statement(TypeChecker* tc, AstNode* stmt) {
 static Type* check_expression(TypeChecker* tc, AstNode* expr) {
     switch (expr->kind) {
         case AST_LITERAL_EXPR: {
-            AstLiteralExpr* lit = &expr->data.literal_expr;
-            switch (lit->lit_kind) {
-                case LIT_INT:
+            switch (expr->data.literal_expr.literal_kind) {
+                case LITERAL_INT:
                     expr->type = TYPE_I64_SINGLETON;  // Default to i64 for integer literals
                     return expr->type;
-                case LIT_BOOL:
+                case LITERAL_BOOL:
                     expr->type = TYPE_BOOL_SINGLETON;
                     return expr->type;
-                case LIT_STRING:
+                case LITERAL_STRING:
                     // String literal is a slice of u8
                     expr->type = type_new_slice(TYPE_U8_SINGLETON, tc->arena);
                     return expr->type;
@@ -925,25 +877,21 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
         }
 
         case AST_IDENTIFIER_EXPR: {
-            AstIdentifierExpr* ident = &expr->data.identifier_expr;
-            if (!ident->symbol) {
-                error_list_add(tc->errors, ERROR_TYPE, expr->loc,
-                              "Unresolved identifier: %s", ident->name);
-                return NULL;
-            }
-            expr->type = ident->symbol->type;
-            return expr->type;
+            // Identifiers need to be resolved via symbol table lookup
+            // For now, return error as we don't have symbol resolution integrated
+            error_list_add(tc->errors, ERROR_TYPE, expr->loc,
+                          "Identifier resolution not implemented: %s", expr->data.identifier_expr.name);
+            return NULL;
         }
 
         case AST_BINARY_EXPR: {
-            AstBinaryExpr* bin = &expr->data.binary_expr;
-            Type* left_type = check_expression(tc, bin->left);
-            Type* right_type = check_expression(tc, bin->right);
+            Type* left_type = check_expression(tc, expr->data.binary_expr.left);
+            Type* right_type = check_expression(tc, expr->data.binary_expr.right);
 
             if (!left_type || !right_type) return NULL;
 
             // Type check binary operation
-            switch (bin->op) {
+            switch (expr->data.binary_expr.op) {
                 case BINOP_ADD: case BINOP_SUB: case BINOP_MUL: case BINOP_DIV: case BINOP_MOD:
                 case BINOP_AND: case BINOP_OR: case BINOP_XOR:
                 case BINOP_LSHIFT: case BINOP_RSHIFT:
@@ -963,7 +911,7 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
                     expr->type = left_type;
                     return expr->type;
 
-                case BINOP_LAND: case BINOP_LOR:
+                case BINOP_LOGICAL_AND: case BINOP_LOGICAL_OR:
                     // Logical operations require bool
                     if (!type_equals(left_type, TYPE_BOOL_SINGLETON) || !type_equals(right_type, TYPE_BOOL_SINGLETON)) {
                         error_list_add(tc->errors, ERROR_TYPE, expr->loc,
@@ -973,8 +921,8 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
                     expr->type = TYPE_BOOL_SINGLETON;
                     return expr->type;
 
-                case BINOP_EQ: case BINOP_NE:
-                case BINOP_LT: case BINOP_LE: case BINOP_GT: case BINOP_GE:
+                case BINOP_EQ_EQ: case BINOP_BANG_EQ:
+                case BINOP_LT: case BINOP_LT_EQ: case BINOP_GT: case BINOP_GT_EQ:
                     // Comparison operations
                     if (!type_equals(left_type, right_type)) {
                         error_list_add(tc->errors, ERROR_TYPE, expr->loc,
@@ -992,11 +940,10 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
         }
 
         case AST_UNARY_EXPR: {
-            AstUnaryExpr* un = &expr->data.unary_expr;
-            Type* operand_type = check_expression(tc, un->operand);
+            Type* operand_type = check_expression(tc, expr->data.unary_expr.operand);
             if (!operand_type) return NULL;
 
-            switch (un->op) {
+            switch (expr->data.unary_expr.op) {
                 case UNOP_NEG:
                     if (!type_is_numeric(operand_type)) {
                         error_list_add(tc->errors, ERROR_TYPE, expr->loc,
@@ -1015,7 +962,7 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
                     expr->type = TYPE_BOOL_SINGLETON;
                     return expr->type;
 
-                case UNOP_BNOT:
+                case UNOP_BIT_NOT:
                     if (!type_is_integer(operand_type)) {
                         error_list_add(tc->errors, ERROR_TYPE, expr->loc,
                                       "Bitwise not requires integer type");
@@ -1043,27 +990,26 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
         }
 
         case AST_CALL_EXPR: {
-            AstCallExpr* call = &expr->data.call_expr;
-            Type* callee_type = check_expression(tc, call->callee);
+            Type* callee_type = check_expression(tc, expr->data.call_expr.callee);
             if (!callee_type || callee_type->kind != TYPE_FUNCTION) {
-                error_list_add(tc->errors, ERROR_TYPE, call->callee->loc,
+                error_list_add(tc->errors, ERROR_TYPE, expr->data.call_expr.callee->loc,
                               "Expression is not callable");
                 return NULL;
             }
 
             // Check argument count
-            if (call->arg_count != callee_type->data.function.param_count) {
+            if (expr->data.call_expr.arg_count != callee_type->data.function.param_count) {
                 error_list_add(tc->errors, ERROR_TYPE, expr->loc,
                               "Function expects %zu arguments, got %zu",
-                              callee_type->data.function.param_count, call->arg_count);
+                              callee_type->data.function.param_count, expr->data.call_expr.arg_count);
             }
 
             // Check argument types
-            for (size_t i = 0; i < call->arg_count && i < callee_type->data.function.param_count; i++) {
-                Type* arg_type = check_expression(tc, call->args[i]);
+            for (size_t i = 0; i < expr->data.call_expr.arg_count && i < callee_type->data.function.param_count; i++) {
+                Type* arg_type = check_expression(tc, expr->data.call_expr.args[i]);
                 Type* param_type = callee_type->data.function.params[i].type;
                 if (!type_is_assignable_to(arg_type, param_type)) {
-                    error_list_add(tc->errors, ERROR_TYPE, call->args[i]->loc,
+                    error_list_add(tc->errors, ERROR_TYPE, expr->data.call_expr.args[i]->loc,
                                   "Argument type mismatch: expected %s, got %s",
                                   type_to_string(param_type, tc->arena),
                                   type_to_string(arg_type, tc->arena));
@@ -1076,26 +1022,25 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
 
         case AST_ASYNC_CALL_EXPR: {
             // Similar to regular call, but wraps result in coroutine type
-            AstAsyncCallExpr* call = &expr->data.async_call_expr;
-            Type* callee_type = check_expression(tc, call->callee);
+            Type* callee_type = check_expression(tc, expr->data.async_call_expr.callee);
             if (!callee_type || callee_type->kind != TYPE_FUNCTION) {
-                error_list_add(tc->errors, ERROR_TYPE, call->callee->loc,
+                error_list_add(tc->errors, ERROR_TYPE, expr->data.async_call_expr.callee->loc,
                               "Expression is not callable");
                 return NULL;
             }
 
             // Check arguments (same as regular call)
-            if (call->arg_count != callee_type->data.function.param_count) {
+            if (expr->data.async_call_expr.arg_count != callee_type->data.function.param_count) {
                 error_list_add(tc->errors, ERROR_TYPE, expr->loc,
                               "Function expects %zu arguments, got %zu",
-                              callee_type->data.function.param_count, call->arg_count);
+                              callee_type->data.function.param_count, expr->data.async_call_expr.arg_count);
             }
 
-            for (size_t i = 0; i < call->arg_count && i < callee_type->data.function.param_count; i++) {
-                Type* arg_type = check_expression(tc, call->args[i]);
+            for (size_t i = 0; i < expr->data.async_call_expr.arg_count && i < callee_type->data.function.param_count; i++) {
+                Type* arg_type = check_expression(tc, expr->data.async_call_expr.args[i]);
                 Type* param_type = callee_type->data.function.params[i].type;
                 if (!type_is_assignable_to(arg_type, param_type)) {
-                    error_list_add(tc->errors, ERROR_TYPE, call->args[i]->loc,
+                    error_list_add(tc->errors, ERROR_TYPE, expr->data.async_call_expr.args[i]->loc,
                                   "Argument type mismatch: expected %s, got %s",
                                   type_to_string(param_type, tc->arena),
                                   type_to_string(arg_type, tc->arena));
@@ -1108,8 +1053,7 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
         }
 
         case AST_FIELD_ACCESS_EXPR: {
-            AstFieldAccessExpr* field = &expr->data.field_access_expr;
-            Type* object_type = check_expression(tc, field->object);
+            Type* object_type = check_expression(tc, expr->data.field_access_expr.object);
             if (!object_type) return NULL;
 
             if (object_type->kind != TYPE_STRUCT) {
@@ -1121,8 +1065,7 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
 
             // Find field
             for (size_t i = 0; i < object_type->data.struct_type.field_count; i++) {
-                if (strcmp(object_type->data.struct_type.fields[i].name, field->field_name) == 0) {
-                    field->field_index = i;
+                if (strcmp(object_type->data.struct_type.fields[i].name, expr->data.field_access_expr.field_name) == 0) {
                     expr->type = object_type->data.struct_type.fields[i].type;
                     return expr->type;
                 }
@@ -1130,14 +1073,13 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
 
             error_list_add(tc->errors, ERROR_TYPE, expr->loc,
                           "No field '%s' in struct '%s'",
-                          field->field_name, object_type->data.struct_type.name);
+                          expr->data.field_access_expr.field_name, object_type->data.struct_type.name);
             return NULL;
         }
 
         case AST_INDEX_EXPR: {
-            AstIndexExpr* idx = &expr->data.index_expr;
-            Type* array_type = check_expression(tc, idx->array);
-            Type* index_type = check_expression(tc, idx->index);
+            Type* array_type = check_expression(tc, expr->data.index_expr.array);
+            Type* index_type = check_expression(tc, expr->data.index_expr.index);
 
             if (!array_type || !index_type) return NULL;
 
@@ -1148,7 +1090,7 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
             }
 
             if (!type_is_integer(index_type)) {
-                error_list_add(tc->errors, ERROR_TYPE, idx->index->loc,
+                error_list_add(tc->errors, ERROR_TYPE, expr->data.index_expr.index->loc,
                               "Array index must be integer type");
                 return NULL;
             }
@@ -1161,9 +1103,8 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
         }
 
         case AST_CAST_EXPR: {
-            AstCastExpr* cast = &expr->data.cast_expr;
-            Type* src_type = check_expression(tc, cast->expr);
-            Type* dst_type = resolve_type_from_node(tc, cast->target_type_node);
+            Type* src_type = check_expression(tc, expr->data.cast_expr.expr);
+            Type* dst_type = resolve_type_from_node(tc, expr->data.cast_expr.type);
 
             if (!src_type || !dst_type) return NULL;
 
@@ -1175,14 +1116,12 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
                 return NULL;
             }
 
-            cast->target_type = dst_type;
             expr->type = dst_type;
             return expr->type;
         }
 
         case AST_TRY_EXPR: {
-            AstTryExpr* try_expr = &expr->data.try_expr;
-            Type* result_type = check_expression(tc, try_expr->expr);
+            Type* result_type = check_expression(tc, expr->data.try_expr.expr);
 
             if (!result_type || result_type->kind != TYPE_RESULT) {
                 error_list_add(tc->errors, ERROR_TYPE, expr->loc,
@@ -1221,11 +1160,9 @@ void typeck_check_module(AstNode* module_node, SymbolTable* symbol_table,
         .current_function_return_type = NULL
     };
 
-    AstModule* module = &module_node->data.module;
-
     // First pass: check type declarations
-    for (size_t i = 0; i < module->decl_count; i++) {
-        AstNode* decl = module->declarations[i];
+    for (size_t i = 0; i < module_node->data.module.decl_count; i++) {
+        AstNode* decl = module_node->data.module.decls[i];
         switch (decl->kind) {
             case AST_STRUCT_DECL:
                 check_struct_decl(&tc, decl);
@@ -1242,8 +1179,8 @@ void typeck_check_module(AstNode* module_node, SymbolTable* symbol_table,
     }
 
     // Second pass: check function declarations
-    for (size_t i = 0; i < module->decl_count; i++) {
-        AstNode* decl = module->declarations[i];
+    for (size_t i = 0; i < module_node->data.module.decl_count; i++) {
+        AstNode* decl = module_node->data.module.decls[i];
         if (decl->kind == AST_FUNCTION_DECL) {
             check_function_decl(&tc, decl);
         }
