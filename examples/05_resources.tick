@@ -1,0 +1,107 @@
+# 05_resources.tick - Resource management with defer and errdefer
+
+let Error = enum(u8) {
+    OutOfMemory = 0,
+    InvalidFile = 1,
+    IoError = 2
+};
+
+# Simple allocator interface (stub)
+let Allocator = struct {
+    alloc_fn: fn(usize) -> *u8,
+    free_fn: fn(*u8)
+};
+
+# File handle (stub)
+let File = struct {
+    fd: i32,
+    is_open: bool
+};
+
+let file_open = fn(path: *u8) -> Error!File {
+    # Stub implementation
+    let file = File { fd: 1, is_open: true };
+    return file;
+};
+
+let file_close = fn(file: *File) {
+    file.is_open = false;
+};
+
+let file_write = fn(file: *File, data: []u8) -> Error!usize {
+    if !file.is_open {
+        return Error.InvalidFile;
+    }
+    return data.len;
+};
+
+# Example using defer for cleanup
+let process_file = fn(path: *u8) -> Error!void {
+    let file = try file_open(path);
+    defer file_close(&file);  # Always runs at scope exit
+
+    var buffer: [1024]u8;
+    let bytes_written = try file_write(&file, buffer[0..100]);
+
+    return;
+};
+
+# Example using errdefer
+let allocate_and_process = fn(alloc: *Allocator, size: usize) -> Error!*u8 {
+    let buffer = alloc.alloc_fn(size);
+    if buffer == 0 {
+        return Error.OutOfMemory;
+    }
+    errdefer alloc.free_fn(buffer);  # Only runs if error returned
+
+    # Process buffer - if this fails, buffer is freed
+    # ... processing ...
+
+    # Success - caller owns the buffer
+    return buffer;
+};
+
+# Multiple cleanup handlers
+let complex_cleanup = fn() -> Error!void {
+    let file1 = try file_open("file1.txt");
+    defer file_close(&file1);
+
+    let file2 = try file_open("file2.txt");
+    defer file_close(&file2);  # Cleanups execute in reverse order (LIFO)
+
+    # Both files closed on any exit path
+    var buffer: [512]u8;
+    let n = try file_write(&file1, buffer[0..100]);
+
+    return;
+};
+
+# Nested scopes with defer
+let nested_defer = fn() -> i32 {
+    var counter = 0;
+
+    {
+        defer counter = counter + 1;  # Runs at end of inner scope
+        counter = counter + 10;
+    }
+    # counter is now 11
+
+    defer counter = counter + 100;  # Runs at function exit
+    counter = counter + 5;
+
+    return counter;  # Returns 16, then defer sets it to 116 (but after return)
+};
+
+pub let main = fn() -> i32 {
+    # Process file with automatic cleanup
+    try {
+        process_file("test.txt");
+    } catch |err| {
+        # File is closed even on error
+        return 1;
+    }
+
+    let result = nested_defer();
+
+    return 0;
+};

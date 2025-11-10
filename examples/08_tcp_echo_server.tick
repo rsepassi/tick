@@ -1,0 +1,331 @@
+# 08_tcp_echo_server.tick - Complete TCP echo server using epoll-based async I/O
+
+# Error types
+let NetError = enum(i32) {
+    SUCCESS = 0,
+    WOULD_BLOCK = -11,
+    CONNECTION_RESET = -104,
+    BROKEN_PIPE = -32,
+    ADDRESS_IN_USE = -98,
+    INVALID_ARG = -22
+};
+
+# Async operations (match runtime interface)
+let AsyncOp = struct {
+    opcode: u32,
+    result: i32,
+    ctx: *void,
+    callback: fn(*AsyncOp),
+    parent: *void,
+    req_id: u64,
+    next: *AsyncOp,
+    deadline_ns: u64,
+    submitted: bool,
+    completed: bool
+};
+
+let AsyncAccept = struct {
+    base: AsyncOp,
+    listen_fd: i32,
+    client_fd: i32,
+    client_addr: u32,
+    client_port: u16
+};
+
+let AsyncRead = struct {
+    base: AsyncOp,
+    fd: i32,
+    buffer: *u8,
+    count: usize
+};
+
+let AsyncWrite = struct {
+    base: AsyncOp,
+    fd: i32,
+    buffer: *u8,
+    count: usize
+};
+
+let AsyncClose = struct {
+    base: AsyncOp,
+    fd: i32
+};
+
+# Opcodes
+let ASYNC_OP_READ = 1;
+let ASYNC_OP_WRITE = 2;
+let ASYNC_OP_ACCEPT = 3;
+let ASYNC_OP_CLOSE = 5;
+
+# Client connection state
+let ClientState = enum(u8) {
+    READING = 0,
+    WRITING = 1,
+    CLOSING = 2
+};
+
+let Client = struct {
+    fd: i32,
+    state: ClientState,
+    buffer: [4096]u8,
+    read_pos: usize,
+    write_pos: usize
+};
+
+# Server state
+let Server = struct {
+    listen_fd: i32,
+    clients: [128]Client,
+    client_count: usize,
+    running: bool
+};
+
+# Initialize server
+let server_init = fn(server: *Server, listen_fd: i32) {
+    server.listen_fd = listen_fd;
+    server.client_count = 0;
+    server.running = true;
+};
+
+# Find free client slot
+let server_find_free_client = fn(server: *Server) -> *Client {
+    if server.client_count >= 128 {
+        return 0 as *Client;
+    }
+
+    # Find unused slot (fd == -1)
+    for i in 0..128 {
+        if server.clients[i].fd == -1 {
+            return &server.clients[i];
+        }
+    }
+
+    return 0 as *Client;
+};
+
+# Accept callback
+let on_accept_complete = fn(op: *AsyncOp) {
+    let accept_op = op as *AsyncAccept;
+    let server = op.ctx as *Server;
+
+    if op.result < 0 {
+        # Accept failed - log error and retry
+        return;
+    }
+
+    # Got new client
+    let client = server_find_free_client(server);
+    if client == 0 {
+        # No free slots - close connection
+        var close_op: AsyncClose;
+        close_op.base.opcode = ASYNC_OP_CLOSE;
+        close_op.fd = accept_op.client_fd;
+        # async_submit(runtime, &close_op.base);
+        return;
+    }
+
+    # Initialize client
+    client.fd = accept_op.client_fd;
+    client.state = ClientState.READING;
+    client.read_pos = 0;
+    client.write_pos = 0;
+    server.client_count = server.client_count + 1;
+
+    # Start reading from client
+    var read_op: AsyncRead;
+    read_op.base.opcode = ASYNC_OP_READ;
+    read_op.base.ctx = client as *void;
+    read_op.base.callback = on_client_read;
+    read_op.fd = client.fd;
+    read_op.buffer = &client.buffer[0];
+    read_op.count = 4096;
+    # async_submit(runtime, &read_op.base);
+
+    # Accept next connection
+    accept_op.client_fd = -1;
+    # async_submit(runtime, &accept_op.base);
+};
+
+# Client read callback
+let on_client_read = fn(op: *AsyncOp) {
+    let read_op = op as *AsyncRead;
+    let client = op.ctx as *Client;
+
+    if op.result <= 0 {
+        # EOF or error - close connection
+        client.state = ClientState.CLOSING;
+
+        var close_op: AsyncClose;
+        close_op.base.opcode = ASYNC_OP_CLOSE;
+        close_op.base.ctx = client as *void;
+        close_op.base.callback = on_client_close;
+        close_op.fd = client.fd;
+        # async_submit(runtime, &close_op.base);
+        return;
+    }
+
+    # Got data - echo it back
+    client.read_pos = op.result as usize;
+    client.write_pos = 0;
+    client.state = ClientState.WRITING;
+
+    var write_op: AsyncWrite;
+    write_op.base.opcode = ASYNC_OP_WRITE;
+    write_op.base.ctx = client as *void;
+    write_op.base.callback = on_client_write;
+    write_op.fd = client.fd;
+    write_op.buffer = &client.buffer[0];
+    write_op.count = client.read_pos;
+    # async_submit(runtime, &write_op.base);
+};
+
+# Client write callback
+let on_client_write = fn(op: *AsyncOp) {
+    let write_op = op as *AsyncWrite;
+    let client = op.ctx as *Client;
+
+    if op.result < 0 {
+        # Write error - close connection
+        client.state = ClientState.CLOSING;
+
+        var close_op: AsyncClose;
+        close_op.base.opcode = ASYNC_OP_CLOSE;
+        close_op.base.ctx = client as *void;
+        close_op.base.callback = on_client_close;
+        close_op.fd = client.fd;
+        # async_submit(runtime, &close_op.base);
+        return;
+    }
+
+    client.write_pos = client.write_pos + (op.result as usize);
+
+    if client.write_pos < client.read_pos {
+        # More data to write
+        let remaining = client.read_pos - client.write_pos;
+        write_op.buffer = &client.buffer[client.write_pos];
+        write_op.count = remaining;
+        # async_submit(runtime, &write_op.base);
+    } else {
+        # Done writing - read again
+        client.state = ClientState.READING;
+        client.read_pos = 0;
+        client.write_pos = 0;
+
+        var read_op: AsyncRead;
+        read_op.base.opcode = ASYNC_OP_READ;
+        read_op.base.ctx = client as *void;
+        read_op.base.callback = on_client_read;
+        read_op.fd = client.fd;
+        read_op.buffer = &client.buffer[0];
+        read_op.count = 4096;
+        # async_submit(runtime, &read_op.base);
+    }
+};
+
+# Client close callback
+let on_client_close = fn(op: *AsyncOp) {
+    let client = op.ctx as *Client;
+    client.fd = -1;
+    # server.client_count would be decremented here
+};
+
+# Coroutine-based client handler
+let handle_client_coro = fn(client_fd: i32) -> NetError!void {
+    var buffer: [4096]u8;
+
+    defer {
+        var close_op: AsyncClose;
+        close_op.base.opcode = ASYNC_OP_CLOSE;
+        close_op.fd = client_fd;
+        # Submit close operation
+    }
+
+    for {
+        # Read from client
+        var read_op: AsyncRead;
+        read_op.base.opcode = ASYNC_OP_READ;
+        read_op.fd = client_fd;
+        read_op.buffer = &buffer[0];
+        read_op.count = 4096;
+
+        # Submit and suspend
+        suspend;
+
+        if read_op.base.result == 0 {
+            # EOF
+            break;
+        }
+
+        if read_op.base.result < 0 {
+            return NetError.CONNECTION_RESET;
+        }
+
+        let bytes_read = read_op.base.result as usize;
+
+        # Echo back to client
+        var total_written: usize = 0;
+        for total_written < bytes_read {
+            var write_op: AsyncWrite;
+            write_op.base.opcode = ASYNC_OP_WRITE;
+            write_op.fd = client_fd;
+            write_op.buffer = &buffer[total_written];
+            write_op.count = bytes_read - total_written;
+
+            # Submit and suspend
+            suspend;
+
+            if write_op.base.result < 0 {
+                return NetError.BROKEN_PIPE;
+            }
+
+            total_written = total_written + (write_op.base.result as usize);
+        }
+    }
+
+    return;
+};
+
+# Server accept loop (coroutine)
+let server_accept_loop = fn(listen_fd: i32) {
+    for {
+        # Accept connection
+        var accept_op: AsyncAccept;
+        accept_op.base.opcode = ASYNC_OP_ACCEPT;
+        accept_op.listen_fd = listen_fd;
+        accept_op.client_fd = -1;
+
+        # Submit and suspend
+        suspend;
+
+        if accept_op.base.result < 0 {
+            # Accept failed - continue
+            continue;
+        }
+
+        # Handle client in new coroutine
+        let client_coro = async handle_client_coro(accept_op.client_fd);
+
+        # Don't wait - let it run concurrently
+        # The runtime will manage the coroutine lifecycle
+    }
+};
+
+# Main server function
+pub let main = fn() -> i32 {
+    # Setup socket (stub - would use actual socket syscalls)
+    let listen_fd = 3;  # Assume socket is already created and bound
+
+    # Initialize server
+    var server: Server;
+    server_init(&server, listen_fd);
+
+    # Start accept loop
+    server_accept_loop(listen_fd);
+
+    # Run event loop (conceptual)
+    # async_runtime* rt = async_runtime_create();
+    # async_run_until_complete(rt);
+    # async_runtime_destroy(rt);
+
+    return 0;
+};

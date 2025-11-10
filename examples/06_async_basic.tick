@@ -1,0 +1,141 @@
+# 06_async_basic.tick - Basic async/await with suspend and resume
+
+# Simple coroutine with suspend point
+let worker = fn() {
+    # Do some work
+    var x = 1;
+    var y = 2;
+
+    # Suspend execution
+    suspend;
+
+    # Resume continues here
+    var z = x + y;
+    return;
+};
+
+# Coroutine that returns a value
+let compute = fn() -> i32 {
+    var result = 0;
+
+    result = result + 10;
+    suspend;
+
+    result = result + 20;
+    suspend;
+
+    result = result + 30;
+    return result;  # Returns 60
+};
+
+# Multiple suspend points
+let multi_step = fn() -> i32 {
+    var step = 0;
+
+    step = 1;
+    suspend;  # State 1
+
+    step = 2;
+    suspend;  # State 2
+
+    step = 3;
+    suspend;  # State 3
+
+    return step;
+};
+
+# Calling coroutines synchronously (blocking)
+let sync_caller = fn() -> i32 {
+    # Synchronous call - runs to completion
+    worker();
+
+    # Another sync call
+    let result = compute();
+    return result;
+};
+
+# Calling coroutines asynchronously
+let async_caller = fn() {
+    # Asynchronous call - returns a coroutine handle
+    let coro1 = async worker();
+
+    # Can do other work here
+    var x = 10;
+
+    # Resume the coroutine
+    resume coro1;
+
+    # Multiple async calls
+    let coro2 = async compute();
+    let coro3 = async multi_step();
+
+    # Resume them
+    resume coro2;
+    resume coro2;  # Second suspend point
+    resume coro2;  # Third suspend point (completes)
+
+    resume coro3;
+    resume coro3;
+    resume coro3;
+
+    return;
+};
+
+# Coroutine that calls other functions
+let caller_coro = fn() -> i32 {
+    # Call regular function
+    var temp = sync_caller();
+
+    # Suspend in caller
+    suspend;
+
+    # Can call async functions
+    let coro = async compute();
+    resume coro;
+    resume coro;
+    resume coro;
+
+    return temp;
+};
+
+# State machine pattern
+let State = enum(u8) {
+    INIT = 0,
+    RUNNING = 1,
+    WAITING = 2,
+    DONE = 3
+};
+
+let state_machine_coro = fn() -> State {
+    var state = State.INIT;
+
+    # Initialize
+    state = State.RUNNING;
+    suspend;
+
+    # Process
+    state = State.WAITING;
+    suspend;
+
+    # Wait for event
+    state = State.DONE;
+    suspend;
+
+    return state;
+};
+
+pub let main = fn() -> i32 {
+    # Synchronous execution
+    let result1 = sync_caller();
+
+    # Asynchronous execution
+    async_caller();
+
+    # Create and manually step through coroutine
+    let coro = async multi_step();
+    resume coro;  # Step 1
+    resume coro;  # Step 2
+    resume coro;  # Step 3
+
+    return 0;
+};

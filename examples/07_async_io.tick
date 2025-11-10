@@ -1,0 +1,236 @@
+# 07_async_io.tick - Async I/O operations with epoll runtime
+
+# Import the async runtime (conceptual - actual import would be from C library)
+# In practice, these types and functions are provided by the runtime
+
+# Error codes
+let IOError = enum(i32) {
+    SUCCESS = 0,
+    WOULD_BLOCK = -11,  # EAGAIN
+    INTERRUPTED = -4,   # EINTR
+    BAD_FD = -9,        # EBADF
+    PERMISSION = -13,   # EACCES
+    NOT_FOUND = -2      # ENOENT
+};
+
+# Async operation base (matches runtime interface)
+let AsyncOp = struct {
+    opcode: u32,
+    result: i32,
+    ctx: *void,
+    callback: fn(*AsyncOp),
+    parent: *void,
+    req_id: u64,
+    next: *AsyncOp,
+    deadline_ns: u64,
+    submitted: bool,
+    completed: bool
+};
+
+# Read operation
+let AsyncRead = struct {
+    base: AsyncOp,
+    fd: i32,
+    buffer: *u8,
+    count: usize
+};
+
+# Write operation
+let AsyncWrite = struct {
+    base: AsyncOp,
+    fd: i32,
+    buffer: *u8,
+    count: usize
+};
+
+# Timer operation
+let AsyncTimer = struct {
+    base: AsyncOp,
+    timeout_ns: u64
+};
+
+# Opcodes
+let ASYNC_OP_READ = 1;
+let ASYNC_OP_WRITE = 2;
+let ASYNC_OP_TIMER = 6;
+
+# Example: Async read with callback
+let on_read_complete = fn(op: *AsyncOp) {
+    let read_op = op as *AsyncRead;
+    if op.result > 0 {
+        # Successfully read op.result bytes
+        # Process the data in read_op.buffer
+    } else {
+        # Handle error: op.result is negative errno
+    }
+};
+
+let async_read_file = fn(fd: i32) {
+    # Allocate buffer
+    var buffer: [4096]u8;
+
+    # Setup read operation
+    var read_op: AsyncRead;
+    read_op.base.opcode = ASYNC_OP_READ;
+    read_op.base.result = 0;
+    read_op.base.callback = on_read_complete;
+    read_op.fd = fd;
+    read_op.buffer = &buffer[0];
+    read_op.count = 4096;
+
+    # Submit to runtime (conceptual - would call runtime function)
+    # async_submit(runtime, &read_op.base);
+
+    return;
+};
+
+# Example: Async write with callback
+let on_write_complete = fn(op: *AsyncOp) {
+    let write_op = op as *AsyncWrite;
+    if op.result > 0 {
+        # Successfully wrote op.result bytes
+    } else {
+        # Handle error
+    }
+};
+
+let async_write_file = fn(fd: i32, data: []u8) {
+    var write_op: AsyncWrite;
+    write_op.base.opcode = ASYNC_OP_WRITE;
+    write_op.base.result = 0;
+    write_op.base.callback = on_write_complete;
+    write_op.fd = fd;
+    write_op.buffer = data.ptr;
+    write_op.count = data.len;
+
+    # Submit to runtime
+    # async_submit(runtime, &write_op.base);
+
+    return;
+};
+
+# Example: Timer with callback
+let on_timer_expired = fn(op: *AsyncOp) {
+    # Timer expired - execute delayed action
+    let timer_op = op as *AsyncTimer;
+    # Perform scheduled action
+};
+
+let schedule_timer = fn(timeout_ms: u64) {
+    var timer_op: AsyncTimer;
+    timer_op.base.opcode = ASYNC_OP_TIMER;
+    timer_op.base.callback = on_timer_expired;
+    timer_op.timeout_ns = timeout_ms * 1000000;  # Convert ms to ns
+
+    # Submit to runtime
+    # async_submit(runtime, &timer_op.base);
+
+    return;
+};
+
+# Example: Coroutine-based async I/O
+let read_file_coro = fn(fd: i32) -> IOError!usize {
+    var buffer: [4096]u8;
+    var read_op: AsyncRead;
+
+    read_op.base.opcode = ASYNC_OP_READ;
+    read_op.fd = fd;
+    read_op.buffer = &buffer[0];
+    read_op.count = 4096;
+
+    # Submit operation
+    # async_submit(runtime, &read_op.base);
+
+    # Suspend until operation completes
+    suspend;
+
+    # Resumed after I/O completion
+    if read_op.base.result < 0 {
+        # Error occurred
+        return IOError.BAD_FD;
+    }
+
+    return read_op.base.result as usize;
+};
+
+# Example: Multiple async operations
+let copy_file = fn(src_fd: i32, dst_fd: i32) -> IOError!usize {
+    var total_copied: usize = 0;
+    var buffer: [4096]u8;
+
+    for {
+        # Read from source
+        var read_op: AsyncRead;
+        read_op.base.opcode = ASYNC_OP_READ;
+        read_op.fd = src_fd;
+        read_op.buffer = &buffer[0];
+        read_op.count = 4096;
+
+        # Submit and wait
+        suspend;
+
+        if read_op.base.result == 0 {
+            # EOF
+            break;
+        }
+
+        if read_op.base.result < 0 {
+            return IOError.BAD_FD;
+        }
+
+        let bytes_read = read_op.base.result as usize;
+
+        # Write to destination
+        var write_op: AsyncWrite;
+        write_op.base.opcode = ASYNC_OP_WRITE;
+        write_op.fd = dst_fd;
+        write_op.buffer = &buffer[0];
+        write_op.count = bytes_read;
+
+        # Submit and wait
+        suspend;
+
+        if write_op.base.result < 0 {
+            return IOError.BAD_FD;
+        }
+
+        total_copied = total_copied + bytes_read;
+    }
+
+    return total_copied;
+};
+
+# Example: Concurrent I/O operations
+let parallel_reads = fn(fd1: i32, fd2: i32) {
+    # Start first read
+    let coro1 = async read_file_coro(fd1);
+
+    # Start second read concurrently
+    let coro2 = async read_file_coro(fd2);
+
+    # Wait for both to complete
+    resume coro1;
+    resume coro2;
+
+    return;
+};
+
+pub let main = fn() -> i32 {
+    # Open files (stub - would use actual file operations)
+    let fd = 0;  # stdin
+
+    # Callback-based I/O
+    async_read_file(fd);
+
+    # Coroutine-based I/O
+    try {
+        let bytes = read_file_coro(fd);
+    } catch |err| {
+        return 1;
+    }
+
+    # Schedule timer
+    schedule_timer(1000);  # 1 second
+
+    return 0;
+};

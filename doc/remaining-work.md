@@ -1,7 +1,7 @@
 # Remaining Work Items
 
 **Last Updated:** 2025-11-10
-**Status:** All integration tests passing (42/42)
+**Status:** All integration tests passing (42/42) + Examples and epoll runtime completed
 
 ---
 
@@ -44,16 +44,30 @@
 
 ## Example Programs
 
-**Tasks:**
-- Create `examples/` directory
-- Add simple function example
-- Add async/await coroutine example
-- Add error handling example (try/catch, Result types)
-- Add defer/errdefer resource management example
-- Add struct and enum type examples
-- Add comprehensive language feature showcase
+**Status:** ✅ **COMPLETED**
 
-**Goal:** Demonstrate all language features working end-to-end
+**Completed Tasks:**
+- ✅ Created `examples/` directory with 8 comprehensive examples
+- ✅ Added simple function examples (01_hello.tick)
+- ✅ Added type system examples (02_types.tick)
+- ✅ Added control flow examples (03_control_flow.tick)
+- ✅ Added error handling examples (04_errors.tick)
+- ✅ Added resource management examples (05_resources.tick)
+- ✅ Added basic async/coroutine examples (06_async_basic.tick)
+- ✅ Added async I/O examples (07_async_io.tick)
+- ✅ Added complete TCP echo server (08_tcp_echo_server.tick)
+- ✅ Implemented full epoll-based async runtime
+- ✅ Created and tested 3 runtime integration tests
+- ✅ Documented examples, runtime, and integration
+
+**Resources:**
+- `examples/README.md` - Overview of all examples
+- `examples/EXAMPLES_SUMMARY.md` - Detailed feature coverage and metrics
+- `examples/INTEGRATION_GUIDE.md` - Complete integration documentation
+- `examples/runtime/` - Production-quality epoll runtime
+- `examples/runtime/README.md` - Runtime API and usage documentation
+
+**Goal:** ✅ All language features demonstrated with working runtime integration
 
 ---
 

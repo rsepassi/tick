@@ -1,0 +1,83 @@
+# 04_errors.tick - Error handling with Result types and try/catch
+
+# Error enum
+let MathError = enum(u8) {
+    DivideByZero = 0,
+    Overflow = 1,
+    Underflow = 2
+};
+
+# Function that can return an error
+let divide = fn(a: i32, b: i32) -> MathError!i32 {
+    if b == 0 {
+        return MathError.DivideByZero;
+    }
+    return a / b;
+};
+
+let checked_add = fn(a: i32, b: i32) -> MathError!i32 {
+    # In a real implementation, would check for overflow
+    let max = 2147483647;
+    if a > max - b {
+        return MathError.Overflow;
+    }
+    return a + b;
+};
+
+# Function using try/catch
+let safe_divide = fn(a: i32, b: i32) -> i32 {
+    try {
+        let result = divide(a, b);
+        return result;
+    } catch |err| {
+        # Handle error - return default value
+        return 0;
+    }
+};
+
+# Error propagation
+let divide_chain = fn(a: i32, b: i32, c: i32) -> MathError!i32 {
+    # Try without catch propagates error
+    let temp = try divide(a, b);
+    let result = try divide(temp, c);
+    return result;
+};
+
+# Generic error type
+let Error = enum(u8) {
+    InvalidInput = 0,
+    NotFound = 1,
+    PermissionDenied = 2,
+    IoError = 3
+};
+
+let parse_positive = fn(value: i32) -> Error!i32 {
+    if value < 0 {
+        return Error.InvalidInput;
+    }
+    return value;
+};
+
+pub let main = fn() -> i32 {
+    # Using try/catch
+    let result1 = safe_divide(10, 2);  # Returns 5
+    let result2 = safe_divide(10, 0);  # Returns 0 (error handled)
+
+    # Pattern matching on result
+    try {
+        let result = divide_chain(100, 5, 2);
+        # Use result
+    } catch |err| {
+        switch err {
+            case MathError.DivideByZero:
+                # Handle divide by zero
+                return 1;
+            case MathError.Overflow:
+                return 2;
+            default:
+                return 3;
+        }
+    }
+
+    return 0;
+};
