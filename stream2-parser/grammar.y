@@ -1045,6 +1045,23 @@ postfix_expr(E) ::= expr(Arr) LBRACKET(T) expr(Idx) RBRACKET. {
     }
 }
 
+// Struct literal with explicit type name (e.g., Point { x: 1, y: 2 })
+postfix_expr(E) ::= IDENTIFIER(Name) LBRACE(T) struct_init_list(Fields) RBRACE. {
+    // Create a named type node for the struct type
+    AstNode* type_node = ast_alloc(parser, AST_TYPE_NAMED, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
+    if (type_node) {
+        AstTypeNode* tnode = (AstTypeNode*)type_node;
+        tnode->data.named.name = Name.literal.str_value;
+    }
+
+    E = ast_alloc(parser, AST_STRUCT_INIT_EXPR, (SourceLocation){T.line, T.column, T.start});
+    if (E) {
+        E->data.struct_init_expr.type = type_node;
+        E->data.struct_init_expr.fields = (AstStructInit*)Fields;
+        E->data.struct_init_expr.field_count = 0; // Set by parser
+    }
+}
+
 postfix_expr(E) ::= type(T) LBRACE struct_init_list(Fields) RBRACE. {
     E = ast_alloc(parser, AST_STRUCT_INIT_EXPR, T->loc);
     if (E) {

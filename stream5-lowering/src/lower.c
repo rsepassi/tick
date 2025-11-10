@@ -43,6 +43,11 @@ typedef struct LowerContext {
 static IrValue* lower_expr(LowerContext* ctx, AstNode* expr);
 static void lower_stmt(LowerContext* ctx, AstNode* stmt);
 static IrBasicBlock* lower_block_stmt(LowerContext* ctx, AstNode* block);
+static void lower_break_stmt(LowerContext* ctx, AstNode* stmt);
+static void lower_continue_stmt(LowerContext* ctx, AstNode* stmt);
+static void lower_continue_switch_stmt(LowerContext* ctx, AstNode* stmt);
+static void lower_resume_stmt(LowerContext* ctx, AstNode* stmt);
+static void lower_try_catch_stmt(LowerContext* ctx, AstNode* stmt);
 
 //=============================================================================
 // Variable Map Helpers
@@ -1197,6 +1202,130 @@ static void lower_expr_stmt(LowerContext* ctx, AstNode* stmt) {
     lower_expr(ctx, stmt->data.expr_stmt.expr);
 }
 
+static void lower_break_stmt(LowerContext* ctx, AstNode* stmt) {
+    assert(stmt->kind == AST_BREAK_STMT);
+
+    // Break jumps to the loop exit block
+    if (ctx->break_target) {
+        IrInstruction* jmp = ir_alloc_instruction(IR_JUMP, ctx->arena);
+        jmp->loc = stmt->loc;
+        jmp->data.jump.target = ctx->break_target;
+        ir_block_add_instruction(ctx->current_block, jmp, ctx->arena);
+        ir_block_add_successor(ctx->current_block, ctx->break_target, ctx->arena);
+        ir_block_add_predecessor(ctx->break_target, ctx->current_block, ctx->arena);
+    } else {
+        // Error: break outside of loop - should be caught in semantic analysis
+        fprintf(stderr, "Error: break statement outside of loop\n");
+    }
+}
+
+static void lower_continue_stmt(LowerContext* ctx, AstNode* stmt) {
+    assert(stmt->kind == AST_CONTINUE_STMT);
+
+    // Continue jumps to the loop header/increment block
+    if (ctx->continue_target) {
+        IrInstruction* jmp = ir_alloc_instruction(IR_JUMP, ctx->arena);
+        jmp->loc = stmt->loc;
+        jmp->data.jump.target = ctx->continue_target;
+        ir_block_add_instruction(ctx->current_block, jmp, ctx->arena);
+        ir_block_add_successor(ctx->current_block, ctx->continue_target, ctx->arena);
+        ir_block_add_predecessor(ctx->continue_target, ctx->current_block, ctx->arena);
+    } else {
+        // Error: continue outside of loop - should be caught in semantic analysis
+        fprintf(stderr, "Error: continue statement outside of loop\n");
+    }
+}
+
+static void lower_continue_switch_stmt(LowerContext* ctx, AstNode* stmt) {
+    assert(stmt->kind == AST_CONTINUE_SWITCH_STMT);
+
+    // Lower the new value expression
+    IrValue* value = lower_expr(ctx, stmt->data.continue_switch_stmt.value);
+
+    // Store the new value to the switch variable
+    // Then jump back to the switch header
+    // TODO: This needs proper implementation with switch context tracking
+    // For now, just emit an assign and jump to continue target
+
+    if (ctx->continue_target) {
+        // Create an assignment to update the switch variable
+        // (The switch variable tracking would need to be added to context)
+
+        // Jump back to loop header
+        IrInstruction* jmp = ir_alloc_instruction(IR_JUMP, ctx->arena);
+        jmp->loc = stmt->loc;
+        jmp->data.jump.target = ctx->continue_target;
+        ir_block_add_instruction(ctx->current_block, jmp, ctx->arena);
+        ir_block_add_successor(ctx->current_block, ctx->continue_target, ctx->arena);
+        ir_block_add_predecessor(ctx->continue_target, ctx->current_block, ctx->arena);
+    }
+}
+
+static void lower_resume_stmt(LowerContext* ctx, AstNode* stmt) {
+    assert(stmt->kind == AST_RESUME_STMT);
+
+    // Lower the coroutine expression
+    IrValue* coro = lower_expr(ctx, stmt->data.resume_stmt.coro);
+
+    // Create resume instruction
+    IrInstruction* resume = ir_alloc_instruction(IR_RESUME, ctx->arena);
+    resume->loc = stmt->loc;
+    resume->data.resume.coro_handle = coro;
+    resume->data.resume.state_id = 0;  // Will be filled during state machine transformation
+    ir_block_add_instruction(ctx->current_block, resume, ctx->arena);
+}
+
+static void lower_try_catch_stmt(LowerContext* ctx, AstNode* stmt) {
+    assert(stmt->kind == AST_TRY_CATCH_STMT);
+
+    // Create blocks for try, catch, and continuation
+    IrBasicBlock* try_block = ir_function_new_block(ctx->current_function, "try", ctx->arena);
+    IrBasicBlock* catch_block = NULL;
+    IrBasicBlock* cont_block = ir_function_new_block(ctx->current_function, "try_cont", ctx->arena);
+
+    if (stmt->data.try_catch_stmt.catch_block) {
+        catch_block = ir_function_new_block(ctx->current_function, "catch", ctx->arena);
+    }
+
+    // Jump to try block
+    IrInstruction* jmp_try = ir_alloc_instruction(IR_JUMP, ctx->arena);
+    jmp_try->data.jump.target = try_block;
+    ir_block_add_instruction(ctx->current_block, jmp_try, ctx->arena);
+    ir_block_add_successor(ctx->current_block, try_block, ctx->arena);
+
+    // Lower try block
+    ctx->current_block = try_block;
+    ir_function_add_block(ctx->current_function, try_block, ctx->arena);
+    lower_block_stmt(ctx, stmt->data.try_catch_stmt.try_block);
+
+    // Jump to continuation from try block
+    IrInstruction* jmp_cont = ir_alloc_instruction(IR_JUMP, ctx->arena);
+    jmp_cont->data.jump.target = cont_block;
+    ir_block_add_instruction(ctx->current_block, jmp_cont, ctx->arena);
+    ir_block_add_successor(ctx->current_block, cont_block, ctx->arena);
+
+    // Lower catch block if present
+    if (catch_block) {
+        ctx->current_block = catch_block;
+        ir_function_add_block(ctx->current_function, catch_block, ctx->arena);
+
+        // TODO: Bind error variable
+        // const char* error_var = stmt->data.try_catch_stmt.error_var;
+
+        lower_block_stmt(ctx, stmt->data.try_catch_stmt.catch_block);
+
+        // Jump to continuation from catch block
+        IrInstruction* jmp_cont_catch = ir_alloc_instruction(IR_JUMP, ctx->arena);
+        jmp_cont_catch->data.jump.target = cont_block;
+        ir_block_add_instruction(ctx->current_block, jmp_cont_catch, ctx->arena);
+        ir_block_add_successor(ctx->current_block, cont_block, ctx->arena);
+    }
+
+    // Continue with continuation block
+    ctx->current_block = cont_block;
+    ir_function_add_block(ctx->current_function, cont_block, ctx->arena);
+}
+
 static void lower_stmt(LowerContext* ctx, AstNode* stmt) {
     if (!stmt) return;
 
@@ -1222,6 +1351,15 @@ static void lower_stmt(LowerContext* ctx, AstNode* stmt) {
         case AST_SWITCH_STMT:
             lower_switch_stmt(ctx, stmt);
             break;
+        case AST_BREAK_STMT:
+            lower_break_stmt(ctx, stmt);
+            break;
+        case AST_CONTINUE_STMT:
+            lower_continue_stmt(ctx, stmt);
+            break;
+        case AST_CONTINUE_SWITCH_STMT:
+            lower_continue_switch_stmt(ctx, stmt);
+            break;
         case AST_DEFER_STMT:
             lower_defer_stmt(ctx, stmt);
             break;
@@ -1230,6 +1368,12 @@ static void lower_stmt(LowerContext* ctx, AstNode* stmt) {
             break;
         case AST_SUSPEND_STMT:
             lower_suspend_stmt(ctx, stmt);
+            break;
+        case AST_RESUME_STMT:
+            lower_resume_stmt(ctx, stmt);
+            break;
+        case AST_TRY_CATCH_STMT:
+            lower_try_catch_stmt(ctx, stmt);
             break;
         case AST_EXPR_STMT:
             lower_expr_stmt(ctx, stmt);
