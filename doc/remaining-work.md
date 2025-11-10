@@ -5,37 +5,34 @@
 
 ---
 
-## Executive Summary
+## Current State
 
-**Current State:** The compiler pipeline has several working components but **cannot compile even a simple "hello world" program**. No compiler executable exists.
+The compiler pipeline has several working components but **cannot compile even a simple "hello world" program**. No compiler executable exists.
 
 **Critical Path to Production:**
-1. Build compiler driver executable (~500 LOC)
-2. Implement IR lowering with async support (~2000 LOC)
-3. Implement C code generation (~1500 LOC)
+1. Build compiler driver executable
+2. Implement IR lowering with async support
+3. Implement C code generation
 4. Replace stub integration tests with real tests
 5. Actually compile and run all 8 example programs
-
-**Estimated Time:** 8-12 weeks of focused development
 
 ---
 
 ## What Actually Works
 
-### ✅ Epoll Async Runtime (PRODUCTION READY)
+### Epoll Async Runtime
 - **Location:** `examples/runtime/`
 - **Status:** Fully functional and tested
 - **Tests:** 3/3 passing (timer, pipe I/O, TCP echo)
 - **Code:** ~800 LOC, clean, well-documented
-- **Verdict:** This component is genuinely complete
 
-### ✅ Early Compiler Stages (PARTIALLY WORKING)
+### Early Compiler Stages
 - **Lexer:** Can tokenize tick source (33/33 tests pass)
 - **Parser:** Can build AST from tokens (25/26 tests pass, 119 shift/reduce conflicts)
 - **Semantic:** Basic symbol resolution and type checking (15/15 tests pass)
 - **Limitation:** Only handles simple, non-async code snippets
 
-### ✅ Example Programs (WRITTEN BUT NOT COMPILABLE)
+### Example Programs
 - **Location:** `examples/01-08*.tick`
 - **Count:** 8 example programs (1044 LOC)
 - **Status:** Written and documented
@@ -43,9 +40,9 @@
 
 ---
 
-## Critical Missing Components
+## Missing Components
 
-### 1. ❌ Compiler Driver Executable (BLOCKING EVERYTHING)
+### 1. Compiler Driver Executable
 
 **Problem:** There is no `tick` or `tickc` executable. Cannot compile any `.tick` files.
 
@@ -68,11 +65,9 @@ $ ./tick compile examples/01_hello.tick -o hello
 $ ls hello.c hello.h                # Generated C files exist
 ```
 
-**Estimated Effort:** 1 week
-
 ---
 
-### 2. ❌ IR Lowering (NOT IMPLEMENTED)
+### 2. IR Lowering
 
 **Problem:** Stream 5 (lowering) exists but **async/coroutine lowering is not implemented**.
 
@@ -100,11 +95,9 @@ $ ls hello.c hello.h                # Generated C files exist
 - Live variable analysis integrated
 - All lowering tests actually test functionality (not stubs)
 
-**Estimated Effort:** 3-4 weeks
-
 ---
 
-### 3. ❌ Code Generation (NOT IMPLEMENTED)
+### 3. Code Generation
 
 **Problem:** Stream 6 (codegen) exists but **C code generation from IR is not implemented**.
 
@@ -133,11 +126,9 @@ $ ls hello.c hello.h                # Generated C files exist
 - State machines use computed goto correctly
 - All codegen tests actually test functionality (not stubs)
 
-**Estimated Effort:** 3-4 weeks
-
 ---
 
-### 4. ❌ Integration Tests (63% ARE STUBS)
+### 4. Integration Tests (63% Are Stubs)
 
 **Problem:** 27 out of 42 "passing" integration tests are empty stubs that don't test anything.
 
@@ -181,11 +172,9 @@ static int test1(void) {
 - No more "TODO: depends on..." markers
 - Tests actually compile .tick files end-to-end
 
-**Estimated Effort:** 2-3 weeks (concurrent with IR/codegen implementation)
-
 ---
 
-### 5. ❌ End-to-End Validation (NEVER DONE)
+### 5. End-to-End Validation
 
 **Problem:** Examples exist but have never been compiled or run.
 
@@ -208,7 +197,7 @@ static int test1(void) {
 | 07_async_io.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
 | 08_tcp_echo_server.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
 
-**Acceptance Criteria (Production Readiness):**
+**Acceptance Criteria:**
 ```bash
 # Must work for ALL examples
 $ ./tick compile examples/08_tcp_echo_server.tick -o tcp_server
@@ -217,77 +206,25 @@ $ ./tcp_server
 # Server should accept connections, echo data, work correctly
 ```
 
-**Estimated Effort:** 1-2 weeks (after IR/codegen complete)
-
 ---
 
-## Secondary Issues (Post-Production)
+## Additional Issues
 
 ### Parser Conflicts
 - 119 shift/reduce conflicts in expression grammar
 - 1 test failing (struct initialization syntax)
 - Works for most cases but could be cleaner
-- **Priority:** Low (functional as-is)
 
 ### Code Quality
 - Error messages could be more descriptive
 - No fuzzing or security testing
 - Memory leak checking needed (valgrind)
 - Test coverage analysis
-- **Priority:** Medium (important but not blocking)
 
 ### Documentation
 - Examples documented but can't demonstrate until compiler works
 - Need troubleshooting guide
 - Interface headers need usage examples
-- **Priority:** Low (plenty of docs already)
-
----
-
-## Recommended Development Sequence
-
-### Phase 1: Basic Compilation (4 weeks)
-1. **Week 1:** Build compiler driver executable
-   - Create `src/main.c`
-   - Wire together lexer → parser → semantic
-   - Test with simple non-async examples
-
-2. **Week 2-3:** Implement IR lowering
-   - Focus on simple functions first
-   - Add async/coroutine transformation
-   - Replace stub tests
-
-3. **Week 4:** Implement code generation
-   - Generate C from simple IR first
-   - Add state machine generation
-   - Replace stub tests
-
-### Phase 2: Async Support (3 weeks)
-4. **Week 5-6:** Complete async/coroutine pipeline
-   - IR lowering for suspend/resume
-   - Code generation for state machines
-   - Coroutine frame generation
-
-5. **Week 7:** Integration with runtime
-   - Generate async_submit calls
-   - Link with epoll runtime
-   - Test callback integration
-
-### Phase 3: Validation (2-3 weeks)
-6. **Week 8:** Compile simple examples (01-05)
-   - Fix bugs in generated C
-   - Iterate until all compile
-   - Run and validate behavior
-
-7. **Week 9-10:** Compile async examples (06-08)
-   - Test async/coroutine functionality
-   - Validate TCP echo server works
-   - Performance testing
-
-8. **Week 11-12:** Polish and documentation
-   - Fix remaining issues
-   - Improve error messages
-   - Update documentation with real examples
 
 ---
 
@@ -320,8 +257,6 @@ A tick compiler is **production-ready** when:
 ---
 
 ## Progress Tracking
-
-Use this checklist to track actual progress:
 
 ### Compiler Driver
 - [ ] Create `src/main.c`
@@ -396,15 +331,3 @@ Use this checklist to track actual progress:
 - `doc/impl-guide.md` - Implementation specifications
 - `examples/INTEGRATION_GUIDE.md` - How compiler should integrate with runtime
 - `VALIDATION_REPORT.md` - Honest assessment of current state
-
----
-
-## Honest Assessment
-
-**Current State:** Many pieces exist but are not assembled. Critical components (IR lowering, code generation, compiler driver) are missing or incomplete.
-
-**Time to Production:** 8-12 weeks of focused development, not "almost done"
-
-**Biggest Risk:** Underestimating remaining work. The async/coroutine transformation is complex and will require significant debugging.
-
-**Recommendation:** Focus on Phase 1 first (get simple non-async programs compiling) before tackling full async support.
