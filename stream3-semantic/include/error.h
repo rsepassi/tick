@@ -9,6 +9,9 @@
 // Error Reporting Interface
 // Purpose: Consistent error handling across all phases
 
+// Forward declare Arena
+typedef struct Arena Arena;
+
 typedef enum {
     ERROR_LEXICAL,
     ERROR_SYNTAX,
@@ -31,13 +34,11 @@ typedef struct CompileError {
 } CompileError;
 
 typedef struct ErrorList {
+    Arena* arena;
     CompileError* errors;
     size_t count;
     size_t capacity;
 } ErrorList;
-
-// Forward declare Arena
-typedef struct Arena Arena;
 
 // Initialize with caller-provided memory
 void error_list_init(ErrorList* list, Arena* arena);

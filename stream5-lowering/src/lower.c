@@ -163,8 +163,18 @@ static IrValue* lower_literal_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_LITERAL_EXPR);
     IrValue* value = ir_alloc_value(IR_VALUE_CONSTANT, expr->type, ctx->arena);
 
-    // TODO: Extract literal value from AST
-    // This is a placeholder - actual implementation depends on AST structure
+    // Extract literal value from AST
+    switch (expr->data.literal_expr.literal_kind) {
+        case LITERAL_INT:
+            value->data.constant.data.int_val = expr->data.literal_expr.value.int_value;
+            break;
+        case LITERAL_STRING:
+            value->data.constant.data.str_val = expr->data.literal_expr.value.string.str_value;
+            break;
+        case LITERAL_BOOL:
+            value->data.constant.data.bool_val = expr->data.literal_expr.value.bool_value;
+            break;
+    }
 
     return value;
 }
@@ -172,18 +182,45 @@ static IrValue* lower_literal_expr(LowerContext* ctx, AstNode* expr) {
 static IrValue* lower_identifier_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_IDENTIFIER_EXPR);
 
-    // TODO: Look up variable in scope and create appropriate value
-    // For now, create a temp
+    // Look up variable name from AST
+    const char* name = expr->data.identifier_expr.name;
+
+    // For now, create a temp with the identifier name
     IrValue* value = ir_function_new_temp(ctx->current_function, expr->type, ctx->arena);
+    value->data.temp.name = name;
     return value;
+}
+
+static IrBinaryOp map_binary_op(BinaryOp ast_op) {
+    switch (ast_op) {
+        case BINOP_ADD: return IR_OP_ADD;
+        case BINOP_SUB: return IR_OP_SUB;
+        case BINOP_MUL: return IR_OP_MUL;
+        case BINOP_DIV: return IR_OP_DIV;
+        case BINOP_MOD: return IR_OP_MOD;
+        case BINOP_AND: return IR_OP_AND;
+        case BINOP_OR: return IR_OP_OR;
+        case BINOP_XOR: return IR_OP_XOR;
+        case BINOP_LSHIFT: return IR_OP_SHL;
+        case BINOP_RSHIFT: return IR_OP_SHR;
+        case BINOP_LOGICAL_AND: return IR_OP_LOGICAL_AND;
+        case BINOP_LOGICAL_OR: return IR_OP_LOGICAL_OR;
+        case BINOP_LT: return IR_OP_LT;
+        case BINOP_GT: return IR_OP_GT;
+        case BINOP_LT_EQ: return IR_OP_LE;
+        case BINOP_GT_EQ: return IR_OP_GE;
+        case BINOP_EQ_EQ: return IR_OP_EQ;
+        case BINOP_BANG_EQ: return IR_OP_NE;
+        default: return IR_OP_ADD;
+    }
 }
 
 static IrValue* lower_binary_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_BINARY_EXPR);
 
     // Lower operands
-    IrValue* left = lower_expr(ctx, NULL);  // TODO: Get left from expr
-    IrValue* right = lower_expr(ctx, NULL); // TODO: Get right from expr
+    IrValue* left = lower_expr(ctx, expr->data.binary_expr.left);
+    IrValue* right = lower_expr(ctx, expr->data.binary_expr.right);
 
     // Create destination temp
     IrValue* dest = ir_function_new_temp(ctx->current_function, expr->type, ctx->arena);
@@ -195,19 +232,29 @@ static IrValue* lower_binary_expr(LowerContext* ctx, AstNode* expr) {
     instr->data.binary_op.dest = dest;
     instr->data.binary_op.left = left;
     instr->data.binary_op.right = right;
-    // TODO: Map AST operator to IR operator
-    instr->data.binary_op.op = IR_OP_ADD;
+    instr->data.binary_op.op = map_binary_op(expr->data.binary_expr.op);
 
     ir_block_add_instruction(ctx->current_block, instr, ctx->arena);
 
     return dest;
 }
 
+static IrUnaryOp map_unary_op(UnaryOp ast_op) {
+    switch (ast_op) {
+        case UNOP_NEG: return IR_OP_NEG;
+        case UNOP_NOT: return IR_OP_LOGICAL_NOT;
+        case UNOP_BIT_NOT: return IR_OP_NOT;
+        case UNOP_DEREF: return IR_OP_DEREF;
+        case UNOP_ADDR: return IR_OP_ADDR_OF;
+        default: return IR_OP_NEG;
+    }
+}
+
 static IrValue* lower_unary_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_UNARY_EXPR);
 
     // Lower operand
-    IrValue* operand = lower_expr(ctx, NULL); // TODO: Get operand from expr
+    IrValue* operand = lower_expr(ctx, expr->data.unary_expr.operand);
 
     // Create destination temp
     IrValue* dest = ir_function_new_temp(ctx->current_function, expr->type, ctx->arena);
@@ -218,8 +265,7 @@ static IrValue* lower_unary_expr(LowerContext* ctx, AstNode* expr) {
     instr->loc = expr->loc;
     instr->data.unary_op.dest = dest;
     instr->data.unary_op.operand = operand;
-    // TODO: Map AST operator to IR operator
-    instr->data.unary_op.op = IR_OP_NEG;
+    instr->data.unary_op.op = map_unary_op(expr->data.unary_expr.op);
 
     ir_block_add_instruction(ctx->current_block, instr, ctx->arena);
 
@@ -230,12 +276,17 @@ static IrValue* lower_call_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_CALL_EXPR);
 
     // Lower function expression
-    IrValue* func = lower_expr(ctx, NULL); // TODO: Get func from expr
+    IrValue* func = lower_expr(ctx, expr->data.call_expr.callee);
 
     // Lower arguments
-    // TODO: Get arg count from expr
-    size_t arg_count = 0;
+    size_t arg_count = expr->data.call_expr.arg_count;
     IrValue** args = NULL;
+    if (arg_count > 0) {
+        args = arena_alloc(ctx->arena, sizeof(IrValue*) * arg_count, 8);
+        for (size_t i = 0; i < arg_count; i++) {
+            args[i] = lower_expr(ctx, expr->data.call_expr.args[i]);
+        }
+    }
 
     // Create destination temp (NULL for void)
     IrValue* dest = NULL;
@@ -261,11 +312,17 @@ static IrValue* lower_async_call_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_ASYNC_CALL_EXPR);
 
     // Lower function expression
-    IrValue* func = lower_expr(ctx, NULL); // TODO: Get func from expr
+    IrValue* func = lower_expr(ctx, expr->data.async_call_expr.callee);
 
     // Lower arguments
-    size_t arg_count = 0;
+    size_t arg_count = expr->data.async_call_expr.arg_count;
     IrValue** args = NULL;
+    if (arg_count > 0) {
+        args = arena_alloc(ctx->arena, sizeof(IrValue*) * arg_count, 8);
+        for (size_t i = 0; i < arg_count; i++) {
+            args[i] = lower_expr(ctx, expr->data.async_call_expr.args[i]);
+        }
+    }
 
     // Create destination temp
     IrValue* dest = NULL;
@@ -291,7 +348,7 @@ static IrValue* lower_field_access_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_FIELD_ACCESS_EXPR);
 
     // Lower base expression
-    IrValue* base = lower_expr(ctx, NULL); // TODO: Get base from expr
+    IrValue* base = lower_expr(ctx, expr->data.field_access_expr.object);
 
     // Create destination temp
     IrValue* dest = ir_function_new_temp(ctx->current_function, expr->type, ctx->arena);
@@ -302,9 +359,8 @@ static IrValue* lower_field_access_expr(LowerContext* ctx, AstNode* expr) {
     instr->loc = expr->loc;
     instr->data.get_field.dest = dest;
     instr->data.get_field.base = base;
-    // TODO: Get field index and name from expr
-    instr->data.get_field.field_index = 0;
-    instr->data.get_field.field_name = "field";
+    instr->data.get_field.field_index = 0; // TODO: Look up field index from type
+    instr->data.get_field.field_name = expr->data.field_access_expr.field_name;
 
     ir_block_add_instruction(ctx->current_block, instr, ctx->arena);
 
@@ -315,8 +371,8 @@ static IrValue* lower_index_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_INDEX_EXPR);
 
     // Lower base and index
-    IrValue* base = lower_expr(ctx, NULL);  // TODO: Get base from expr
-    IrValue* index = lower_expr(ctx, NULL); // TODO: Get index from expr
+    IrValue* base = lower_expr(ctx, expr->data.index_expr.array);
+    IrValue* index = lower_expr(ctx, expr->data.index_expr.index);
 
     // Create destination temp
     IrValue* dest = ir_function_new_temp(ctx->current_function, expr->type, ctx->arena);
@@ -338,7 +394,7 @@ static IrValue* lower_cast_expr(LowerContext* ctx, AstNode* expr) {
     assert(expr->kind == AST_CAST_EXPR);
 
     // Lower value to cast
-    IrValue* value = lower_expr(ctx, NULL); // TODO: Get value from expr
+    IrValue* value = lower_expr(ctx, expr->data.cast_expr.expr);
 
     // Create destination temp
     IrValue* dest = ir_function_new_temp(ctx->current_function, expr->type, ctx->arena);
@@ -392,12 +448,11 @@ static void lower_let_stmt(LowerContext* ctx, AstNode* stmt) {
     assert(stmt->kind == AST_LET_STMT);
 
     // Lower initializer expression
-    IrValue* init_value = lower_expr(ctx, NULL); // TODO: Get init expr from stmt
+    IrValue* init_value = lower_expr(ctx, stmt->data.let_decl.init);
 
     // Allocate local variable
     IrInstruction* alloca_instr = ir_alloc_instruction(IR_ALLOCA, ctx->arena);
     alloca_instr->loc = stmt->loc;
-    // TODO: Get var type from stmt
     alloca_instr->data.alloca.dest = ir_function_new_temp(ctx->current_function,
         stmt->type, ctx->arena);
     alloca_instr->data.alloca.alloc_type = stmt->type;
@@ -429,7 +484,7 @@ static void lower_return_stmt(LowerContext* ctx, AstNode* stmt) {
     }
 
     // Lower return value
-    IrValue* ret_value = lower_expr(ctx, NULL); // TODO: Get return expr from stmt
+    IrValue* ret_value = lower_expr(ctx, stmt->data.return_stmt.value);
 
     // Create return instruction
     IrInstruction* ret_instr = ir_alloc_instruction(IR_RETURN, ctx->arena);
@@ -443,12 +498,13 @@ static void lower_if_stmt(LowerContext* ctx, AstNode* stmt) {
     assert(stmt->kind == AST_IF_STMT);
 
     // Lower condition
-    IrValue* cond = lower_expr(ctx, NULL); // TODO: Get condition from stmt
+    IrValue* cond = lower_expr(ctx, stmt->data.if_stmt.condition);
 
     // Create blocks
     IrBasicBlock* then_block = ir_function_new_block(ctx->current_function,
         "if.then", ctx->arena);
-    IrBasicBlock* else_block = NULL; // TODO: Check if else exists
+    IrBasicBlock* else_block = stmt->data.if_stmt.else_block ?
+        ir_function_new_block(ctx->current_function, "if.else", ctx->arena) : NULL;
     IrBasicBlock* merge_block = ir_function_new_block(ctx->current_function,
         "if.merge", ctx->arena);
 
@@ -471,7 +527,7 @@ static void lower_if_stmt(LowerContext* ctx, AstNode* stmt) {
     // Lower then block
     IrBasicBlock* saved_block = ctx->current_block;
     ctx->current_block = then_block;
-    // TODO: Lower then body
+    lower_stmt(ctx, stmt->data.if_stmt.then_block);
 
     // Jump to merge
     IrInstruction* then_jump = ir_alloc_instruction(IR_JUMP, ctx->arena);
@@ -484,7 +540,7 @@ static void lower_if_stmt(LowerContext* ctx, AstNode* stmt) {
     if (else_block) {
         ctx->current_block = else_block;
         ir_function_add_block(ctx->current_function, else_block, ctx->arena);
-        // TODO: Lower else body
+        lower_stmt(ctx, stmt->data.if_stmt.else_block);
 
         // Jump to merge
         IrInstruction* else_jump = ir_alloc_instruction(IR_JUMP, ctx->arena);
@@ -589,7 +645,8 @@ static void lower_defer_stmt(LowerContext* ctx, AstNode* stmt) {
     IrDeferCleanup* cleanup = arena_alloc(ctx->arena, sizeof(IrDeferCleanup), 8);
     cleanup->is_errdefer = false;
 
-    // TODO: Lower defer body and store instructions
+    // Lower defer body and store instructions
+    // TODO: Create a temporary block to collect defer instructions
     cleanup->instructions = NULL;
     cleanup->instruction_count = 0;
 
@@ -656,7 +713,7 @@ static void lower_expr_stmt(LowerContext* ctx, AstNode* stmt) {
     assert(stmt->kind == AST_EXPR_STMT);
 
     // Just lower the expression (side effects matter)
-    lower_expr(ctx, NULL); // TODO: Get expr from stmt
+    lower_expr(ctx, stmt->data.expr_stmt.expr);
 }
 
 static void lower_stmt(LowerContext* ctx, AstNode* stmt) {
@@ -702,7 +759,10 @@ static void lower_stmt(LowerContext* ctx, AstNode* stmt) {
 static IrBasicBlock* lower_block_stmt(LowerContext* ctx, AstNode* block) {
     assert(block->kind == AST_BLOCK_STMT);
 
-    // TODO: Iterate through statements in block and lower each
+    // Iterate through statements in block and lower each
+    for (size_t i = 0; i < block->data.block_stmt.stmt_count; i++) {
+        lower_stmt(ctx, block->data.block_stmt.stmts[i]);
+    }
 
     return ctx->current_block;
 }
@@ -714,11 +774,21 @@ static IrBasicBlock* lower_block_stmt(LowerContext* ctx, AstNode* block) {
 IrFunction* ir_lower_function(AstNode* func_node, CoroMetadata* coro_meta, Arena* arena) {
     assert(func_node->kind == AST_FUNCTION_DECL);
 
-    // TODO: Extract function info from AST
-    const char* name = "function";
-    Type* return_type = NULL;
+    // Extract function info from AST
+    const char* name = func_node->data.function_decl.name;
+    Type* return_type = func_node->type; // Function type already resolved
+
+    // Convert AST params to IR params
+    size_t param_count = func_node->data.function_decl.param_count;
     IrParam* params = NULL;
-    size_t param_count = 0;
+    if (param_count > 0) {
+        params = arena_alloc(arena, sizeof(IrParam) * param_count, 8);
+        for (size_t i = 0; i < param_count; i++) {
+            params[i].name = func_node->data.function_decl.params[i].name;
+            params[i].type = func_node->data.function_decl.params[i].type->type;
+            params[i].index = i;
+        }
+    }
 
     // Create IR function
     IrFunction* func = ir_function_create(name, return_type, params, param_count, arena);
@@ -743,8 +813,9 @@ IrFunction* ir_lower_function(AstNode* func_node, CoroMetadata* coro_meta, Arena
     };
 
     // Lower function body
-    // TODO: Get body from func_node
-    // lower_stmt(&ctx, body);
+    if (func_node->data.function_decl.body) {
+        lower_stmt(&ctx, func_node->data.function_decl.body);
+    }
 
     // If this is a coroutine, transform to state machine
     if (func->is_state_machine) {
@@ -764,12 +835,30 @@ IrModule* ir_lower_ast(AstNode* ast, Arena* arena) {
     IrModule* module = arena_alloc(arena, sizeof(IrModule), 8);
     memset(module, 0, sizeof(IrModule));
 
-    // TODO: Extract module name from AST
-    module->name = "module";
+    // Extract module name from AST
+    module->name = ast->data.module.name;
 
-    // TODO: Count and lower all functions
-    module->function_count = 0;
-    module->functions = NULL;
+    // Count functions
+    size_t func_count = 0;
+    for (size_t i = 0; i < ast->data.module.decl_count; i++) {
+        if (ast->data.module.decls[i]->kind == AST_FUNCTION_DECL) {
+            func_count++;
+        }
+    }
+
+    // Allocate function array
+    if (func_count > 0) {
+        module->functions = arena_alloc(arena, sizeof(IrFunction*) * func_count, 8);
+        module->function_count = 0;
+
+        // Lower all functions
+        for (size_t i = 0; i < ast->data.module.decl_count; i++) {
+            if (ast->data.module.decls[i]->kind == AST_FUNCTION_DECL) {
+                module->functions[module->function_count++] =
+                    ir_lower_function(ast->data.module.decls[i], NULL, arena);
+            }
+        }
+    }
 
     return module;
 }

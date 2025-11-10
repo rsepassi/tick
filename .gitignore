@@ -1,0 +1,23 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+build/
+test_*
+!test_*.c
+
+# Compiler generated files
+*.out
+*.exe
+
+# Editor artifacts
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db

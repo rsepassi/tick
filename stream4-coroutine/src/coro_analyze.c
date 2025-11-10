@@ -265,7 +265,7 @@ void cfg_process_expr(CFGBuilder* builder, AstNode* expr) {
     switch (expr->kind) {
         case AST_IDENTIFIER_EXPR: {
             // Variable use
-            const char* name = expr->data.identifier.name;
+            const char* name = expr->data.identifier_expr.name;
             block_add_var_ref(builder->current_block, name, expr->type,
                             false, expr, builder->arena);
             break;
@@ -295,7 +295,7 @@ void cfg_process_expr(CFGBuilder* builder, AstNode* expr) {
             break;
 
         case AST_FIELD_ACCESS_EXPR:
-            cfg_process_expr(builder, expr->data.field_access.object);
+            cfg_process_expr(builder, expr->data.field_access_expr.object);
             break;
 
         case AST_INDEX_EXPR:
@@ -323,9 +323,9 @@ void cfg_process_stmt(CFGBuilder* builder, AstNode* stmt) {
         case AST_LET_STMT:
         case AST_VAR_STMT: {
             const char* name = stmt->kind == AST_LET_STMT ?
-                             stmt->data.let_stmt.name : stmt->data.var_stmt.name;
+                             stmt->data.let_decl.name : stmt->data.var_decl.name;
             AstNode* init = stmt->kind == AST_LET_STMT ?
-                          stmt->data.let_stmt.init : stmt->data.var_stmt.init;
+                          stmt->data.let_decl.init : stmt->data.var_decl.init;
 
             // Process initializer first (uses)
             if (init) {
@@ -345,8 +345,8 @@ void cfg_process_stmt(CFGBuilder* builder, AstNode* stmt) {
             break;
 
         case AST_RETURN_STMT:
-            if (stmt->data.return_stmt.expr) {
-                cfg_process_expr(builder, stmt->data.return_stmt.expr);
+            if (stmt->data.return_stmt.value) {
+                cfg_process_expr(builder, stmt->data.return_stmt.value);
             }
             block_add_stmt(builder->current_block, stmt, builder->arena);
             cfg_add_edge(builder->current_block, builder->cfg->exit, builder->arena);
@@ -385,25 +385,25 @@ void cfg_process_stmt(CFGBuilder* builder, AstNode* stmt) {
         }
 
         case AST_FOR_STMT: {
-            BasicBlock* init_block = builder->current_block;
+            BasicBlock* header_block = builder->current_block;
             BasicBlock* cond_block = cfg_builder_new_block(builder);
             BasicBlock* body_block = cfg_builder_new_block(builder);
-            BasicBlock* update_block = cfg_builder_new_block(builder);
+            BasicBlock* continue_block = cfg_builder_new_block(builder);
             BasicBlock* exit_block = cfg_builder_new_block(builder);
 
             // Save loop targets
             BasicBlock* saved_exit = builder->loop_exit;
             BasicBlock* saved_continue = builder->loop_continue;
             builder->loop_exit = exit_block;
-            builder->loop_continue = update_block;
+            builder->loop_continue = continue_block;
 
-            // Process init
-            if (stmt->data.for_stmt.init) {
-                cfg_process_stmt(builder, stmt->data.for_stmt.init);
+            // Process iterable/range if present
+            if (stmt->data.for_stmt.iterable) {
+                cfg_process_expr(builder, stmt->data.for_stmt.iterable);
             }
-            cfg_add_edge(init_block, cond_block, builder->arena);
+            cfg_add_edge(header_block, cond_block, builder->arena);
 
-            // Process condition
+            // Process condition (or implicit true for infinite loop)
             cfg_builder_set_current(builder, cond_block);
             if (stmt->data.for_stmt.condition) {
                 cfg_process_expr(builder, stmt->data.for_stmt.condition);
@@ -415,14 +415,14 @@ void cfg_process_stmt(CFGBuilder* builder, AstNode* stmt) {
             // Process body
             cfg_builder_set_current(builder, body_block);
             cfg_process_stmt(builder, stmt->data.for_stmt.body);
-            cfg_add_edge(builder->current_block, update_block, builder->arena);
+            cfg_add_edge(builder->current_block, continue_block, builder->arena);
 
-            // Process update
-            cfg_builder_set_current(builder, update_block);
-            if (stmt->data.for_stmt.update) {
-                cfg_process_stmt(builder, stmt->data.for_stmt.update);
+            // Process continue expression (post-iteration update)
+            cfg_builder_set_current(builder, continue_block);
+            if (stmt->data.for_stmt.continue_expr) {
+                cfg_process_expr(builder, stmt->data.for_stmt.continue_expr);
             }
-            cfg_add_edge(update_block, cond_block, builder->arena);
+            cfg_add_edge(continue_block, cond_block, builder->arena);
 
             // Restore loop targets
             builder->loop_exit = saved_exit;
@@ -445,8 +445,8 @@ void cfg_process_stmt(CFGBuilder* builder, AstNode* stmt) {
         }
 
         case AST_BLOCK_STMT: {
-            for (size_t i = 0; i < stmt->data.block.stmt_count; i++) {
-                cfg_process_stmt(builder, stmt->data.block.stmts[i]);
+            for (size_t i = 0; i < stmt->data.block_stmt.stmt_count; i++) {
+                cfg_process_stmt(builder, stmt->data.block_stmt.stmts[i]);
             }
             break;
         }
@@ -480,8 +480,8 @@ CFG* coro_build_cfg(AstNode* function, Scope* scope, Arena* arena, ErrorList* er
     cfg_builder_set_current(&builder, builder.cfg->entry);
 
     // Process function body
-    if (function->data.function.body) {
-        cfg_process_stmt(&builder, function->data.function.body);
+    if (function->data.function_decl.body) {
+        cfg_process_stmt(&builder, function->data.function_decl.body);
     }
 
     // Connect to exit if no explicit return
@@ -710,7 +710,7 @@ void coro_compute_frame_layout(CoroMetadata* meta, Arena* arena) {
 // ============================================================================
 
 void coro_metadata_init(CoroMetadata* meta, AstNode* function, Arena* arena) {
-    meta->function_name = function->data.function.name;
+    meta->function_name = function->data.function_decl.name;
     meta->function_node = function;
     meta->cfg = NULL;
     meta->suspend_points = NULL;

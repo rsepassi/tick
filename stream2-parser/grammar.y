@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "parser.h"
-#include "ast.h"
-#include "lexer.h"
-#include "arena.h"
+#include "../interfaces2/parser.h"
+#include "../interfaces2/ast.h"
+#include "../interfaces2/lexer.h"
+#include "../interfaces2/arena.h"
 }
 
 %token_prefix TOKEN_

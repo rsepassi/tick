@@ -1,6 +1,6 @@
 #include "test_harness.h"
-#include "../error.h"
-#include "../arena.h"
+#include "error.h"
+#include "arena.h"
 #include <string.h>
 
 // Test basic error addition
