@@ -1,0 +1,57 @@
+# 02_types.tick - Primitive types, structs, enums, and unions
+
+# Struct definition
+let Point = struct {
+    x: i32,
+    y: i32
+};
+
+# Packed struct for memory-mapped I/O
+let Register = struct packed {
+    value: u32,
+    flags: u8,
+    reserved: u8
+};
+
+# Enum with explicit size
+let Status = enum(u8) {
+    OK = 0,
+    ERROR = 1,
+    PENDING = 2
+};
+
+# Tagged union
+let Value = union {
+    integer: i64,
+    unsigned: u64,
+    boolean: bool
+};
+
+# Function using these types
+let create_point = fn(x: i32, y: i32) -> Point {
+    let p = Point { x: x, y: y };
+    return p;
+};
+
+let distance_squared = fn(p: Point) -> i32 {
+    return p.x * p.x + p.y * p.y;
+};
+
+pub let main = fn() -> i32 {
+    # Create a point
+    let p = create_point(3, 4);
+    let dist_sq = distance_squared(p);
+
+    # Use enum
+    let status = Status.OK;
+
+    # Use union
+    let val = Value { integer: 42 };
+
+    # Arrays
+    var buffer: [10]u8;
+    buffer[0] = 1;
+    buffer[1] = 2;
+
+    return 0;
+};

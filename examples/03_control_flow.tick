@@ -1,0 +1,99 @@
+# 03_control_flow.tick - If statements, loops, and switch
+
+let abs = fn(x: i32) -> i32 {
+    if x < 0 {
+        return -x;
+    } else {
+        return x;
+    }
+};
+
+let sum_range = fn(n: i32) -> i32 {
+    var sum = 0;
+
+    # Range iteration (exclusive end)
+    for i in 0..n {
+        sum = sum + i;
+    }
+
+    return sum;
+};
+
+let sum_array = fn(arr: []i32) -> i32 {
+    var total = 0;
+    var i = 0;
+
+    # While-style loop
+    for i < arr.len {
+        total = total + arr[i];
+        i = i + 1;
+    }
+
+    return total;
+};
+
+let Status = enum(u8) {
+    IDLE = 0,
+    RUNNING = 1,
+    STOPPED = 2,
+    ERROR = 3
+};
+
+let handle_status = fn(status: Status) -> i32 {
+    switch status {
+        case Status.IDLE:
+            return 0;
+        case Status.RUNNING:
+            return 1;
+        case Status.STOPPED:
+            return 2;
+        default:
+            return -1;
+    }
+};
+
+# Computed goto pattern for VM dispatch
+let State = enum(u8) {
+    INIT = 0,
+    PROCESS = 1,
+    DONE = 2
+};
+
+let vm_dispatch = fn() -> i32 {
+    var state = State.INIT;
+    var result = 0;
+
+    while switch state {
+        case State.INIT:
+            result = 1;
+            state = State.PROCESS;
+            continue switch state;
+        case State.PROCESS:
+            result = result + 10;
+            state = State.DONE;
+            continue switch state;
+        case State.DONE:
+            break;
+    }
+
+    return result;
+};
+
+pub let main = fn() -> i32 {
+    let x = abs(-42);
+    let sum = sum_range(10);
+
+    var arr: [5]i32;
+    arr[0] = 1;
+    arr[1] = 2;
+    arr[2] = 3;
+    arr[3] = 4;
+    arr[4] = 5;
+
+    let status = Status.RUNNING;
+    let code = handle_status(status);
+
+    let vm_result = vm_dispatch();
+
+    return 0;
+};
