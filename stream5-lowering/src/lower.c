@@ -1,10 +1,10 @@
-#include "../ir.h"
-#include "../ast.h"
-#include "../type.h"
-#include "../symbol.h"
-#include "../coro_metadata.h"
-#include "../arena.h"
-#include "../error.h"
+#include "ir.h"
+#include "ast.h"
+#include "type.h"
+#include "symbol.h"
+#include "coro_metadata.h"
+#include "arena.h"
+#include "error.h"
 #include <string.h>
 #include <assert.h>
 

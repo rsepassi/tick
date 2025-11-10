@@ -1,7 +1,7 @@
-#include "../include/lexer.h"
-#include "../include/string_pool.h"
-#include "../include/error.h"
-#include "../include/arena.h"
+#include "lexer.h"
+#include "string_pool.h"
+#include "error.h"
+#include "arena.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>

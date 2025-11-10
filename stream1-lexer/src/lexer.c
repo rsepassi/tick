@@ -1,6 +1,6 @@
-#include "../include/lexer.h"
-#include "../include/string_pool.h"
-#include "../include/error.h"
+#include "lexer.h"
+#include "string_pool.h"
+#include "error.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>

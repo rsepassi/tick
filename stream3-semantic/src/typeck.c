@@ -1,11 +1,11 @@
 // Type Checker: Type checking and inference
 // Purpose: Assign types to all AST nodes and verify type correctness
 
-#include "../include/type.h"
-#include "../include/ast.h"
-#include "../include/symbol.h"
-#include "../include/error.h"
-#include "../include/arena.h"
+#include "type.h"
+#include "ast.h"
+#include "symbol.h"
+#include "error.h"
+#include "arena.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>

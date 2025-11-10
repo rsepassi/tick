@@ -1,5 +1,5 @@
-#include "../include/string_pool.h"
-#include "../include/arena.h"
+#include "string_pool.h"
+#include "arena.h"
 #include <string.h>
 
 void string_pool_init(StringPool* pool, Arena* arena) {

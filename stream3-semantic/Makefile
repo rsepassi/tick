@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -I include
+CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -I../interfaces2
 DEBUG_FLAGS = -g -O0
 RELEASE_FLAGS = -O2 -DNDEBUG
 

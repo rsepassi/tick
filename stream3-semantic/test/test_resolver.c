@@ -1,11 +1,11 @@
 // Test suite for resolver (name resolution and scope building)
 
-#include "../include/symbol.h"
-#include "../include/ast.h"
-#include "../include/type.h"
-#include "../include/error.h"
-#include "../include/arena.h"
-#include "../include/string_pool.h"
+#include "symbol.h"
+#include "ast.h"
+#include "type.h"
+#include "error.h"
+#include "arena.h"
+#include "string_pool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

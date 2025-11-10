@@ -9,14 +9,9 @@ LDFLAGS =
 ROOT = ..
 
 # Include paths for all interfaces
-INCLUDES = -I$(ROOT)/interfaces \
-           -I$(ROOT)/stream1-lexer/include \
-           -I$(ROOT)/stream2-parser \
-           -I$(ROOT)/stream3-semantic/include \
-           -I$(ROOT)/stream4-coroutine \
-           -I$(ROOT)/stream5-lowering \
+INCLUDES = -I$(ROOT)/interfaces2 \
            -I$(ROOT)/stream6-codegen/include \
-           -I$(ROOT)/stream7-infrastructure
+           -I$(ROOT)/stream4-coroutine
 
 # Source files from all streams
 LEXER_SRCS = $(ROOT)/stream1-lexer/src/lexer.c \

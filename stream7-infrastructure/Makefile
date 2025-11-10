@@ -1,7 +1,7 @@
 # Makefile for Stream 7: Core Infrastructure
 
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -g -I./include
+CFLAGS = -Wall -Wextra -std=c11 -g -I../interfaces2 -I./include
 LDFLAGS =
 
 # Source files
