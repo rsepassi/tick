@@ -56,7 +56,7 @@ let ASYNC_OP_TIMER = 6;
 
 # Example: Async read with callback
 let on_read_complete = fn(op: *AsyncOp) {
-    let read_op = op as *AsyncRead;
+    let read_op = op.(*AsyncRead);
     if op.result > 0 {
         # Successfully read op.result bytes
         # Process the data in read_op.buffer
@@ -86,7 +86,7 @@ let async_read_file = fn(fd: i32) {
 
 # Example: Async write with callback
 let on_write_complete = fn(op: *AsyncOp) {
-    let write_op = op as *AsyncWrite;
+    let write_op = op.(*AsyncWrite);
     if op.result > 0 {
         # Successfully wrote op.result bytes
     } else {
@@ -112,7 +112,7 @@ let async_write_file = fn(fd: i32, data: []u8) {
 # Example: Timer with callback
 let on_timer_expired = fn(op: *AsyncOp) {
     # Timer expired - execute delayed action
-    let timer_op = op as *AsyncTimer;
+    let timer_op = op.(*AsyncTimer);
     # Perform scheduled action
 };
 
@@ -150,7 +150,7 @@ let read_file_coro = fn(fd: i32) -> IOError!usize {
         return IOError.BAD_FD;
     }
 
-    return read_op.base.result as usize;
+    return read_op.base.result.(usize);
 };
 
 # Example: Multiple async operations
@@ -178,7 +178,7 @@ let copy_file = fn(src_fd: i32, dst_fd: i32) -> IOError!usize {
             return IOError.BAD_FD;
         }
 
-        let bytes_read = read_op.base.result as usize;
+        let bytes_read = read_op.base.result.(usize);
 
         # Write to destination
         var write_op: AsyncWrite;

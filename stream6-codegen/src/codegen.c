@@ -169,15 +169,22 @@ static void emit_value(IrValue* value, CodegenContext* ctx) {
 
         case IR_VALUE_CONSTANT:
             // Emit constant based on type
-            if (value->type && value->type->kind == TYPE_BOOL) {
+            if (!value->type) {
+                // No type information - default to 0
+                fprintf(ctx->source_out, "0");
+            } else if (value->type->kind == TYPE_BOOL) {
                 fprintf(ctx->source_out, "%s", value->data.constant.data.bool_val ? "true" : "false");
-            } else if (value->type && (value->type->kind >= TYPE_I8 && value->type->kind <= TYPE_ISIZE)) {
+            } else if (value->type->kind >= TYPE_I8 && value->type->kind <= TYPE_ISIZE) {
                 fprintf(ctx->source_out, "%lld", (long long)value->data.constant.data.int_val);
-            } else if (value->type && (value->type->kind >= TYPE_U8 && value->type->kind <= TYPE_USIZE)) {
+            } else if (value->type->kind >= TYPE_U8 && value->type->kind <= TYPE_USIZE) {
                 fprintf(ctx->source_out, "%llu", (unsigned long long)value->data.constant.data.uint_val);
             } else {
-                fprintf(ctx->source_out, "%s",
-                       value->data.constant.data.str_val ? value->data.constant.data.str_val : "0");
+                // For other types (string, etc.), check if str_val is valid
+                if (value->data.constant.data.str_val) {
+                    fprintf(ctx->source_out, "%s", value->data.constant.data.str_val);
+                } else {
+                    fprintf(ctx->source_out, "0");
+                }
             }
             break;
 

@@ -1,0 +1,12 @@
+# Test error return type
+let Error = enum(u8) {
+    Failed = 0
+};
+
+let test = fn() -> Error!i32 {
+    return 42;
+};
+
+pub let main = fn() -> i32 {
+    return 0;
+};

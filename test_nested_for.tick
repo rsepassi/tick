@@ -1,0 +1,50 @@
+# Test nested for loops with error return type
+
+let TestError = enum(i32) {
+    ERROR1 = 1,
+    ERROR2 = 2
+};
+
+# Simple nested for loops (no error return)
+pub let test_simple = fn() -> i32 {
+    for {
+        var total: i32 = 0;
+        for total < 10 {
+            total = total + 1;
+        }
+        break;
+    }
+    return 0;
+};
+
+# Nested for loops with error return type
+pub let test_with_error = fn() -> TestError!void {
+    for {
+        var total: i32 = 0;
+        for total < 10 {
+            total = total + 1;
+        }
+        break;
+    }
+    return;
+};
+
+# Nested for loops with error return + defer
+pub let test_with_defer = fn() -> TestError!void {
+    defer {
+        var x: i32 = 0;
+    }
+
+    for {
+        var total: i32 = 0;
+        for total < 10 {
+            total = total + 1;
+        }
+        break;
+    }
+    return;
+};
+
+pub let main = fn() -> i32 {
+    return 0;
+};

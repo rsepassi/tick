@@ -68,7 +68,7 @@ pub let main = fn() -> i32 {
         let result = divide_chain(100, 5, 2);
         # Use result
     } catch |err| {
-        switch err {
+        switch (err) {
             case MathError.DivideByZero:
                 # Handle divide by zero
                 return 1;
