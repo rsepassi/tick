@@ -130,7 +130,7 @@ typedef struct AstNodeList {
     size_t capacity;
 } AstNodeList;
 
-__attribute__((unused)) static AstNodeList* node_list_create(Parser* parser) {
+AstNodeList* node_list_create(Parser* parser) {
     AstNodeList* list = (AstNodeList*)arena_alloc(parser->ast_arena,
         sizeof(AstNodeList), _Alignof(AstNodeList));
     if (!list) return NULL;
@@ -143,7 +143,7 @@ __attribute__((unused)) static AstNodeList* node_list_create(Parser* parser) {
     return list;
 }
 
-__attribute__((unused)) static void node_list_append(Parser* parser, AstNodeList* list, AstNode* node) {
+void node_list_append(Parser* parser, AstNodeList* list, AstNode* node) {
     if (!list || !node) return;
 
     if (list->count >= list->capacity) {
@@ -167,7 +167,7 @@ typedef struct AstParamList {
     size_t capacity;
 } AstParamList;
 
-__attribute__((unused)) static AstParamList* param_list_create(Parser* parser) {
+AstParamList* param_list_create(Parser* parser) {
     AstParamList* list = (AstParamList*)arena_alloc(parser->ast_arena,
         sizeof(AstParamList), _Alignof(AstParamList));
     if (!list) return NULL;
@@ -180,7 +180,7 @@ __attribute__((unused)) static AstParamList* param_list_create(Parser* parser) {
     return list;
 }
 
-__attribute__((unused)) static void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc) {
+void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc) {
     if (!list) return;
 
     if (list->count >= list->capacity) {

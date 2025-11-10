@@ -10,6 +10,25 @@
 #include "../interfaces2/ast.h"
 #include "../interfaces2/lexer.h"
 #include "../interfaces2/arena.h"
+
+// Forward declare list types from parser.c
+typedef struct AstNodeList {
+    AstNode** nodes;
+    size_t count;
+    size_t capacity;
+} AstNodeList;
+
+typedef struct AstParamList {
+    AstParam* params;
+    size_t count;
+    size_t capacity;
+} AstParamList;
+
+// Forward declare helper functions from parser.c
+AstNodeList* node_list_create(Parser* parser);
+void node_list_append(Parser* parser, AstNodeList* list, AstNode* node);
+AstParamList* param_list_create(Parser* parser);
+void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc);
 }
 
 %token_prefix TOKEN_
@@ -40,11 +59,12 @@
 
 // Module
 module(M) ::= decl_list(D). {
-    M = ast_alloc(parser, AST_MODULE, ((AstNode*)D)->loc);
+    AstNodeList* list = (AstNodeList*)D;
+    M = ast_alloc(parser, AST_MODULE, list->count > 0 ? list->nodes[0]->loc : (SourceLocation){1, 1, ""});
     if (M) {
         M->data.module.name = "main";
-        M->data.module.decls = (AstNode**)D;
-        M->data.module.decl_count = 0; // Will be set by parser
+        M->data.module.decls = list->nodes;
+        M->data.module.decl_count = list->count;
     }
     parser->root = M;
 }
@@ -60,10 +80,10 @@ module(M) ::= . {
 }
 
 // Declaration list type
-%type decl_list { void* }
+%type decl_list { AstNodeList* }
+%type param_list { AstParamList* }
 %type stmt_list { void* }
 %type expr_list { void* }
-%type param_list { void* }
 %type field_list { void* }
 %type enum_value_list { void* }
 %type case_list { void* }
@@ -71,13 +91,13 @@ module(M) ::= . {
 %type struct_init_list { void* }
 
 decl_list(L) ::= decl(D). {
-    // Single declaration - will be collected in parser
-    L = D;
+    L = node_list_create(parser);
+    node_list_append(parser, L, D);
 }
 
 decl_list(L) ::= decl_list(Prev) decl(D). {
-    // Multiple declarations - will be collected in parser
-    L = D;
+    L = Prev;
+    node_list_append(parser, L, D);
 }
 
 // Declarations (all use let/var syntax)
@@ -89,7 +109,7 @@ decl(D) ::= var_decl(V). { D = V; }
 import_decl(I) ::= LET(T) IDENTIFIER(Name) EQ IMPORT STRING_LITERAL(Path) SEMICOLON. {
     I = ast_alloc(parser, AST_IMPORT_DECL, (SourceLocation){T.line, T.column, T.start});
     if (I) {
-        I->data.import_decl.name = Name.start;
+        I->data.import_decl.name = Name.literal.str_value;
         I->data.import_decl.path = Path.literal.str_value;
         I->data.import_decl.is_pub = false;
     }
@@ -98,7 +118,7 @@ import_decl(I) ::= LET(T) IDENTIFIER(Name) EQ IMPORT STRING_LITERAL(Path) SEMICO
 import_decl(I) ::= PUB LET(T) IDENTIFIER(Name) EQ IMPORT STRING_LITERAL(Path) SEMICOLON. {
     I = ast_alloc(parser, AST_IMPORT_DECL, (SourceLocation){T.line, T.column, T.start});
     if (I) {
-        I->data.import_decl.name = Name.start;
+        I->data.import_decl.name = Name.literal.str_value;
         I->data.import_decl.path = Path.literal.str_value;
         I->data.import_decl.is_pub = true;
     }
@@ -108,7 +128,7 @@ import_decl(I) ::= PUB LET(T) IDENTIFIER(Name) EQ IMPORT STRING_LITERAL(Path) SE
 let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ function_def(F) SEMICOLON. {
     D = F;
     if (D) {
-        D->data.function_decl.name = Name.start;
+        D->data.function_decl.name = Name.literal.str_value;
         D->data.function_decl.is_pub = false;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -117,7 +137,7 @@ let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ function_def(F) SEMICOLON. {
 let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ function_def(F) SEMICOLON. {
     D = F;
     if (D) {
-        D->data.function_decl.name = Name.start;
+        D->data.function_decl.name = Name.literal.str_value;
         D->data.function_decl.is_pub = true;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -126,7 +146,7 @@ let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ function_def(F) SEMICOLON. {
 let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ struct_def(S) SEMICOLON. {
     D = S;
     if (D) {
-        D->data.struct_decl.name = Name.start;
+        D->data.struct_decl.name = Name.literal.str_value;
         D->data.struct_decl.is_pub = false;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -135,7 +155,7 @@ let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ struct_def(S) SEMICOLON. {
 let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ struct_def(S) SEMICOLON. {
     D = S;
     if (D) {
-        D->data.struct_decl.name = Name.start;
+        D->data.struct_decl.name = Name.literal.str_value;
         D->data.struct_decl.is_pub = true;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -144,7 +164,7 @@ let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ struct_def(S) SEMICOLON. {
 let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ enum_def(E) SEMICOLON. {
     D = E;
     if (D) {
-        D->data.enum_decl.name = Name.start;
+        D->data.enum_decl.name = Name.literal.str_value;
         D->data.enum_decl.is_pub = false;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -153,7 +173,7 @@ let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ enum_def(E) SEMICOLON. {
 let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ enum_def(E) SEMICOLON. {
     D = E;
     if (D) {
-        D->data.enum_decl.name = Name.start;
+        D->data.enum_decl.name = Name.literal.str_value;
         D->data.enum_decl.is_pub = true;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -162,7 +182,7 @@ let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ enum_def(E) SEMICOLON. {
 let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ union_def(U) SEMICOLON. {
     D = U;
     if (D) {
-        D->data.union_decl.name = Name.start;
+        D->data.union_decl.name = Name.literal.str_value;
         D->data.union_decl.is_pub = false;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -171,7 +191,7 @@ let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ union_def(U) SEMICOLON. {
 let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ union_def(U) SEMICOLON. {
     D = U;
     if (D) {
-        D->data.union_decl.name = Name.start;
+        D->data.union_decl.name = Name.literal.str_value;
         D->data.union_decl.is_pub = true;
         D->loc = (SourceLocation){T.line, T.column, T.start};
     }
@@ -180,7 +200,7 @@ let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ union_def(U) SEMICOLON. {
 let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
     D = ast_alloc(parser, AST_LET_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.let_decl.name = Name.start;
+        D->data.let_decl.name = Name.literal.str_value;
         D->data.let_decl.type = NULL;
         D->data.let_decl.init = E;
         D->data.let_decl.is_pub = false;
@@ -190,7 +210,7 @@ let_decl(D) ::= LET(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
 let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
     D = ast_alloc(parser, AST_LET_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.let_decl.name = Name.start;
+        D->data.let_decl.name = Name.literal.str_value;
         D->data.let_decl.type = NULL;
         D->data.let_decl.init = E;
         D->data.let_decl.is_pub = true;
@@ -200,7 +220,7 @@ let_decl(D) ::= PUB LET(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
 let_decl(D) ::= LET(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
     D = ast_alloc(parser, AST_LET_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.let_decl.name = Name.start;
+        D->data.let_decl.name = Name.literal.str_value;
         D->data.let_decl.type = Ty;
         D->data.let_decl.init = E;
         D->data.let_decl.is_pub = false;
@@ -211,7 +231,7 @@ let_decl(D) ::= LET(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
 var_decl(D) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
     D = ast_alloc(parser, AST_VAR_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.var_decl.name = Name.start;
+        D->data.var_decl.name = Name.literal.str_value;
         D->data.var_decl.type = Ty;
         D->data.var_decl.init = NULL;
         D->data.var_decl.is_volatile = false;
@@ -222,7 +242,7 @@ var_decl(D) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
 var_decl(D) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
     D = ast_alloc(parser, AST_VAR_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.var_decl.name = Name.start;
+        D->data.var_decl.name = Name.literal.str_value;
         D->data.var_decl.type = Ty;
         D->data.var_decl.init = E;
         D->data.var_decl.is_volatile = false;
@@ -233,7 +253,7 @@ var_decl(D) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
 var_decl(D) ::= VAR(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
     D = ast_alloc(parser, AST_VAR_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.var_decl.name = Name.start;
+        D->data.var_decl.name = Name.literal.str_value;
         D->data.var_decl.type = NULL;
         D->data.var_decl.init = E;
         D->data.var_decl.is_volatile = false;
@@ -244,7 +264,7 @@ var_decl(D) ::= VAR(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
 var_decl(D) ::= VOLATILE VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
     D = ast_alloc(parser, AST_VAR_DECL, (SourceLocation){T.line, T.column, T.start});
     if (D) {
-        D->data.var_decl.name = Name.start;
+        D->data.var_decl.name = Name.literal.str_value;
         D->data.var_decl.type = Ty;
         D->data.var_decl.init = NULL;
         D->data.var_decl.is_volatile = true;
@@ -256,8 +276,9 @@ var_decl(D) ::= VOLATILE VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
 function_def(F) ::= FN(T) LPAREN param_list(P) RPAREN block(B). {
     F = ast_alloc(parser, AST_FUNCTION_DECL, (SourceLocation){T.line, T.column, T.start});
     if (F) {
-        F->data.function_decl.params = (AstParam*)P;
-        F->data.function_decl.param_count = 0; // Set by parser
+        AstParamList* plist = (AstParamList*)P;
+        F->data.function_decl.params = plist->params;
+        F->data.function_decl.param_count = plist->count;
         F->data.function_decl.return_type = NULL;
         F->data.function_decl.body = B;
     }
@@ -266,8 +287,9 @@ function_def(F) ::= FN(T) LPAREN param_list(P) RPAREN block(B). {
 function_def(F) ::= FN(T) LPAREN param_list(P) RPAREN ARROW type(Ret) block(B). {
     F = ast_alloc(parser, AST_FUNCTION_DECL, (SourceLocation){T.line, T.column, T.start});
     if (F) {
-        F->data.function_decl.params = (AstParam*)P;
-        F->data.function_decl.param_count = 0; // Set by parser
+        AstParamList* plist = (AstParamList*)P;
+        F->data.function_decl.params = plist->params;
+        F->data.function_decl.param_count = plist->count;
         F->data.function_decl.return_type = Ret;
         F->data.function_decl.body = B;
     }
@@ -294,12 +316,25 @@ function_def(F) ::= FN(T) LPAREN RPAREN ARROW type(Ret) block(B). {
 }
 
 // Parameter list
-param_list(L) ::= param(P). { L = P; }
-param_list(L) ::= param_list(Prev) COMMA param(P). { L = P; }
+%type param { void* }
+
+param_list(L) ::= param(P). {
+    L = param_list_create(parser);
+    param_list_append(parser, L, ((AstParam*)P)->name, ((AstParam*)P)->type, ((AstParam*)P)->loc);
+}
+
+param_list(L) ::= param_list(Prev) COMMA param(P). {
+    L = Prev;
+    param_list_append(parser, L, ((AstParam*)P)->name, ((AstParam*)P)->type, ((AstParam*)P)->loc);
+}
 
 param(P) ::= IDENTIFIER(Name) COLON type(T). {
-    P = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.start});
-    // Store as AstParam later
+    // Create a temporary param struct to pass name and type
+    AstParam* temp = (AstParam*)arena_alloc(parser->ast_arena, sizeof(AstParam), _Alignof(AstParam));
+    temp->name = Name.literal.str_value;
+    temp->type = T;
+    temp->loc = (SourceLocation){Name.line, Name.column, Name.start};
+    P = temp;
 }
 
 // Struct definition
@@ -335,7 +370,7 @@ field_list(L) ::= field(F). { L = F; }
 field_list(L) ::= field_list(Prev) COMMA field(F). { L = F; }
 
 field(F) ::= IDENTIFIER(Name) COLON type(T). {
-    F = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.start});
+    F = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
     // Store as AstField later
 }
 
@@ -353,12 +388,12 @@ enum_value_list(L) ::= enum_value(V). { L = V; }
 enum_value_list(L) ::= enum_value_list(Prev) COMMA enum_value(V). { L = V; }
 
 enum_value(V) ::= IDENTIFIER(Name). {
-    V = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.start});
+    V = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
     // Store as AstEnumValue later
 }
 
 enum_value(V) ::= IDENTIFIER(Name) EQ expr(E). {
-    V = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.start});
+    V = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
     // Store as AstEnumValue later with expression
 }
 
@@ -404,7 +439,7 @@ stmt(S) ::= expr_stmt(E). { S = E; }
 let_stmt(S) ::= LET(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
     S = ast_alloc(parser, AST_LET_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
-        S->data.let_decl.name = Name.start;
+        S->data.let_decl.name = Name.literal.str_value;
         S->data.let_decl.type = NULL;
         S->data.let_decl.init = E;
     }
@@ -413,7 +448,7 @@ let_stmt(S) ::= LET(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
 let_stmt(S) ::= LET(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
     S = ast_alloc(parser, AST_LET_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
-        S->data.let_decl.name = Name.start;
+        S->data.let_decl.name = Name.literal.str_value;
         S->data.let_decl.type = Ty;
         S->data.let_decl.init = E;
     }
@@ -423,7 +458,7 @@ let_stmt(S) ::= LET(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
 var_stmt(S) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
     S = ast_alloc(parser, AST_VAR_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
-        S->data.var_decl.name = Name.start;
+        S->data.var_decl.name = Name.literal.str_value;
         S->data.var_decl.type = Ty;
         S->data.var_decl.init = NULL;
         S->data.var_decl.is_volatile = false;
@@ -433,7 +468,7 @@ var_stmt(S) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
 var_stmt(S) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
     S = ast_alloc(parser, AST_VAR_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
-        S->data.var_decl.name = Name.start;
+        S->data.var_decl.name = Name.literal.str_value;
         S->data.var_decl.type = Ty;
         S->data.var_decl.init = E;
         S->data.var_decl.is_volatile = false;
@@ -443,7 +478,7 @@ var_stmt(S) ::= VAR(T) IDENTIFIER(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
 var_stmt(S) ::= VAR(T) IDENTIFIER(Name) EQ expr(E) SEMICOLON. {
     S = ast_alloc(parser, AST_VAR_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
-        S->data.var_decl.name = Name.start;
+        S->data.var_decl.name = Name.literal.str_value;
         S->data.var_decl.type = NULL;
         S->data.var_decl.init = E;
         S->data.var_decl.is_volatile = false;
@@ -980,7 +1015,7 @@ postfix_expr(E) ::= expr(Obj) DOT(T) IDENTIFIER(Field). {
     E = ast_alloc(parser, AST_FIELD_ACCESS_EXPR, (SourceLocation){T.line, T.column, T.start});
     if (E) {
         E->data.field_access_expr.object = Obj;
-        E->data.field_access_expr.field_name = Field.start;
+        E->data.field_access_expr.field_name = Field.literal.str_value;
         E->data.field_access_expr.is_arrow = false;
     }
 }
@@ -989,7 +1024,7 @@ postfix_expr(E) ::= expr(Obj) ARROW(T) IDENTIFIER(Field). {
     E = ast_alloc(parser, AST_FIELD_ACCESS_EXPR, (SourceLocation){T.line, T.column, T.start});
     if (E) {
         E->data.field_access_expr.object = Obj;
-        E->data.field_access_expr.field_name = Field.start;
+        E->data.field_access_expr.field_name = Field.literal.str_value;
         E->data.field_access_expr.is_arrow = true;
     }
 }
@@ -1024,7 +1059,7 @@ struct_init_list(L) ::= struct_init_field(F). { L = F; }
 struct_init_list(L) ::= struct_init_list(Prev) COMMA struct_init_field(F). { L = F; }
 
 struct_init_field(F) ::= IDENTIFIER(Name) COLON expr(E). {
-    F = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.start});
+    F = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
     // Store as AstStructInit later
 }
 
@@ -1094,7 +1129,7 @@ primary_expr(E) ::= expr(Start) DOT_DOT(T) expr(End). {
 
 // Types
 type(T) ::= IDENTIFIER(Name). {
-    T = ast_alloc(parser, AST_TYPE_NAMED, (SourceLocation){Name.line, Name.column, Name.start});
+    T = ast_alloc(parser, AST_TYPE_NAMED, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
     if (T) {
         // Store type name
     }

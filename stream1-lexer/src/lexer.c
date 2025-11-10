@@ -501,6 +501,10 @@ static Token scan_token(Lexer* lexer) {
         case '"':
             return string_literal(lexer);
 
+        // Line comment (# style)
+        case '#':
+            return line_comment(lexer);
+
         default:
             return error_token(lexer, "Unexpected character");
     }

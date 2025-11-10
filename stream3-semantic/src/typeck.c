@@ -626,6 +626,8 @@ static void check_function_decl(TypeChecker* tc, AstNode* node) {
     if (node->data.function_decl.return_type) {
         return_type = resolve_type_from_node(tc, node->data.function_decl.return_type);
         if (!return_type) return_type = TYPE_VOID_SINGLETON;
+        // Set type on the return type node
+        node->data.function_decl.return_type->type = return_type;
     }
 
     // Create function type
@@ -636,6 +638,8 @@ static void check_function_decl(TypeChecker* tc, AstNode* node) {
         AstParam* param = &node->data.function_decl.params[i];
         Type* param_type = resolve_type_from_node(tc, param->type);
         if (param_type) {
+            // Set type on the parameter type node
+            param->type->type = param_type;
             type_function_add_param(func_type, param->name, param_type, tc->arena);
         }
     }

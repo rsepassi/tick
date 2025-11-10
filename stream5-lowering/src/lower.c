@@ -776,7 +776,16 @@ IrFunction* ir_lower_function(AstNode* func_node, CoroMetadata* coro_meta, Arena
 
     // Extract function info from AST
     const char* name = func_node->data.function_decl.name;
-    Type* return_type = func_node->type; // Function type already resolved
+
+    // Get return type - either from return_type node or void
+    Type* return_type = NULL;
+    if (func_node->data.function_decl.return_type) {
+        return_type = func_node->data.function_decl.return_type->type;
+    } else {
+        // No return type specified means void
+        extern Type* TYPE_VOID_SINGLETON;
+        return_type = TYPE_VOID_SINGLETON;
+    }
 
     // Convert AST params to IR params
     size_t param_count = func_node->data.function_decl.param_count;
