@@ -11,16 +11,24 @@
 #include "../interfaces2/lexer.h"
 #include "../interfaces2/arena.h"
 
-// Forward declare list type from parser.c
+// Forward declare list types from parser.c
 typedef struct AstNodeList {
     AstNode** nodes;
     size_t count;
     size_t capacity;
 } AstNodeList;
 
+typedef struct AstParamList {
+    AstParam* params;
+    size_t count;
+    size_t capacity;
+} AstParamList;
+
 // Forward declare helper functions from parser.c
 AstNodeList* node_list_create(Parser* parser);
 void node_list_append(Parser* parser, AstNodeList* list, AstNode* node);
+AstParamList* param_list_create(Parser* parser);
+void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc);
 }
 
 %token_prefix TOKEN_
@@ -73,9 +81,9 @@ module(M) ::= . {
 
 // Declaration list type
 %type decl_list { AstNodeList* }
+%type param_list { AstParamList* }
 %type stmt_list { void* }
 %type expr_list { void* }
-%type param_list { void* }
 %type field_list { void* }
 %type enum_value_list { void* }
 %type case_list { void* }
@@ -268,8 +276,9 @@ var_decl(D) ::= VOLATILE VAR(T) IDENTIFIER(Name) COLON type(Ty) SEMICOLON. {
 function_def(F) ::= FN(T) LPAREN param_list(P) RPAREN block(B). {
     F = ast_alloc(parser, AST_FUNCTION_DECL, (SourceLocation){T.line, T.column, T.start});
     if (F) {
-        F->data.function_decl.params = (AstParam*)P;
-        F->data.function_decl.param_count = 0; // Set by parser
+        AstParamList* plist = (AstParamList*)P;
+        F->data.function_decl.params = plist->params;
+        F->data.function_decl.param_count = plist->count;
         F->data.function_decl.return_type = NULL;
         F->data.function_decl.body = B;
     }
@@ -278,8 +287,9 @@ function_def(F) ::= FN(T) LPAREN param_list(P) RPAREN block(B). {
 function_def(F) ::= FN(T) LPAREN param_list(P) RPAREN ARROW type(Ret) block(B). {
     F = ast_alloc(parser, AST_FUNCTION_DECL, (SourceLocation){T.line, T.column, T.start});
     if (F) {
-        F->data.function_decl.params = (AstParam*)P;
-        F->data.function_decl.param_count = 0; // Set by parser
+        AstParamList* plist = (AstParamList*)P;
+        F->data.function_decl.params = plist->params;
+        F->data.function_decl.param_count = plist->count;
         F->data.function_decl.return_type = Ret;
         F->data.function_decl.body = B;
     }
@@ -306,12 +316,25 @@ function_def(F) ::= FN(T) LPAREN RPAREN ARROW type(Ret) block(B). {
 }
 
 // Parameter list
-param_list(L) ::= param(P). { L = P; }
-param_list(L) ::= param_list(Prev) COMMA param(P). { L = P; }
+%type param { void* }
+
+param_list(L) ::= param(P). {
+    L = param_list_create(parser);
+    param_list_append(parser, L, ((AstParam*)P)->name, ((AstParam*)P)->type, ((AstParam*)P)->loc);
+}
+
+param_list(L) ::= param_list(Prev) COMMA param(P). {
+    L = Prev;
+    param_list_append(parser, L, ((AstParam*)P)->name, ((AstParam*)P)->type, ((AstParam*)P)->loc);
+}
 
 param(P) ::= IDENTIFIER(Name) COLON type(T). {
-    P = ast_alloc(parser, AST_LET_DECL, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
-    // Store as AstParam later
+    // Create a temporary param struct to pass name and type
+    AstParam* temp = (AstParam*)arena_alloc(parser->ast_arena, sizeof(AstParam), _Alignof(AstParam));
+    temp->name = Name.literal.str_value;
+    temp->type = T;
+    temp->loc = (SourceLocation){Name.line, Name.column, Name.start};
+    P = temp;
 }
 
 // Struct definition
