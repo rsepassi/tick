@@ -1,0 +1,5 @@
+# Test range expression
+pub let main = fn() -> i32 {
+    let x = 0..10;
+    return 0;
+};

@@ -1,0 +1,9 @@
+# Test void return type
+let test = fn() -> void {
+    return;
+};
+
+pub let main = fn() -> i32 {
+    test();
+    return 0;
+};

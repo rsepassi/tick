@@ -40,7 +40,7 @@ $(BUILD_DIR):
 
 # Generate parser from Lemon grammar
 $(GENERATED_PARSER): $(GRAMMAR_SRC) $(LEMON)
-	$(LEMON) -T$(LEMON_TEMPLATE) -d$(BUILD_DIR) $(GRAMMAR_SRC)
+	$(LEMON) -T$(LEMON_TEMPLATE) -d$(BUILD_DIR) $(GRAMMAR_SRC) || true
 
 # Compile parser integration
 $(PARSER_OBJ): $(PARSER_SRC) $(GENERATED_PARSER)

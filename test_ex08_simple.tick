@@ -1,0 +1,26 @@
+# Simplified version of example 08
+let NetError = enum(i32) {
+    SUCCESS = 0
+};
+
+let Client = struct {
+    fd: i32
+};
+
+let Server = struct {
+    listen_fd: i32,
+    clients: [128]Client
+};
+
+let server_find_free_client = fn(server: *Server) -> *Client {
+    for i in 0..128 {
+        if server.clients[i].fd == -1 {
+            return &server.clients[i];
+        }
+    }
+    return 0 as *Client;
+};
+
+pub let main = fn() -> i32 {
+    return 0;
+};

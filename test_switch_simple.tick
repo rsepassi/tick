@@ -1,0 +1,11 @@
+# Test switch statement with literals
+pub let main = fn() -> i32 {
+    let x = 1;
+    switch x {
+        case 0:
+            return 0;
+        default:
+            return 1;
+    }
+    return 2;
+};

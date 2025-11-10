@@ -1,0 +1,17 @@
+# Test try/catch
+let Error = enum(u8) {
+    Failed = 0
+};
+
+let test = fn() -> Error!i32 {
+    return Error.Failed;
+};
+
+pub let main = fn() -> i32 {
+    try {
+        let x = test();
+    } catch |err| {
+        return 1;
+    }
+    return 0;
+};

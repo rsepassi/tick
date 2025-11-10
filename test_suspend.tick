@@ -1,0 +1,5 @@
+# Test suspend statement
+pub let main = fn() -> i32 {
+    suspend;
+    return 0;
+};

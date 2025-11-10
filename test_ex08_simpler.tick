@@ -1,0 +1,12 @@
+# Even simpler
+let Client = struct {
+    fd: i32
+};
+
+let test = fn() -> *Client {
+    return 0 as *Client;
+};
+
+pub let main = fn() -> i32 {
+    return 0;
+};

@@ -24,11 +24,19 @@ typedef struct AstParamList {
     size_t capacity;
 } AstParamList;
 
+typedef struct AstSwitchCaseList {
+    AstSwitchCase* cases;
+    size_t count;
+    size_t capacity;
+} AstSwitchCaseList;
+
 // Forward declare helper functions from parser.c
 AstNodeList* node_list_create(Parser* parser);
 void node_list_append(Parser* parser, AstNodeList* list, AstNode* node);
 AstParamList* param_list_create(Parser* parser);
 void param_list_append(Parser* parser, AstParamList* list, const char* name, AstNode* type, SourceLocation loc);
+AstSwitchCaseList* switch_case_list_create(Parser* parser);
+void switch_case_list_append(Parser* parser, AstSwitchCaseList* list, AstNode** values, size_t value_count, AstNode** stmts, size_t stmt_count, SourceLocation loc);
 }
 
 %token_prefix TOKEN_
@@ -87,6 +95,7 @@ module(M) ::= . {
 %type field_list { void* }
 %type enum_value_list { void* }
 %type case_list { void* }
+%type case_clause { void* }
 %type case_value_list { void* }
 %type struct_init_list { void* }
 
@@ -630,42 +639,81 @@ for_stmt(S) ::= FOR(T) COLON expr(Cont) block(Body). {
     }
 }
 
-// Switch statement
-switch_stmt(S) ::= SWITCH(T) expr(Val) LBRACE case_list(Cases) RBRACE. {
+// Switch statement (parentheses required around expression to avoid ambiguity with struct literals)
+switch_stmt(S) ::= SWITCH(T) LPAREN expr(Val) RPAREN LBRACE case_list(Cases) RBRACE. {
     S = ast_alloc(parser, AST_SWITCH_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
+        AstSwitchCaseList* case_list = (AstSwitchCaseList*)Cases;
         S->data.switch_stmt.value = Val;
-        S->data.switch_stmt.cases = (AstSwitchCase*)Cases;
-        S->data.switch_stmt.case_count = 0; // Set by parser
+        S->data.switch_stmt.cases = case_list->cases;
+        S->data.switch_stmt.case_count = case_list->count;
         S->data.switch_stmt.is_while_switch = false;
     }
 }
 
-switch_stmt(S) ::= WHILE SWITCH(T) expr(Val) LBRACE case_list(Cases) RBRACE. {
+switch_stmt(S) ::= WHILE SWITCH(T) LPAREN expr(Val) RPAREN LBRACE case_list(Cases) RBRACE. {
     S = ast_alloc(parser, AST_SWITCH_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
+        AstSwitchCaseList* case_list = (AstSwitchCaseList*)Cases;
         S->data.switch_stmt.value = Val;
-        S->data.switch_stmt.cases = (AstSwitchCase*)Cases;
-        S->data.switch_stmt.case_count = 0; // Set by parser
+        S->data.switch_stmt.cases = case_list->cases;
+        S->data.switch_stmt.case_count = case_list->count;
         S->data.switch_stmt.is_while_switch = true;
     }
 }
 
-case_list(L) ::= case_clause(C). { L = C; }
-case_list(L) ::= case_list(Prev) case_clause(C). { L = C; }
+case_list(L) ::= case_clause(C). {
+    L = switch_case_list_create(parser);
+    AstSwitchCase* case_ptr = (AstSwitchCase*)C;
+    switch_case_list_append(parser, L, case_ptr->values, case_ptr->value_count,
+                           case_ptr->stmts, case_ptr->stmt_count, case_ptr->loc);
+}
+
+case_list(L) ::= case_list(Prev) case_clause(C). {
+    L = Prev;
+    AstSwitchCase* case_ptr = (AstSwitchCase*)C;
+    switch_case_list_append(parser, L, case_ptr->values, case_ptr->value_count,
+                           case_ptr->stmts, case_ptr->stmt_count, case_ptr->loc);
+}
 
 case_clause(C) ::= CASE(T) case_value_list(V) COLON stmt_list(S). {
-    C = ast_alloc(parser, AST_BLOCK_STMT, (SourceLocation){T.line, T.column, T.start});
-    // Store as AstSwitchCase later
+    // Create a temporary AstSwitchCase struct
+    AstSwitchCase* temp = (AstSwitchCase*)arena_alloc(parser->ast_arena, sizeof(AstSwitchCase), _Alignof(AstSwitchCase));
+    if (temp) {
+        AstNodeList* value_list = (AstNodeList*)V;
+        AstNodeList* stmt_list = (AstNodeList*)S;
+        temp->values = value_list->nodes;
+        temp->value_count = value_list->count;
+        temp->stmts = stmt_list->nodes;
+        temp->stmt_count = stmt_list->count;
+        temp->loc = (SourceLocation){T.line, T.column, T.start};
+    }
+    C = temp;
 }
 
 case_clause(C) ::= DEFAULT(T) COLON stmt_list(S). {
-    C = ast_alloc(parser, AST_BLOCK_STMT, (SourceLocation){T.line, T.column, T.start});
-    // Store as AstSwitchCase with NULL values
+    // Create a temporary AstSwitchCase struct with NULL values for default
+    AstSwitchCase* temp = (AstSwitchCase*)arena_alloc(parser->ast_arena, sizeof(AstSwitchCase), _Alignof(AstSwitchCase));
+    if (temp) {
+        AstNodeList* stmt_list = (AstNodeList*)S;
+        temp->values = NULL;
+        temp->value_count = 0;
+        temp->stmts = stmt_list->nodes;
+        temp->stmt_count = stmt_list->count;
+        temp->loc = (SourceLocation){T.line, T.column, T.start};
+    }
+    C = temp;
 }
 
-case_value_list(L) ::= expr(E). { L = E; }
-case_value_list(L) ::= case_value_list(Prev) COMMA expr(E). { L = E; }
+case_value_list(L) ::= expr(E). {
+    L = node_list_create(parser);
+    node_list_append(parser, L, E);
+}
+
+case_value_list(L) ::= case_value_list(Prev) COMMA expr(E). {
+    L = Prev;
+    node_list_append(parser, L, E);
+}
 
 // Control flow
 break_stmt(S) ::= BREAK(T) SEMICOLON. {
@@ -676,7 +724,7 @@ continue_stmt(S) ::= CONTINUE(T) SEMICOLON. {
     S = ast_alloc(parser, AST_CONTINUE_STMT, (SourceLocation){T.line, T.column, T.start});
 }
 
-continue_switch_stmt(S) ::= CONTINUE SWITCH(T) expr(E) SEMICOLON. {
+continue_switch_stmt(S) ::= CONTINUE SWITCH(T) LPAREN expr(E) RPAREN SEMICOLON. {
     S = ast_alloc(parser, AST_CONTINUE_SWITCH_STMT, (SourceLocation){T.line, T.column, T.start});
     if (S) {
         S->data.continue_switch_stmt.value = E;
@@ -1046,6 +1094,7 @@ postfix_expr(E) ::= expr(Arr) LBRACKET(T) expr(Idx) RBRACKET. {
 }
 
 // Struct literal with explicit type name (e.g., Point { x: 1, y: 2 })
+// NOTE: Now unambiguous since switch statements require parentheses: switch (x) { ... }
 postfix_expr(E) ::= IDENTIFIER(Name) LBRACE(T) struct_init_list(Fields) RBRACE. {
     // Create a named type node for the struct type
     AstNode* type_node = ast_alloc(parser, AST_TYPE_NAMED, (SourceLocation){Name.line, Name.column, Name.literal.str_value});

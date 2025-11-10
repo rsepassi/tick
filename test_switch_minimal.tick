@@ -1,0 +1,7 @@
+pub let main = fn() -> i32 {
+    switch 1 {
+        case 0:
+            return 0;
+    }
+    return 1;
+};

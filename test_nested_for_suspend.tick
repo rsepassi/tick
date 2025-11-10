@@ -1,0 +1,44 @@
+# Test nested for loops with error return type, defer, and suspend
+# This matches the pattern in example 08, line 233
+
+let TestError = enum(i32) {
+    ERROR1 = 1,
+    ERROR2 = 2
+};
+
+# Full complexity: error return + defer + nested for + suspend
+pub let test_full_complexity = fn() -> TestError!void {
+    var buffer: [4096]u8;
+
+    defer {
+        var x: i32 = 0;
+        x = 42;
+    }
+
+    for {
+        var bytes_read: usize = 100;
+
+        suspend;
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        var total_written: usize = 0;
+        for total_written < bytes_read {
+            suspend;
+
+            if total_written > 1000 {
+                return TestError.ERROR1;
+            }
+
+            total_written = total_written + 10;
+        }
+    }
+
+    return;
+};
+
+pub let main = fn() -> i32 {
+    return 0;
+};

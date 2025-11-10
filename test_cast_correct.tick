@@ -1,0 +1,13 @@
+# Test cast expression with correct syntax
+let Client = struct {
+    fd: i32
+};
+
+let test = fn() -> *Client {
+    return 0.(*Client);
+};
+
+pub let main = fn() -> i32 {
+    let x = 42.(i32);
+    return 0;
+};

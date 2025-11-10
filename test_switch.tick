@@ -1,0 +1,18 @@
+# Test switch statement
+let Status = enum(u8) {
+    OK = 0,
+    ERROR = 1
+};
+
+pub let main = fn() -> i32 {
+    let status = Status.OK;
+    switch status {
+        case Status.OK:
+            return 0;
+        case Status.ERROR:
+            return 1;
+        default:
+            return 2;
+    }
+    return 3;
+};

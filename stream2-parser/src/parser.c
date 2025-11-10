@@ -287,7 +287,7 @@ typedef struct AstSwitchCaseList {
     size_t capacity;
 } AstSwitchCaseList;
 
-__attribute__((unused)) static AstSwitchCaseList* switch_case_list_create(Parser* parser) {
+AstSwitchCaseList* switch_case_list_create(Parser* parser) {
     AstSwitchCaseList* list = (AstSwitchCaseList*)arena_alloc(parser->ast_arena,
         sizeof(AstSwitchCaseList), _Alignof(AstSwitchCaseList));
     if (!list) return NULL;
@@ -298,6 +298,31 @@ __attribute__((unused)) static AstSwitchCaseList* switch_case_list_create(Parser
         sizeof(AstSwitchCase) * list->capacity, _Alignof(AstSwitchCase));
 
     return list;
+}
+
+void switch_case_list_append(Parser* parser, AstSwitchCaseList* list,
+                             AstNode** values, size_t value_count,
+                             AstNode** stmts, size_t stmt_count,
+                             SourceLocation loc) {
+    if (!list) return;
+
+    if (list->count >= list->capacity) {
+        size_t new_capacity = list->capacity * 2;
+        AstSwitchCase* new_cases = (AstSwitchCase*)arena_alloc(parser->ast_arena,
+            sizeof(AstSwitchCase) * new_capacity, _Alignof(AstSwitchCase));
+        if (!new_cases) return;
+
+        memcpy(new_cases, list->cases, sizeof(AstSwitchCase) * list->count);
+        list->cases = new_cases;
+        list->capacity = new_capacity;
+    }
+
+    list->cases[list->count].values = values;
+    list->cases[list->count].value_count = value_count;
+    list->cases[list->count].stmts = stmts;
+    list->cases[list->count].stmt_count = stmt_count;
+    list->cases[list->count].loc = loc;
+    list->count++;
 }
 
 // Helper functions for building struct init lists

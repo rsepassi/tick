@@ -1292,6 +1292,7 @@ static void lower_try_catch_stmt(LowerContext* ctx, AstNode* stmt) {
     jmp_try->data.jump.target = try_block;
     ir_block_add_instruction(ctx->current_block, jmp_try, ctx->arena);
     ir_block_add_successor(ctx->current_block, try_block, ctx->arena);
+    ir_block_add_predecessor(try_block, ctx->current_block, ctx->arena);
 
     // Lower try block
     ctx->current_block = try_block;
@@ -1303,6 +1304,7 @@ static void lower_try_catch_stmt(LowerContext* ctx, AstNode* stmt) {
     jmp_cont->data.jump.target = cont_block;
     ir_block_add_instruction(ctx->current_block, jmp_cont, ctx->arena);
     ir_block_add_successor(ctx->current_block, cont_block, ctx->arena);
+    ir_block_add_predecessor(cont_block, ctx->current_block, ctx->arena);
 
     // Lower catch block if present
     if (catch_block) {
@@ -1319,6 +1321,7 @@ static void lower_try_catch_stmt(LowerContext* ctx, AstNode* stmt) {
         jmp_cont_catch->data.jump.target = cont_block;
         ir_block_add_instruction(ctx->current_block, jmp_cont_catch, ctx->arena);
         ir_block_add_successor(ctx->current_block, cont_block, ctx->arena);
+        ir_block_add_predecessor(cont_block, ctx->current_block, ctx->arena);
     }
 
     // Continue with continuation block

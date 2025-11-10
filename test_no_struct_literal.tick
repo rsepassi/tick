@@ -1,0 +1,8 @@
+let Point = struct {
+    x: i32,
+    y: i32
+};
+
+pub let main = fn() -> i32 {
+    return 0;
+};

@@ -40,7 +40,7 @@ let Status = enum(u8) {
 };
 
 let handle_status = fn(status: Status) -> i32 {
-    switch status {
+    switch (status) {
         case Status.IDLE:
             return 0;
         case Status.RUNNING:
@@ -63,15 +63,15 @@ let vm_dispatch = fn() -> i32 {
     var state = State.INIT;
     var result = 0;
 
-    while switch state {
+    while switch (state) {
         case State.INIT:
             result = 1;
             state = State.PROCESS;
-            continue switch state;
+            continue switch (state);
         case State.PROCESS:
             result = result + 10;
             state = State.DONE;
-            continue switch state;
+            continue switch (state);
         case State.DONE:
             break;
     }
