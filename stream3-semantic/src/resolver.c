@@ -2,12 +2,12 @@
 // Purpose: Build hierarchical scopes and resolve all name references
 // Scope Hierarchy: Module → Function → Block (nested)
 
-#include "../include/symbol.h"
-#include "../include/ast.h"
-#include "../include/type.h"
-#include "../include/error.h"
-#include "../include/arena.h"
-#include "../include/string_pool.h"
+#include "symbol.h"
+#include "ast.h"
+#include "type.h"
+#include "error.h"
+#include "arena.h"
+#include "string_pool.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>

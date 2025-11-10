@@ -1,8 +1,8 @@
 #include "../include/codegen.h"
-#include "../include/ir.h"
-#include "../include/type.h"
-#include "../include/arena.h"
-#include "../include/error.h"
+#include "ir.h"
+#include "type.h"
+#include "arena.h"
+#include "error.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

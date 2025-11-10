@@ -1,129 +1,177 @@
 # Remaining Work Items
 
-This document tracks the remaining tasks to complete the full integration of the Tick compiler pipeline following the parallel reconciliation integration.
+This document tracks the remaining tasks to complete the full integration of the Tick compiler pipeline following the interface standardization.
 
-**Last Updated:** 2025-11-10
-**Status:** Iteration 2 - Integration Phase
+**Last Updated:** 2025-11-10 (Interface Standardization Complete)
+**Status:** Iteration 2 - Integration Phase - Interfaces Stabilized
 
 ---
 
 ## Overview
 
-All 7 streams have been updated to use the reconciled interfaces from `interfaces2/`. The next phase involves completing build infrastructure, fixing test suites, and running end-to-end integration tests.
+✅ **MAJOR MILESTONE ACHIEVED**: All 7 streams now use `interfaces2/` as the single source of truth.
 
----
-
-## Critical Path Items
-
-### 1. Stream 2 (Parser) - Lemon Parser Generator
-
-**Status:** ✅ Complete (Grammar conflicts need resolution)
-**Priority:** HIGH
-**Progress:** Lemon working, parser files generated, but grammar has conflicts
-
-**Completed Tasks:**
-- [x] Obtain Lemon parser generator (from SQLite project via GitHub)
-- [x] Build Lemon tool (compiled successfully, version 1.0)
-- [x] Generate `grammar.c` from `grammar.y` (generated despite conflicts)
-- [ ] Resolve 119 parsing conflicts in grammar.y
-- [ ] Fix unused label warnings
-- [ ] Verify parser compilation with generated grammar
-- [ ] Run parser test suite (29 tests expected)
-
-**Dependencies:** None - can proceed independently
-**Estimated Effort:** 4-8 hours remaining (conflict resolution)
+**What was completed:**
+- ✅ Deleted `interfaces/` directory to eliminate ambiguity
+- ✅ Removed 34 duplicate interface files from stream directories
+- ✅ Created Makefiles for Streams 4 & 5
+- ✅ Updated all Makefiles to reference `interfaces2/`
+- ✅ Verified 5 streams compile successfully (1, 4, 5, 6, 7)
 
 **Current Status:**
-- ✅ Lemon added to `vendor/lemon/` (7,337 lines)
-- ✅ Lemon executable built and working (version 1.0)
-- ✅ Parser files generated: grammar.c (180KB), grammar.h (3.5KB)
-- ⚠️ Grammar has 119 parsing conflicts (shift/reduce or reduce/reduce)
-- ⚠️ Grammar has unused label warnings (non-critical)
-- 📝 Detailed conflict report in `build/grammar.out` (518KB)
+- `interfaces2/` is now the **stable linkage point** for parallel work
+- Teams can work independently on their streams
+- Integration testing can proceed once remaining compilation issues are fixed
+
+---
+
+## Stream 1: Lexer
+
+**Status:** ✅ Compiling and all tests pass
+
+**Completed:**
+- [x] Remove duplicate interface files (4 files removed)
+- [x] Update Makefile to use `interfaces2/`
+- [x] Update source files to reference centralized headers
+- [x] Verify compilation
+- [x] Run tests: **33/33 passing**
+
+---
+
+## Stream 2: Parser
+
+**Status:** ❌ Compilation blocked
+
+**Tasks:**
+- [ ] **Fix grammar.y:43 type safety bug**
+  - Current: `M = ast_alloc(parser, AST_MODULE, D->loc);`
+  - Problem: `decl_list(D)` is `void*`, cannot dereference `D->loc`
+- [ ] Resolve 119 parsing conflicts in grammar.y
+- [ ] Fix 22 unused label warnings
+- [ ] Verify parser compiles with generated grammar.c
+- [ ] Run parser test suite
+
+**Completed:**
+- [x] Lemon parser generator integrated at `vendor/lemon/`
+- [x] Makefile updated to use `interfaces2/`
+- [x] No duplicate interface files found
 
 **Notes:**
-- Lemon location: `vendor/lemon/`
-- Source: https://github.com/sqlite/sqlite (master/tool/)
-- Documentation: https://sqlite.org/lemon.html
-- License: Public Domain
-- Makefile updated to use vendor/lemon/lemon
+- Grammar conflicts may be acceptable for initial testing
+- Type safety bug must be fixed before compilation can succeed
 
 ---
 
-### 2. Stream 3 (Semantic) - Test Suite Updates
+## Stream 3: Semantic Analysis
 
-**Status:** ⚠️ Partial
-**Priority:** HIGH
-**Component:** Implementation complete, tests need updates
+**Status:** ❌ Test compilation blocked
 
 **Tasks:**
+- [ ] Update test files to use reconciled AST interface
 
-#### test_resolver.c (15 compilation errors)
-- [ ] Update `make_int_literal()`: `LIT_INT` → `LITERAL_INT`, `int_value` → `value.int_value`
-- [ ] Update `make_block()`: `statements` → `stmts`
-- [ ] Remove symbol field checks: `identifier_expr.symbol` doesn't exist in interfaces2
-- [ ] Fix array comparison warning in `test_string_interning()`
-- [ ] Update all AST construction helpers for reconciled field names
+**Required Changes (15 total):**
 
-#### test_typeck.c (not yet updated)
-- [ ] Update `make_typed_function()`: parameter and return type handling
-- [ ] Update `make_struct_with_fields()`: `AstStructField` → `AstField`
-- [ ] Update all literal creation helpers: `lit_kind` → `literal_kind`
-- [ ] Update binary/unary operator enums: `BINOP_LAND` → `BINOP_LOGICAL_AND`, etc.
-- [ ] Update expression field accesses throughout
+### Field Name Updates:
+- [ ] `module.declarations` → `module.decls`
+- [ ] `function_decl.return_type_node` → `function_decl.return_type`
+- [ ] `function_decl.is_public` → `function_decl.is_pub`
+- [ ] `struct_decl.is_public` → `struct_decl.is_pub`
+- [ ] `let_stmt` → `let_decl`
+- [ ] `let_decl.type_node` → `let_decl.type`
+- [ ] `literal_expr.lit_kind` → `literal_expr.literal_kind`
+- [ ] `literal_expr.int_value` → `literal_expr.value.int_value`
+- [ ] `block_stmt.statements` → `block_stmt.stmts`
 
-**Dependencies:** None
-**Estimated Effort:** 4-6 hours
+### Enum Updates:
+- [ ] `LIT_INT` → `LITERAL_INT`
+- [ ] `LIT_STRING` → `LITERAL_STRING`
+- [ ] `LIT_BOOL` → `LITERAL_BOOL`
 
-**Current Errors:**
-```
-test_resolver.c:97: 'LIT_INT' undeclared; did you mean 'LITERAL_INT'?
-test_resolver.c:98: no member named 'int_value' in literal_expr
-test_resolver.c:105: no member named 'statements' in block_stmt
-test_resolver.c:259: no member named 'symbol' in identifier_expr
-```
+### Remove References to Deleted Fields:
+- [ ] Remove `function_decl.is_async` (field no longer exists)
+- [ ] Remove `struct_decl.alignment` (field no longer exists)
+- [ ] Remove `identifier_expr.symbol` (field no longer exists, use `.name` only)
+
+**Completed:**
+- [x] Removed 10 duplicate interface files
+- [x] Updated Makefile to use `interfaces2/`
+- [x] Updated source files (resolver.c, typeck.c)
+- [x] Added missing `#include <stdint.h>` to `interfaces2/type.h`
 
 ---
 
-### 3. Streams 4 & 5 - Build Infrastructure
+## Stream 4: Coroutine Analysis
 
-**Status:** ⚠️ Missing
-**Priority:** MEDIUM
-**Issue:** No Makefiles present
+**Status:** ✅ Compiling and all tests pass
+
+**Completed:**
+- [x] Created `Makefile`
+- [x] Removed 5 duplicate interface files
+- [x] Updated to use `interfaces2/`
+- [x] Verify compilation
+- [x] Run tests: **8/8 passing**
+
+**Important Note on Stubs:**
+- Created `src/stubs.c` with minimal stub implementations for `type_sizeof()`, `type_alignof()`, and `scope_init()`
+- **These stubs MUST be replaced with full, correct implementations**
+- Stubs currently allow independent compilation but are NOT production-ready
+- Integration testing will require linking against full implementations from Stream 3
+
+---
+
+## Stream 5: IR Lowering
+
+**Status:** ✅ Compiling (test has data initialization issue)
 
 **Tasks:**
+- [ ] Fix test data initialization
+  - Problem: `ir_lower_function_with_coro_metadata` test creates `suspend_count=2` but doesn't allocate `suspend_points` array
+  - Causes segfault at `src/lower.c:892` when accessing `meta->suspend_points[i]`
 
-#### Stream 4 (Coroutine)
-- [ ] Create `stream4-coroutine/Makefile`
-- [ ] Link against: arena, error, string_pool (stream7)
-- [ ] Build `coro_analyze.o` and `test_coro_analyze`
-- [ ] Verify compilation with reconciled interfaces
-- [ ] Run test suite
+**Completed:**
+- [x] Created `Makefile`
+- [x] Removed 7 duplicate interface files
+- [x] Updated to use `interfaces2/`
+- [x] Verify compilation succeeds
 
-#### Stream 5 (Lowering)
-- [ ] Create `stream5-lowering/Makefile`
-- [ ] Link against: arena, error, string_pool (stream7)
-- [ ] Build `lower.o` and `test_lower`
-- [ ] Verify compilation with reconciled interfaces
-- [ ] Run test suite
+---
 
-**Dependencies:** None - can proceed independently
-**Estimated Effort:** 2-3 hours per stream
+## Stream 6: Code Generation
 
-**Template:** Use `stream1-lexer/Makefile` or `stream6-codegen/Makefile` as reference
+**Status:** ✅ Compiling and all tests pass
+
+**Completed:**
+- [x] Removed 5 duplicate interface files
+- [x] Makefile already used `interfaces2/`
+- [x] Updated source files to reference centralized headers
+- [x] Verify compilation
+- [x] Run tests: **6/6 passing**
+
+---
+
+## Stream 7: Core Infrastructure
+
+**Status:** ✅ Compiling and all tests pass
+
+**Tasks:**
+- [ ] Fix unused variable warning in `src/arena.c:71` (variable `padding`)
+- [ ] Fix unused function warning in `src/string_pool.c:13` (`hash_string`)
+
+**Completed:**
+- [x] Removed 3 duplicate interface files
+- [x] Updated Makefile to use `interfaces2/`
+- [x] Verify compilation
+- [x] Run tests: **20/20 passing**
 
 ---
 
 ## Integration Testing
 
-### 4. Integration Test Suite Execution
-
-**Status:** 📝 Ready (created but not run)
-**Priority:** HIGH
-**Location:** `integration/`
+**Status:** Integration Makefile updated, awaiting Stream 2 & 3 fixes
 
 **Tasks:**
-- [ ] Fix compilation of integration tests (may need mock implementations)
+- [ ] Update integration Makefile (DONE - now uses `interfaces2/`)
+- [ ] Fix compilation of integration tests
 - [ ] Run `test_lexer_parser` - Lexer → Parser boundary
 - [ ] Run `test_semantic` - Parser → Semantic boundary
 - [ ] Run `test_coroutine` - Semantic → Coroutine boundary
@@ -132,59 +180,39 @@ test_resolver.c:259: no member named 'symbol' in identifier_expr
 - [ ] Run `test_full_compile` - Complete pipeline + gcc verification
 - [ ] Run `test_pipeline` - End-to-end comprehensive scenarios
 
-**Dependencies:**
-- Stream 2 (Parser) must be built
+**Blockers:**
+- Stream 2 (Parser) must compile
 - Stream 3 tests must be fixed
-- Streams 4 & 5 Makefiles must exist
-
-**Estimated Effort:** 8-12 hours (including bug fixes)
-
-**Expected Issues:**
-- Interface mismatches between real implementations
-- Mock functions may need updates
-- Pipeline data flow issues
-- Memory management bugs
+- Stream 4 stubs must be replaced with full implementations
 
 ---
 
-## Secondary Items
-
-### 5. Documentation Updates
-
-**Status:** 📝 In Progress
-**Priority:** LOW
+## Documentation
 
 **Tasks:**
-- [ ] Update `doc/parallel-impl-plan.md` with Iteration 2 completion status
+- [ ] Update `doc/parallel-impl-plan.md` with interface standardization completion
 - [ ] Document interface reconciliation lessons learned
 - [ ] Create integration testing guide
 - [ ] Document build system conventions
 - [ ] Add troubleshooting guide for common integration issues
 
-**Estimated Effort:** 2-3 hours
-
 ---
 
-### 6. Code Quality Improvements
-
-**Status:** 🔄 Ongoing
-**Priority:** LOW
+## Code Quality
 
 **Tasks:**
-- [ ] Fix compilation warnings in stream7-infrastructure (unused variables)
-- [ ] Add missing function implementations (stubs currently)
+- [ ] Fix compilation warnings in stream7-infrastructure
+- [ ] Replace all stub implementations with full, correct implementations
+  - Stream 4: `type_sizeof()`, `type_alignof()`, `scope_init()`
 - [ ] Improve error messages across all components
 - [ ] Add input validation
 - [ ] Memory leak checking with valgrind
 
-**Estimated Effort:** 4-8 hours
+**Important:** All stub implementations are temporary workarounds for independent compilation. They MUST be replaced with full, correct implementations before the project is considered complete.
 
 ---
 
-### 7. Example Programs
-
-**Status:** 📝 Not Started
-**Priority:** LOW
+## Example Programs
 
 **Tasks:**
 - [ ] Create `examples/` directory
@@ -195,21 +223,19 @@ test_resolver.c:259: no member named 'symbol' in identifier_expr
 - [ ] Add struct and enum examples
 - [ ] Add comprehensive language feature showcase
 
-**Estimated Effort:** 4-6 hours
-
 ---
 
 ## Completion Criteria
 
-The integration is considered complete when:
-
 ### Must Have
 - ✅ All 7 streams use interfaces2/ (DONE)
 - ✅ Integration test suite created (DONE)
+- ✅ Makefiles exist for all streams (DONE)
 - ⏳ All streams compile without errors
-- ⏳ All unit tests pass (59+ currently passing)
+- ⏳ All unit tests pass
 - ⏳ Integration tests pass
 - ⏳ Full pipeline generates valid C11 code
+- ⏳ All stub implementations replaced with full implementations
 
 ### Should Have
 - ⏳ Generated C compiles with strict flags: `-Wall -Werror -Wextra -std=c11 -ffreestanding`
@@ -222,84 +248,6 @@ The integration is considered complete when:
 - ⏳ Multiple example programs
 - ⏳ Performance benchmarks
 - ⏳ CI/CD pipeline
-
----
-
-## Work Estimates
-
-| Category | Items | Estimated Hours |
-|----------|-------|-----------------|
-| Critical Path | 3 items | 8-13 hours |
-| Integration Testing | 1 item | 8-12 hours |
-| Secondary Items | 3 items | 10-17 hours |
-| **Total** | **7 items** | **26-42 hours** |
-
----
-
-## Known Issues
-
-### Build Environment
-- Lemon parser generator not available
-- Some streams missing Makefiles
-- No CI/CD automation
-
-### Code Issues
-- Stream 3 tests incompatible with reconciled AST structure
-- Some functions are stubs (implementation incomplete)
-- Compiler warnings in infrastructure code
-
-### Testing Gaps
-- Integration tests not yet run
-- No end-to-end validation
-- No performance testing
-- No memory leak checking
-
----
-
-## Next Steps (Recommended Order)
-
-1. **Immediate** (1-2 days)
-   - Fix Stream 3 test suite (test_resolver.c, test_typeck.c)
-   - Create Makefiles for Streams 4 & 5
-   - Obtain/build Lemon parser generator
-
-2. **Short-term** (3-5 days)
-   - Compile all streams successfully
-   - Run all unit tests
-   - Begin integration test execution
-   - Fix integration bugs as discovered
-
-3. **Medium-term** (1-2 weeks)
-   - Complete integration test suite
-   - Generate valid C11 code end-to-end
-   - Create example programs
-   - Documentation updates
-
-4. **Long-term** (2-4 weeks)
-   - Performance optimization
-   - Comprehensive error messages
-   - Code quality improvements
-   - CI/CD setup
-
----
-
-## Questions / Decisions Needed
-
-1. **Lemon Parser Generator**
-   - Should we obtain Lemon or switch to Bison/Yacc?
-   - Can we use a pre-built Lemon binary?
-
-2. **Test Strategy**
-   - Should we prioritize unit tests or integration tests?
-   - What's the acceptable test coverage percentage?
-
-3. **Stub Implementations**
-   - Which stub functions are critical vs. nice-to-have?
-   - Should we complete all stubs before integration testing?
-
-4. **Error Handling**
-   - What level of error message quality is required?
-   - Should we implement error recovery in the parser?
 
 ---
 
@@ -329,3 +277,4 @@ The integration is considered complete when:
 | Date | Version | Changes |
 |------|---------|---------|
 | 2025-11-10 | 1.0 | Initial document after reconciliation integration |
+| 2025-11-10 | 2.0 | Interface standardization complete, updated with task focus |

@@ -1,11 +1,11 @@
 // Test suite for type checker
 
-#include "../include/type.h"
-#include "../include/ast.h"
-#include "../include/symbol.h"
-#include "../include/error.h"
-#include "../include/arena.h"
-#include "../include/string_pool.h"
+#include "type.h"
+#include "ast.h"
+#include "symbol.h"
+#include "error.h"
+#include "arena.h"
+#include "string_pool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

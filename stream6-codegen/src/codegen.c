@@ -1,7 +1,7 @@
 #include "../include/codegen.h"
-#include "../include/ir.h"
-#include "../include/type.h"
-#include "../include/coro_metadata.h"
+#include "ir.h"
+#include "type.h"
+#include "coro_metadata.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>

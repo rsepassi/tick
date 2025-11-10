@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 // Type System Interface
 // Purpose: Shared type representation across all semantic phases

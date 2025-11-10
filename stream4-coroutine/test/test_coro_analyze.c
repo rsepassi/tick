@@ -1,9 +1,9 @@
 #include "../coro_metadata.h"
-#include "../ast.h"
-#include "../symbol.h"
-#include "../type.h"
-#include "../arena.h"
-#include "../error.h"
+#include <ast.h>
+#include <symbol.h>
+#include <type.h>
+#include <arena.h>
+#include <error.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
