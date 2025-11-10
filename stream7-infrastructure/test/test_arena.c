@@ -1,5 +1,5 @@
 #include "test_harness.h"
-#include "../arena.h"
+#include "arena.h"
 #include <string.h>
 
 // Test basic allocation

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 void error_list_init(ErrorList* list, Arena* arena) {
+    list->arena = arena;
     list->errors = NULL;
     list->count = 0;
     list->capacity = 16;
@@ -33,10 +34,9 @@ void error_list_add(ErrorList* list, ErrorKind kind, SourceLocation loc,
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    // For simplicity, we'll just store a pointer to a static copy
-    // In a real implementation, we'd use the arena
+    // Allocate message from arena
     size_t len = strlen(buffer);
-    err->message = (char*)malloc(len + 1);
+    err->message = (char*)arena_alloc(list->arena, len + 1, 1);
     strcpy(err->message, buffer);
 }
 

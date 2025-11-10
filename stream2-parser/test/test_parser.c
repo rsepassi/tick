@@ -1,8 +1,9 @@
-#include "../parser.h"
-#include "../ast.h"
-#include "../lexer.h"
-#include "../arena.h"
-#include "../error.h"
+#include "../../interfaces2/parser.h"
+#include "../../interfaces2/ast.h"
+#include "../../interfaces2/lexer.h"
+#include "../../interfaces2/arena.h"
+#include "../../interfaces2/error.h"
+#include "../../interfaces2/string_pool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,9 +30,9 @@
 #define ASSERT_NOT_NULL(p) ASSERT((p) != NULL)
 
 // Helper to create parser from source string
-static Parser* create_parser(const char* source, Arena* arena, ErrorList* errors) {
+static Parser* create_parser(const char* source, Arena* arena, ErrorList* errors, StringPool* string_pool) {
     Lexer* lexer = (Lexer*)malloc(sizeof(Lexer));
-    lexer_init(lexer, source, strlen(source), "test.tick");
+    lexer_init(lexer, source, strlen(source), "test.tick", string_pool, errors);
 
     Parser* parser = (Parser*)malloc(sizeof(Parser));
     parser_init(parser, lexer, arena, errors);
@@ -54,8 +55,11 @@ TEST(empty_module) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source = "";
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -72,12 +76,15 @@ TEST(simple_function) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let add = fn(x: i32, y: i32) -> i32 {\n"
         "    return x + y;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -94,13 +101,16 @@ TEST(struct_declaration) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let Point = struct {\n"
         "    x: i32,\n"
         "    y: i32\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -117,6 +127,9 @@ TEST(enum_declaration) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let Status = enum(u8) {\n"
         "    OK = 0,\n"
@@ -124,7 +137,7 @@ TEST(enum_declaration) {
         "    PENDING = 2\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -141,13 +154,16 @@ TEST(union_declaration) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let Result = union {\n"
         "    ok: i32,\n"
         "    error: ErrorCode\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -164,6 +180,9 @@ TEST(if_statement) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    if x > 0 {\n"
@@ -173,7 +192,7 @@ TEST(if_statement) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -189,6 +208,9 @@ TEST(for_loop_range) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    for i in 0..10 {\n"
@@ -196,7 +218,7 @@ TEST(for_loop_range) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -212,6 +234,9 @@ TEST(for_loop_condition) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    for x > 0 {\n"
@@ -219,7 +244,7 @@ TEST(for_loop_condition) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -235,6 +260,9 @@ TEST(for_loop_infinite) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    for {\n"
@@ -242,7 +270,7 @@ TEST(for_loop_infinite) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -258,6 +286,9 @@ TEST(switch_statement) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn(x: i32) {\n"
         "    switch x {\n"
@@ -270,7 +301,7 @@ TEST(switch_statement) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -286,6 +317,9 @@ TEST(while_switch_statement) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    while switch state {\n"
@@ -297,7 +331,7 @@ TEST(while_switch_statement) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -313,6 +347,9 @@ TEST(defer_statement) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let file = openFile(path);\n"
@@ -320,7 +357,7 @@ TEST(defer_statement) {
         "    processFile(file);\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -336,6 +373,9 @@ TEST(errdefer_statement) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let buffer = allocate(1024);\n"
@@ -343,7 +383,7 @@ TEST(errdefer_statement) {
         "    process(buffer);\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -359,13 +399,16 @@ TEST(async_call) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let future = async worker();\n"
         "    resume future;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -381,6 +424,9 @@ TEST(suspend_statement) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let worker = fn() {\n"
         "    processStart();\n"
@@ -388,7 +434,7 @@ TEST(suspend_statement) {
         "    processEnd();\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -404,6 +450,9 @@ TEST(try_catch) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    try {\n"
@@ -414,7 +463,7 @@ TEST(try_catch) {
         "    }\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -430,13 +479,16 @@ TEST(try_propagate) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let result = try riskyOperation();\n"
         "    return result;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -452,6 +504,9 @@ TEST(binary_expressions) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let a = 1 + 2;\n"
@@ -461,7 +516,7 @@ TEST(binary_expressions) {
         "    let e = d % 3;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -477,6 +532,9 @@ TEST(comparison_expressions) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let a = x < y;\n"
@@ -487,7 +545,7 @@ TEST(comparison_expressions) {
         "    let f = x != y;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -503,6 +561,9 @@ TEST(logical_expressions) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let a = x && y;\n"
@@ -510,7 +571,7 @@ TEST(logical_expressions) {
         "    let c = !x;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -526,6 +587,9 @@ TEST(bitwise_expressions) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let a = x & y;\n"
@@ -536,7 +600,7 @@ TEST(bitwise_expressions) {
         "    let f = ~x;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -552,6 +616,9 @@ TEST(unary_expressions) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let a = -x;\n"
@@ -559,7 +626,7 @@ TEST(unary_expressions) {
         "    let c = *ptr;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -575,13 +642,16 @@ TEST(field_access) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let x = point.x;\n"
         "    let y = ptr->y;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -597,13 +667,16 @@ TEST(array_index) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let x = array[0];\n"
         "    let y = matrix[i][j];\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -619,6 +692,9 @@ TEST(function_call) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let x = foo();\n"
@@ -626,7 +702,7 @@ TEST(function_call) {
         "    let z = baz(x, y);\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -642,12 +718,15 @@ TEST(struct_initialization) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let p = Point { x: 10, y: 20 };\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -663,12 +742,15 @@ TEST(array_initialization) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    let arr = [1, 2, 3, 4, 5];\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -684,9 +766,12 @@ TEST(import_declaration) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source = "let math = import \"math\";\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -702,12 +787,15 @@ TEST(public_declaration) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "pub let exported_func = fn() {\n"
         "    return 42;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -723,13 +811,16 @@ TEST(volatile_variable) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let test = fn() {\n"
         "    volatile var reg: u32;\n"
         "    reg = 0xFF;\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);
@@ -745,6 +836,9 @@ TEST(packed_struct) {
     ErrorList errors;
     error_list_init(&errors, &arena);
 
+    StringPool string_pool;
+    string_pool_init(&string_pool, &arena);
+
     const char* source =
         "let Packet = struct packed {\n"
         "    header: u8,\n"
@@ -752,7 +846,7 @@ TEST(packed_struct) {
         "    data: [256]u8\n"
         "};\n";
 
-    Parser* parser = create_parser(source, &arena, &errors);
+    Parser* parser = create_parser(source, &arena, &errors, &string_pool);
 
     AstNode* root = parser_parse(parser);
     ASSERT_NOT_NULL(root);

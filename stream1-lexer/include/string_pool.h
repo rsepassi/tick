@@ -6,18 +6,17 @@
 // String Pool Interface
 // Purpose: Centralized string interning for all identifiers and names
 
+// Forward declare Arena
+typedef struct Arena Arena;
+
 typedef struct StringPool {
-    char* buffer;        // Segmented slab allocation
-    size_t used;
-    size_t capacity;
+    Arena* arena;        // Arena for allocations
 
     // TODO: Later convert to trie for faster lookups
     const char** strings;
     size_t string_count;
+    size_t string_capacity;
 } StringPool;
-
-// Forward declare Arena
-typedef struct Arena Arena;
 
 // Initialize with caller-provided memory
 void string_pool_init(StringPool* pool, Arena* arena);

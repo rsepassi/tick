@@ -1,5 +1,5 @@
-#include "../string_pool.h"
-#include "../arena.h"
+#include "string_pool.h"
+#include "arena.h"
 #include <string.h>
 #include <assert.h>
 #include <stdint.h>

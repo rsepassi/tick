@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Werror -Wextra -std=c11 -I./include
+CFLAGS = -Wall -Werror -Wextra -std=c11 -I./include -I../interfaces2
 FREESTANDING_FLAGS = -ffreestanding
 
 SRC_DIR = src

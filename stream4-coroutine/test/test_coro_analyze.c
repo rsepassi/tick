@@ -65,21 +65,25 @@ Type* mock_type_bool(Arena* arena) {
 
 AstNode* mock_identifier(const char* name, Type* type, Arena* arena) {
     AstNode* node = mock_node_create(AST_IDENTIFIER_EXPR, arena);
-    node->data.identifier.name = name;
+    node->data.identifier_expr.name = name;
     node->type = type;
     return node;
 }
 
 AstNode* mock_literal_int(int64_t val, Arena* arena) {
     AstNode* node = mock_node_create(AST_LITERAL_EXPR, arena);
-    node->data.literal.value.int_val = val;
+    node->data.literal_expr.literal_kind = LITERAL_INT;
+    node->data.literal_expr.value.int_value = (uint64_t)val;
     node->type = mock_type_i32(arena);
     return node;
 }
 
 AstNode* mock_binary_expr(const char* op, AstNode* left, AstNode* right, Arena* arena) {
     AstNode* node = mock_node_create(AST_BINARY_EXPR, arena);
-    node->data.binary_expr.op = op;
+    // Map string op to BinaryOp enum (simplified for testing)
+    if (strcmp(op, "+") == 0) node->data.binary_expr.op = BINOP_ADD;
+    else if (strcmp(op, ">") == 0) node->data.binary_expr.op = BINOP_GT;
+    else node->data.binary_expr.op = BINOP_ADD; // Default
     node->data.binary_expr.left = left;
     node->data.binary_expr.right = right;
     node->type = left->type;
@@ -88,16 +92,21 @@ AstNode* mock_binary_expr(const char* op, AstNode* left, AstNode* right, Arena* 
 
 AstNode* mock_var_stmt(const char* name, Type* type, AstNode* init, Arena* arena) {
     AstNode* node = mock_node_create(AST_VAR_STMT, arena);
-    node->data.var_stmt.name = name;
-    node->data.var_stmt.init = init;
+    node->data.var_decl.name = name;
+    node->data.var_decl.init = init;
+    node->data.var_decl.type = NULL;
+    node->data.var_decl.is_volatile = false;
+    node->data.var_decl.is_pub = false;
     node->type = type;
     return node;
 }
 
 AstNode* mock_let_stmt(const char* name, Type* type, AstNode* init, Arena* arena) {
     AstNode* node = mock_node_create(AST_LET_STMT, arena);
-    node->data.let_stmt.name = name;
-    node->data.let_stmt.init = init;
+    node->data.let_decl.name = name;
+    node->data.let_decl.init = init;
+    node->data.let_decl.type = NULL;
+    node->data.let_decl.is_pub = false;
     node->type = type;
     return node;
 }
@@ -109,14 +118,14 @@ AstNode* mock_suspend_stmt(Arena* arena) {
 
 AstNode* mock_return_stmt(AstNode* expr, Arena* arena) {
     AstNode* node = mock_node_create(AST_RETURN_STMT, arena);
-    node->data.return_stmt.expr = expr;
+    node->data.return_stmt.value = expr;
     return node;
 }
 
 AstNode* mock_block_stmt(AstNode** stmts, size_t count, Arena* arena) {
     AstNode* node = mock_node_create(AST_BLOCK_STMT, arena);
-    node->data.block.stmts = stmts;
-    node->data.block.stmt_count = count;
+    node->data.block_stmt.stmts = stmts;
+    node->data.block_stmt.stmt_count = count;
     return node;
 }
 
@@ -136,12 +145,12 @@ AstNode* mock_expr_stmt(AstNode* expr, Arena* arena) {
 
 AstNode* mock_function(const char* name, AstNode* body, bool is_async, Arena* arena) {
     AstNode* node = mock_node_create(AST_FUNCTION_DECL, arena);
-    node->data.function.name = name;
-    node->data.function.body = body;
-    node->data.function.is_async = is_async;
-    node->data.function.is_public = true;
-    node->data.function.params = NULL;
-    node->data.function.param_count = 0;
+    node->data.function_decl.name = name;
+    node->data.function_decl.body = body;
+    node->data.function_decl.params = NULL;
+    node->data.function_decl.param_count = 0;
+    node->data.function_decl.return_type = NULL;
+    node->data.function_decl.is_pub = true;
     return node;
 }
 

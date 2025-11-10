@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Forward declarations
+typedef struct StringPool StringPool;
+typedef struct ErrorList ErrorList;
+
 // Lexer Interface
 // Purpose: Streaming tokenization for parser consumption
 
@@ -41,6 +45,10 @@ typedef enum {
     TOKEN_DOT, TOKEN_ARROW, TOKEN_COLON, TOKEN_SEMICOLON,
     TOKEN_COMMA, TOKEN_DOT_DOT,
 
+    // Comments (preserved for formatter)
+    TOKEN_LINE_COMMENT,
+    TOKEN_BLOCK_COMMENT,
+
     TOKEN_EOF,
     TOKEN_ERROR
 } TokenKind;
@@ -68,15 +76,23 @@ typedef struct Lexer {
     const char* filename;
 
     const char* current;
+    const char* token_start;  // Start of current token
     uint32_t line;
     uint32_t column;
+    uint32_t token_line;      // Line where current token started
+    uint32_t token_column;    // Column where current token started
 
     Token current_token;
     bool has_error;
+
+    // Dependencies
+    StringPool* string_pool;
+    ErrorList* error_list;
 } Lexer;
 
 // Initialize lexer with caller-provided memory
-void lexer_init(Lexer* lexer, const char* source, size_t len, const char* filename);
+void lexer_init(Lexer* lexer, const char* source, size_t len, const char* filename,
+                StringPool* string_pool, ErrorList* error_list);
 
 // Get next token (parser calls this repeatedly)
 Token lexer_next_token(Lexer* lexer);

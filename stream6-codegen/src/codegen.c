@@ -11,12 +11,14 @@
 #define INDENT_H(ctx) for(int i = 0; i < (ctx)->indent_level; i++) fprintf((ctx)->header_out, "    ")
 
 // Forward declarations
-static void emit_node(IrNode* node, CodegenContext* ctx, bool is_expr);
-static void emit_statement(IrNode* node, CodegenContext* ctx);
-static void emit_expression(IrNode* node, CodegenContext* ctx);
-static void emit_function(IrNode* node, CodegenContext* ctx);
-static void emit_state_machine(IrNode* node, CodegenContext* ctx);
+static void emit_function(IrFunction* func, CodegenContext* ctx);
+static void emit_basic_block(IrBasicBlock* block, CodegenContext* ctx);
+static void emit_instruction(IrInstruction* instr, CodegenContext* ctx);
+static void emit_value(IrValue* value, CodegenContext* ctx);
+static void emit_state_machine(IrFunction* func, CodegenContext* ctx);
 static void emit_line_directive(SourceLocation loc, CodegenContext* ctx);
+static const char* binary_op_to_c(IrBinaryOp op);
+static const char* unary_op_to_c(IrUnaryOp op);
 
 // Initialize codegen context
 void codegen_init(CodegenContext* ctx, Arena* arena, ErrorList* errors,
@@ -109,204 +111,254 @@ static void emit_line_directive(SourceLocation loc, CodegenContext* ctx) {
     fprintf(ctx->source_out, "#line %u \"%s\"\n", loc.line, loc.filename);
 }
 
-// Emit a single node (statement or expression)
-// Currently unused, but kept for future expansion
-__attribute__((unused))
-static void emit_node(IrNode* node, CodegenContext* ctx, bool is_expr) {
-    if (is_expr) {
-        emit_expression(node, ctx);
-    } else {
-        emit_statement(node, ctx);
+// Binary operator to C string
+static const char* binary_op_to_c(IrBinaryOp op) {
+    switch (op) {
+        case IR_OP_ADD: return "+";
+        case IR_OP_SUB: return "-";
+        case IR_OP_MUL: return "*";
+        case IR_OP_DIV: return "/";
+        case IR_OP_MOD: return "%";
+        case IR_OP_AND: return "&";
+        case IR_OP_OR:  return "|";
+        case IR_OP_XOR: return "^";
+        case IR_OP_SHL: return "<<";
+        case IR_OP_SHR: return ">>";
+        case IR_OP_EQ:  return "==";
+        case IR_OP_NE:  return "!=";
+        case IR_OP_LT:  return "<";
+        case IR_OP_LE:  return "<=";
+        case IR_OP_GT:  return ">";
+        case IR_OP_GE:  return ">=";
+        case IR_OP_LOGICAL_AND: return "&&";
+        case IR_OP_LOGICAL_OR:  return "||";
+        default: return "?";
     }
 }
 
-// Emit an expression (returns a value)
-static void emit_expression(IrNode* node, CodegenContext* ctx) {
-    if (!node || !ctx->source_out) return;
+// Unary operator to C string
+static const char* unary_op_to_c(IrUnaryOp op) {
+    switch (op) {
+        case IR_OP_NEG: return "-";
+        case IR_OP_NOT: return "~";
+        case IR_OP_DEREF: return "*";
+        case IR_OP_ADDR_OF: return "&";
+        case IR_OP_LOGICAL_NOT: return "!";
+        default: return "?";
+    }
+}
 
-    switch (node->kind) {
-        case IR_LITERAL:
-            fprintf(ctx->source_out, "%s", node->data.literal.literal);
-            break;
+// Emit a value (temporary, constant, parameter, etc.)
+static void emit_value(IrValue* value, CodegenContext* ctx) {
+    if (!value || !ctx->source_out) return;
 
-        case IR_VAR_REF: {
-            const char* prefixed = codegen_prefix_identifier(node->data.var_ref.var_name, ctx->arena);
-            fprintf(ctx->source_out, "%s", prefixed);
-            break;
-        }
-
-        case IR_BINARY_OP:
-            fprintf(ctx->source_out, "(");
-            emit_expression(node->data.binary_op.left, ctx);
-            fprintf(ctx->source_out, " %s ", node->data.binary_op.op);
-            emit_expression(node->data.binary_op.right, ctx);
-            fprintf(ctx->source_out, ")");
-            break;
-
-        case IR_CALL: {
-            const char* prefixed = codegen_prefix_identifier(node->data.call.function_name, ctx->arena);
-            fprintf(ctx->source_out, "%s(", prefixed);
-            for (size_t i = 0; i < node->data.call.arg_count; i++) {
-                if (i > 0) fprintf(ctx->source_out, ", ");
-                emit_expression(node->data.call.args[i], ctx);
+    switch (value->kind) {
+        case IR_VALUE_TEMP:
+            if (value->data.temp.name) {
+                fprintf(ctx->source_out, "%s",
+                       codegen_prefix_identifier(value->data.temp.name, ctx->arena));
+            } else {
+                fprintf(ctx->source_out, "t%u", value->data.temp.id);
             }
-            fprintf(ctx->source_out, ")");
             break;
-        }
+
+        case IR_VALUE_CONSTANT:
+            // Emit constant based on type
+            if (value->type && value->type->kind == TYPE_BOOL) {
+                fprintf(ctx->source_out, "%s", value->data.constant.data.bool_val ? "true" : "false");
+            } else if (value->type && (value->type->kind >= TYPE_I8 && value->type->kind <= TYPE_ISIZE)) {
+                fprintf(ctx->source_out, "%lld", (long long)value->data.constant.data.int_val);
+            } else if (value->type && (value->type->kind >= TYPE_U8 && value->type->kind <= TYPE_USIZE)) {
+                fprintf(ctx->source_out, "%llu", (unsigned long long)value->data.constant.data.uint_val);
+            } else {
+                fprintf(ctx->source_out, "%s",
+                       value->data.constant.data.str_val ? value->data.constant.data.str_val : "0");
+            }
+            break;
+
+        case IR_VALUE_PARAM:
+            fprintf(ctx->source_out, "%s",
+                   codegen_prefix_identifier(value->data.param.name, ctx->arena));
+            break;
+
+        case IR_VALUE_GLOBAL:
+            fprintf(ctx->source_out, "%s",
+                   codegen_prefix_identifier(value->data.global.name, ctx->arena));
+            break;
+
+        case IR_VALUE_NULL:
+            fprintf(ctx->source_out, "NULL");
+            break;
 
         default:
-            fprintf(ctx->source_out, "/* unsupported expression */");
+            fprintf(ctx->source_out, "/* unknown value */");
             break;
     }
 }
 
-// Emit a statement
-static void emit_statement(IrNode* node, CodegenContext* ctx) {
-    if (!node || !ctx->source_out) return;
+// Emit an instruction
+static void emit_instruction(IrInstruction* instr, CodegenContext* ctx) {
+    if (!instr || !ctx->source_out) return;
 
-    emit_line_directive(node->loc, ctx);
+    emit_line_directive(instr->loc, ctx);
 
-    switch (node->kind) {
+    switch (instr->kind) {
         case IR_ASSIGN:
             INDENT(ctx);
-            fprintf(ctx->source_out, "%s = ",
-                    codegen_prefix_identifier(node->data.assign.target, ctx->arena));
-            emit_expression(node->data.assign.value, ctx);
+            emit_value(instr->data.assign.dest, ctx);
+            fprintf(ctx->source_out, " = ");
+            emit_value(instr->data.assign.src, ctx);
             fprintf(ctx->source_out, ";\n");
+            break;
+
+        case IR_BINARY_OP:
+            INDENT(ctx);
+            emit_value(instr->data.binary_op.dest, ctx);
+            fprintf(ctx->source_out, " = ");
+            emit_value(instr->data.binary_op.left, ctx);
+            fprintf(ctx->source_out, " %s ", binary_op_to_c(instr->data.binary_op.op));
+            emit_value(instr->data.binary_op.right, ctx);
+            fprintf(ctx->source_out, ";\n");
+            break;
+
+        case IR_UNARY_OP:
+            INDENT(ctx);
+            emit_value(instr->data.unary_op.dest, ctx);
+            fprintf(ctx->source_out, " = %s", unary_op_to_c(instr->data.unary_op.op));
+            emit_value(instr->data.unary_op.operand, ctx);
+            fprintf(ctx->source_out, ";\n");
+            break;
+
+        case IR_CALL:
+        case IR_ASYNC_CALL:
+            INDENT(ctx);
+            if (instr->data.call.dest) {
+                emit_value(instr->data.call.dest, ctx);
+                fprintf(ctx->source_out, " = ");
+            }
+            emit_value(instr->data.call.func, ctx);
+            fprintf(ctx->source_out, "(");
+            for (size_t i = 0; i < instr->data.call.arg_count; i++) {
+                if (i > 0) fprintf(ctx->source_out, ", ");
+                emit_value(instr->data.call.args[i], ctx);
+            }
+            fprintf(ctx->source_out, ");\n");
             break;
 
         case IR_RETURN:
             INDENT(ctx);
             fprintf(ctx->source_out, "return");
-            if (node->data.return_stmt.value) {
+            if (instr->data.ret.value) {
                 fprintf(ctx->source_out, " ");
-                emit_expression(node->data.return_stmt.value, ctx);
+                emit_value(instr->data.ret.value, ctx);
             }
             fprintf(ctx->source_out, ";\n");
-            break;
-
-        case IR_IF:
-            INDENT(ctx);
-            fprintf(ctx->source_out, "if (");
-            emit_expression(node->data.if_stmt.condition, ctx);
-            fprintf(ctx->source_out, ") {\n");
-            ctx->indent_level++;
-            emit_statement(node->data.if_stmt.then_block, ctx);
-            ctx->indent_level--;
-            if (node->data.if_stmt.else_block) {
-                INDENT(ctx);
-                fprintf(ctx->source_out, "} else {\n");
-                ctx->indent_level++;
-                emit_statement(node->data.if_stmt.else_block, ctx);
-                ctx->indent_level--;
-            }
-            INDENT(ctx);
-            fprintf(ctx->source_out, "}\n");
             break;
 
         case IR_JUMP:
             INDENT(ctx);
             fprintf(ctx->source_out, "goto %s;\n",
-                    codegen_prefix_identifier(node->data.jump.label, ctx->arena));
+                   codegen_prefix_identifier(instr->data.jump.target->label, ctx->arena));
             break;
 
-        case IR_LABEL:
-            fprintf(ctx->source_out, "%s:\n",
-                    codegen_prefix_identifier(node->data.label.label, ctx->arena));
-            break;
-
-        case IR_BASIC_BLOCK:
-            for (size_t i = 0; i < node->data.basic_block.instruction_count; i++) {
-                emit_statement(node->data.basic_block.instructions[i], ctx);
-            }
-            break;
-
-        case IR_CALL:
+        case IR_COND_JUMP:
             INDENT(ctx);
-            emit_expression(node, ctx);
+            fprintf(ctx->source_out, "if (");
+            emit_value(instr->data.cond_jump.cond, ctx);
+            fprintf(ctx->source_out, ") goto %s; else goto %s;\n",
+                   codegen_prefix_identifier(instr->data.cond_jump.true_target->label, ctx->arena),
+                   codegen_prefix_identifier(instr->data.cond_jump.false_target->label, ctx->arena));
+            break;
+
+        case IR_LOAD:
+            INDENT(ctx);
+            emit_value(instr->data.load.dest, ctx);
+            fprintf(ctx->source_out, " = *");
+            emit_value(instr->data.load.addr, ctx);
             fprintf(ctx->source_out, ";\n");
             break;
 
-        case IR_DEFER_REGION:
-            // Emit main body first
-            emit_statement(node->data.defer_region.body, ctx);
-            // Then emit deferred statements in reverse order
-            for (int i = (int)node->data.defer_region.deferred_count - 1; i >= 0; i--) {
-                emit_statement(node->data.defer_region.deferred_stmts[i], ctx);
+        case IR_STORE:
+            INDENT(ctx);
+            fprintf(ctx->source_out, "*");
+            emit_value(instr->data.store.addr, ctx);
+            fprintf(ctx->source_out, " = ");
+            emit_value(instr->data.store.value, ctx);
+            fprintf(ctx->source_out, ";\n");
+            break;
+
+        case IR_ALLOCA:
+            INDENT(ctx);
+            emit_value(instr->data.alloca.dest, ctx);
+            fprintf(ctx->source_out, " = alloca(sizeof(%s)",
+                   codegen_type_to_c(instr->data.alloca.alloc_type, ctx->arena));
+            if (instr->data.alloca.count > 1) {
+                fprintf(ctx->source_out, " * %zu", instr->data.alloca.count);
             }
+            fprintf(ctx->source_out, ");\n");
+            break;
+
+        case IR_GET_FIELD:
+            INDENT(ctx);
+            emit_value(instr->data.get_field.dest, ctx);
+            fprintf(ctx->source_out, " = ");
+            emit_value(instr->data.get_field.base, ctx);
+            fprintf(ctx->source_out, ".%s;\n",
+                   codegen_prefix_identifier(instr->data.get_field.field_name, ctx->arena));
+            break;
+
+        case IR_GET_INDEX:
+            INDENT(ctx);
+            emit_value(instr->data.get_index.dest, ctx);
+            fprintf(ctx->source_out, " = ");
+            emit_value(instr->data.get_index.base, ctx);
+            fprintf(ctx->source_out, "[");
+            emit_value(instr->data.get_index.index, ctx);
+            fprintf(ctx->source_out, "];\n");
+            break;
+
+        case IR_CAST:
+            INDENT(ctx);
+            emit_value(instr->data.cast.dest, ctx);
+            fprintf(ctx->source_out, " = (%s)",
+                   codegen_type_to_c(instr->data.cast.target_type, ctx->arena));
+            emit_value(instr->data.cast.value, ctx);
+            fprintf(ctx->source_out, ";\n");
             break;
 
         default:
             INDENT(ctx);
-            fprintf(ctx->source_out, "/* unsupported statement kind: %d */\n", node->kind);
+            fprintf(ctx->source_out, "/* unsupported instruction kind: %d */\n", instr->kind);
             break;
     }
 }
 
-// Emit a regular function
-static void emit_function(IrNode* node, CodegenContext* ctx) {
-    if (!node || node->kind != IR_FUNCTION) return;
+// Emit a basic block
+static void emit_basic_block(IrBasicBlock* block, CodegenContext* ctx) {
+    if (!block || !ctx->source_out) return;
 
-    const char* func_name = codegen_prefix_identifier(node->data.function.name, ctx->arena);
-    const char* return_type = codegen_type_to_c(node->data.function.return_type, ctx->arena);
-
-    // Function declaration in header
-    if (ctx->header_out) {
-        fprintf(ctx->header_out, "%s %s(", return_type, func_name);
-        for (size_t i = 0; i < node->data.function.param_count; i++) {
-            if (i > 0) fprintf(ctx->header_out, ", ");
-            IrParam* param = &node->data.function.params[i];
-            const char* param_type = codegen_type_to_c(param->type, ctx->arena);
-            const char* param_name = codegen_prefix_identifier(param->name, ctx->arena);
-            fprintf(ctx->header_out, "%s %s", param_type, param_name);
-        }
-        if (node->data.function.param_count == 0) {
-            fprintf(ctx->header_out, "void");
-        }
-        fprintf(ctx->header_out, ");\n\n");
+    // Emit label if present and block has predecessors (needs to be jumped to)
+    if (block->label && block->predecessor_count > 0) {
+        fprintf(ctx->source_out, "%s:\n",
+               codegen_prefix_identifier(block->label, ctx->arena));
     }
 
-    // Function definition in source
-    if (ctx->source_out) {
-        emit_line_directive(node->loc, ctx);
-        fprintf(ctx->source_out, "%s %s(", return_type, func_name);
-        for (size_t i = 0; i < node->data.function.param_count; i++) {
-            if (i > 0) fprintf(ctx->source_out, ", ");
-            IrParam* param = &node->data.function.params[i];
-            const char* param_type = codegen_type_to_c(param->type, ctx->arena);
-            const char* param_name = codegen_prefix_identifier(param->name, ctx->arena);
-            fprintf(ctx->source_out, "%s %s", param_type, param_name);
-        }
-        if (node->data.function.param_count == 0) {
-            fprintf(ctx->source_out, "void");
-        }
-        fprintf(ctx->source_out, ") {\n");
-
-        ctx->indent_level++;
-
-        // Check if this is a state machine function
-        if (node->data.function.is_state_machine && node->data.function.coro_meta) {
-            emit_state_machine(node, ctx);
-        } else {
-            // Regular function body
-            emit_statement(node->data.function.body, ctx);
-        }
-
-        ctx->indent_level--;
-        fprintf(ctx->source_out, "}\n\n");
+    // Emit all instructions in the block
+    for (size_t i = 0; i < block->instruction_count; i++) {
+        emit_instruction(block->instructions[i], ctx);
     }
 }
 
 // Emit state machine using computed goto
-static void emit_state_machine(IrNode* node, CodegenContext* ctx) {
-    if (!node->data.function.coro_meta) return;
+static void emit_state_machine(IrFunction* func, CodegenContext* ctx) {
+    if (!func->coro_meta) return;
 
-    CoroMetadata* meta = node->data.function.coro_meta;
+    CoroMetadata* meta = func->coro_meta;
 
     // Generate state struct type definition
     INDENT(ctx);
     fprintf(ctx->source_out, "struct %s_state {\n",
-            codegen_prefix_identifier(node->data.function.name, ctx->arena));
+           codegen_prefix_identifier(func->name, ctx->arena));
     ctx->indent_level++;
 
     INDENT(ctx);
@@ -346,7 +398,7 @@ static void emit_state_machine(IrNode* node, CodegenContext* ctx) {
     // Initialize machine state
     INDENT(ctx);
     fprintf(ctx->source_out, "machine.state = &&%s_state_0;\n",
-            codegen_prefix_identifier(node->data.function.name, ctx->arena));
+           codegen_prefix_identifier(func->name, ctx->arena));
 
     // Computed goto dispatcher
     INDENT(ctx);
@@ -355,13 +407,13 @@ static void emit_state_machine(IrNode* node, CodegenContext* ctx) {
     // Generate state labels and code
     for (size_t i = 0; i < meta->suspend_count; i++) {
         SuspendPoint* sp = &meta->suspend_points[i];
-        const char* label = codegen_prefix_identifier(node->data.function.name, ctx->arena);
+        const char* label = codegen_prefix_identifier(func->name, ctx->arena);
         fprintf(ctx->source_out, "%s_state_%u:\n", label, sp->state_id);
 
         ctx->indent_level++;
         INDENT(ctx);
         fprintf(ctx->source_out, "/* State %u: %u live variables */\n",
-                sp->state_id, (unsigned)sp->live_var_count);
+               sp->state_id, (unsigned)sp->live_var_count);
 
         // Restore live variables from state struct
         for (size_t j = 0; j < sp->live_var_count; j++) {
@@ -370,7 +422,7 @@ static void emit_state_machine(IrNode* node, CodegenContext* ctx) {
                 INDENT(ctx);
                 const char* var_name = codegen_prefix_identifier(var->var_name, ctx->arena);
                 fprintf(ctx->source_out, "%s = machine.data.state_%u.%s;\n",
-                        var_name, sp->state_id, var_name);
+                       var_name, sp->state_id, var_name);
             }
         }
 
@@ -378,6 +430,61 @@ static void emit_state_machine(IrNode* node, CodegenContext* ctx) {
         fprintf(ctx->source_out, "/* TODO: Resume execution */\n");
         ctx->indent_level--;
         fprintf(ctx->source_out, "\n");
+    }
+}
+
+// Emit a function
+static void emit_function(IrFunction* func, CodegenContext* ctx) {
+    if (!func) return;
+
+    const char* func_name = codegen_prefix_identifier(func->name, ctx->arena);
+    const char* return_type = codegen_type_to_c(func->return_type, ctx->arena);
+
+    // Function declaration in header
+    if (ctx->header_out) {
+        fprintf(ctx->header_out, "%s %s(", return_type, func_name);
+        for (size_t i = 0; i < func->param_count; i++) {
+            if (i > 0) fprintf(ctx->header_out, ", ");
+            IrParam* param = &func->params[i];
+            const char* param_type = codegen_type_to_c(param->type, ctx->arena);
+            const char* param_name = codegen_prefix_identifier(param->name, ctx->arena);
+            fprintf(ctx->header_out, "%s %s", param_type, param_name);
+        }
+        if (func->param_count == 0) {
+            fprintf(ctx->header_out, "void");
+        }
+        fprintf(ctx->header_out, ");\n\n");
+    }
+
+    // Function definition in source
+    if (ctx->source_out) {
+        fprintf(ctx->source_out, "%s %s(", return_type, func_name);
+        for (size_t i = 0; i < func->param_count; i++) {
+            if (i > 0) fprintf(ctx->source_out, ", ");
+            IrParam* param = &func->params[i];
+            const char* param_type = codegen_type_to_c(param->type, ctx->arena);
+            const char* param_name = codegen_prefix_identifier(param->name, ctx->arena);
+            fprintf(ctx->source_out, "%s %s", param_type, param_name);
+        }
+        if (func->param_count == 0) {
+            fprintf(ctx->source_out, "void");
+        }
+        fprintf(ctx->source_out, ") {\n");
+
+        ctx->indent_level++;
+
+        // Check if this is a state machine function
+        if (func->is_state_machine && func->coro_meta) {
+            emit_state_machine(func, ctx);
+        } else {
+            // Emit all basic blocks
+            for (size_t i = 0; i < func->block_count; i++) {
+                emit_basic_block(func->blocks[i], ctx);
+            }
+        }
+
+        ctx->indent_level--;
+        fprintf(ctx->source_out, "}\n\n");
     }
 }
 
@@ -420,13 +527,16 @@ void codegen_emit_module(IrNode* module, CodegenContext* ctx) {
         return;
     }
 
+    IrModule* mod = module->data.module;
+    if (!mod) return;
+
     // Emit header guard and includes for header file
     if (ctx->header_out) {
         fprintf(ctx->header_out, "/* Generated code - do not edit */\n");
         fprintf(ctx->header_out, "#ifndef %s_H\n",
-                codegen_prefix_identifier(ctx->module_name, ctx->arena));
+               codegen_prefix_identifier(ctx->module_name, ctx->arena));
         fprintf(ctx->header_out, "#define %s_H\n\n",
-                codegen_prefix_identifier(ctx->module_name, ctx->arena));
+               codegen_prefix_identifier(ctx->module_name, ctx->arena));
         fprintf(ctx->header_out, "#include \"lang_runtime.h\"\n\n");
     }
 
@@ -437,13 +547,13 @@ void codegen_emit_module(IrNode* module, CodegenContext* ctx) {
     }
 
     // Emit all functions
-    for (size_t i = 0; i < module->data.module.function_count; i++) {
-        emit_function(module->data.module.functions[i], ctx);
+    for (size_t i = 0; i < mod->function_count; i++) {
+        emit_function(mod->functions[i], ctx);
     }
 
     // Close header guard
     if (ctx->header_out) {
         fprintf(ctx->header_out, "#endif /* %s_H */\n",
-                codegen_prefix_identifier(ctx->module_name, ctx->arena));
+               codegen_prefix_identifier(ctx->module_name, ctx->arena));
     }
 }

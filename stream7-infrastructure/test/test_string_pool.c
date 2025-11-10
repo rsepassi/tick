@@ -1,6 +1,6 @@
 #include "test_harness.h"
-#include "../string_pool.h"
-#include "../arena.h"
+#include "string_pool.h"
+#include "arena.h"
 #include <string.h>
 
 // Test basic string interning
