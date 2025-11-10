@@ -24,6 +24,12 @@
 #define TICK_USER_LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
 #define TICK_USER_LOGE(fmt, ...) fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
 
+#ifdef TICK_DEBUG
+#define DLOG(fmt, ...) fprintf(stderr, "[DEBUG] " fmt "\n", ##__VA_ARGS__)
+#else
+#define DLOG(fmt, ...) do {} while (0)
+#endif
+
 #define TICK_HELP "Usage: tick emitc <input.tick> -o <output>\n"
 #define TICK_READ_FILE_ERROR "Failed to read input file"
 
@@ -82,14 +88,123 @@ typedef enum {
 typedef enum {
   TICK_TOK_EOF,
   TICK_TOK_ERR,
+
+  // Identifier
   TICK_TOK_IDENT,
-  TICK_TOK_NUMBER,
-  // Add more token types as needed
+
+  // Literals
+  TICK_TOK_UINT_LITERAL,
+  TICK_TOK_INT_LITERAL,
+  TICK_TOK_STRING_LITERAL,
+  TICK_TOK_BOOL_LITERAL,
+
+  // Type keywords
+  TICK_TOK_BOOL,
+  TICK_TOK_I8,
+  TICK_TOK_I16,
+  TICK_TOK_I32,
+  TICK_TOK_I64,
+  TICK_TOK_ISZ,
+  TICK_TOK_U8,
+  TICK_TOK_U16,
+  TICK_TOK_U32,
+  TICK_TOK_U64,
+  TICK_TOK_USZ,
+  TICK_TOK_VOID,
+
+  // Keywords
+  TICK_TOK_AND,
+  TICK_TOK_ASYNC,
+  TICK_TOK_BREAK,
+  TICK_TOK_CASE,
+  TICK_TOK_CATCH,
+  TICK_TOK_CONTINUE,
+  TICK_TOK_DEFAULT,
+  TICK_TOK_DEFER,
+  TICK_TOK_ELSE,
+  TICK_TOK_EMBED_FILE,
+  TICK_TOK_ENUM,
+  TICK_TOK_ERRDEFER,
+  TICK_TOK_FN,
+  TICK_TOK_FOR,
+  TICK_TOK_IF,
+  TICK_TOK_IMPORT,
+  TICK_TOK_IN,
+  TICK_TOK_LET,
+  TICK_TOK_OR,
+  TICK_TOK_PACKED,
+  TICK_TOK_PUB,
+  TICK_TOK_RESUME,
+  TICK_TOK_RETURN,
+  TICK_TOK_STRUCT,
+  TICK_TOK_SUSPEND,
+  TICK_TOK_SWITCH,
+  TICK_TOK_TRY,
+  TICK_TOK_UNION,
+  TICK_TOK_VAR,
+  TICK_TOK_VOLATILE,
+  TICK_TOK_WHILE,
+
+  // Punctuation
+  TICK_TOK_LPAREN,      // (
+  TICK_TOK_RPAREN,      // )
+  TICK_TOK_LBRACE,      // {
+  TICK_TOK_RBRACE,      // }
+  TICK_TOK_LBRACKET,    // [
+  TICK_TOK_RBRACKET,    // ]
+  TICK_TOK_COMMA,       // ,
+  TICK_TOK_SEMICOLON,   // ;
+  TICK_TOK_COLON,       // :
+  TICK_TOK_DOT,         // .
+  TICK_TOK_DOT_DOT,     // ..
+  TICK_TOK_QUESTION,    // ?
+
+  // Operators
+  TICK_TOK_PLUS,        // +
+  TICK_TOK_MINUS,       // -
+  TICK_TOK_STAR,        // *
+  TICK_TOK_SLASH,       // /
+  TICK_TOK_PERCENT,     // %
+  TICK_TOK_AMPERSAND,   // &
+  TICK_TOK_PIPE,        // |
+  TICK_TOK_CARET,       // ^
+  TICK_TOK_TILDE,       // ~
+  TICK_TOK_BANG,        // !
+  TICK_TOK_EQ,          // =
+  TICK_TOK_LT,          // <
+  TICK_TOK_GT,          // >
+  TICK_TOK_PLUS_EQ,     // +=
+  TICK_TOK_MINUS_EQ,    // -=
+  TICK_TOK_STAR_EQ,     // *=
+  TICK_TOK_SLASH_EQ,    // /=
+  TICK_TOK_PLUS_PIPE,   // +| (saturating add)
+  TICK_TOK_MINUS_PIPE,  // -| (saturating sub)
+  TICK_TOK_STAR_PIPE,   // *| (saturating mul)
+  TICK_TOK_SLASH_PIPE,  // /| (saturating div)
+  TICK_TOK_PLUS_PERCENT,   // +% (modulo add)
+  TICK_TOK_MINUS_PERCENT,  // -% (modulo sub)
+  TICK_TOK_STAR_PERCENT,   // *% (modulo mul)
+  TICK_TOK_SLASH_PERCENT,  // /% (modulo div)
+  TICK_TOK_BANG_EQ,     // !=
+  TICK_TOK_EQ_EQ,       // ==
+  TICK_TOK_LT_EQ,       // <=
+  TICK_TOK_GT_EQ,       // >=
+  TICK_TOK_LSHIFT,      // <<
+  TICK_TOK_RSHIFT,      // >>
+
+  // Comments
+  TICK_TOK_COMMENT,     // #
 } tick_tok_type_t;
+
+typedef union {
+  uint64_t u64;
+  int64_t i64;
+} tick_tok_literal_t;
 
 typedef struct {
   tick_tok_type_t type;
   tick_buf_t text;
+  tick_tok_literal_t literal;
   usz line;
   usz col;
 } tick_tok_t;
@@ -135,6 +250,7 @@ tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t 
 // Lexer functions
 void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc, tick_buf_t errbuf);
 void tick_lex_next(tick_lex_t* lex, tick_tok_t* tok);
+const char* tick_tok_format(tick_tok_t* tok, char* buf, usz buf_sz);
 
 // Parser functions
 void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf);

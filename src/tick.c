@@ -290,34 +290,6 @@ tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t 
 }
 
 // ============================================================================
-// Lexer functions
-// ============================================================================
-
-void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc, tick_buf_t errbuf) {
-  lex->input = input;
-  lex->alloc = alloc;
-  lex->errbuf = errbuf;
-  lex->pos = 0;
-  lex->line = 1;
-  lex->col = 1;
-
-  // Null-terminate error buffer
-  if (errbuf.sz > 0) {
-    errbuf.buf[0] = '\0';
-  }
-}
-
-void tick_lex_next(tick_lex_t* lex, tick_tok_t* tok) {
-  UNUSED(lex);
-  // Return EOF for now (stub implementation)
-  tok->type = TICK_TOK_EOF;
-  tok->text.buf = NULL;
-  tok->text.sz = 0;
-  tok->line = lex->line;
-  tok->col = lex->col;
-}
-
-// ============================================================================
 // Parser functions
 // ============================================================================
 
