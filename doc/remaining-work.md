@@ -1,252 +1,386 @@
 # Remaining Work for Production Readiness
 
 **Last Updated:** 2025-11-10
-**Status:** ❌ NOT PRODUCTION READY - Critical components missing
+**Status:** ⚠️ BASIC COMPILATION WORKING - Type system and async features incomplete
 
 ---
 
 ## Current State
 
-The compiler pipeline has several working components but **cannot compile even a simple "hello world" program**. No compiler executable exists.
+The compiler pipeline now has a working end-to-end flow but **cannot correctly compile programs yet** due to type system bugs and incomplete features.
 
-**Critical Path to Production:**
-1. Build compiler driver executable
-2. Implement IR lowering with async support
-3. Implement C code generation
-4. Replace stub integration tests with real tests
-5. Actually compile and run all 8 example programs
+**Working compiler executable:** `compiler/tickc` (300KB binary)
+
+**Current output for simple function:**
+```c
+// Input: let add = fn(x: i32, y: i32) -> i32 { return x + y; };
+// Generated C:
+void __u_add(void __u_x, void __u_y) {
+}
+```
+
+**Issues:**
+- Parameter types show as "void" instead of "i32" (type resolution bug)
+- Return type shows as "void" instead of "i32" (type resolution bug)
+- Function body is empty (statement lowering/codegen issue)
 
 ---
 
 ## What Actually Works
 
-### Epoll Async Runtime
+### Compiler Infrastructure ✅
+- **Compiler driver:** `compiler/tickc` executable exists and runs
+- **Command-line interface:** `-o`, `-emit-c`, `-v`, `-h` options work
+- **File I/O:** Reads `.tick` files, writes `.c`/`.h` files
+- **Error reporting:** Multi-phase error collection and display
+- **Build system:** Makefile builds entire pipeline
+
+### Lexer ✅
+- **Status:** Fully functional (33/33 tests pass)
+- **Features:** All tokens, keywords, operators, literals
+- **Recent fix:** Added `#` line comment support (tick syntax)
+
+### Parser ✅
+- **Status:** Functional (25/26 tests pass, 119 shift/reduce conflicts)
+- **Recent fixes:**
+  - Declaration collection (AstNodeList with proper counts)
+  - Parameter collection (AstParamList with proper counts)
+  - Identifier name extraction (using interned strings)
+- **Working:** Parses all language constructs, builds AST
+
+### Semantic Analysis ⚠️
+- **Name resolution:** Working (resolves symbols, scopes)
+- **Type checking:** Infrastructure working but bugs remain
+- **Recent fixes:**
+  - Sets `->type` field on parameter type nodes
+  - Sets `->type` field on return type nodes
+- **Problem:** Type nodes may not be constructed correctly by parser
+
+### IR Lowering ⚠️
+- **Infrastructure:** Complete
+- **Function lowering:** Basic structure works
+- **Recent fixes:** Extract return type from correct AST field
+- **Problems:**
+  - Statement lowering may not emit instructions
+  - Expression lowering needs verification
+  - Async transformation not implemented
+
+### Code Generation ⚠️
+- **Infrastructure:** Complete (~560 LOC)
+- **Type translation:** Primitive types work
+- **Function signatures:** Generated correctly (with name prefixing)
+- **Problems:**
+  - Function bodies empty (no instructions emitted)
+  - Need to verify instruction emission pipeline
+
+### Epoll Async Runtime ✅
 - **Location:** `examples/runtime/`
 - **Status:** Fully functional and tested
 - **Tests:** 3/3 passing (timer, pipe I/O, TCP echo)
-- **Code:** ~800 LOC, clean, well-documented
-
-### Early Compiler Stages
-- **Lexer:** Can tokenize tick source (33/33 tests pass)
-- **Parser:** Can build AST from tokens (25/26 tests pass, 119 shift/reduce conflicts)
-- **Semantic:** Basic symbol resolution and type checking (15/15 tests pass)
-- **Limitation:** Only handles simple, non-async code snippets
-
-### Example Programs
-- **Location:** `examples/01-08*.tick`
-- **Count:** 8 example programs (1044 LOC)
-- **Status:** Written and documented
-- **Problem:** Cannot be compiled - no compiler exists
 
 ---
 
-## Missing Components
+## Critical Bugs to Fix
 
-### 1. Compiler Driver Executable
+### 1. Type Resolution Bug
 
-**Problem:** There is no `tick` or `tickc` executable. Cannot compile any `.tick` files.
+**Problem:** Parameter and return types not being populated correctly.
 
-**What's Needed:**
-- Main program that wires together all 7 compiler streams
-- Command-line argument parsing (`tick compile input.tick -o output`)
-- File I/O for reading source and writing generated C code
-- Error reporting and diagnostics
-- Build system integration (Makefile at root level)
+**Symptoms:**
+- All parameter types emit as "void"
+- Return types emit as "void"
 
-**Files to Create:**
-- `src/main.c` - Compiler driver program (~500 LOC)
-- `Makefile` - Root-level build system
-- Integration with existing stream implementations
+**Likely Causes:**
+- Parser may not be creating type AST nodes correctly
+- Type nodes may be missing when passed to type checker
+- Type resolution happens but doesn't store results in right place
 
-**Acceptance Criteria:**
-```bash
-$ make                              # Builds ./tick executable
-$ ./tick compile examples/01_hello.tick -o hello
-$ ls hello.c hello.h                # Generated C files exist
+**Investigation Needed:**
+- Verify `param(P)` grammar rule creates proper type nodes
+- Check if type nodes have correct kind (AST_TYPE_PRIMITIVE, etc.)
+- Trace type resolution through `resolve_type_from_node`
+- Verify type is stored in parameter's `type->type` field
+
+**Files:**
+- `stream2-parser/grammar.y` - Type node creation in grammar
+- `stream3-semantic/src/typeck.c` - Type resolution logic
+- `stream5-lowering/src/lower.c` - Type extraction from AST
+
+---
+
+### 2. Empty Function Bodies
+
+**Problem:** Generated C functions have empty bodies.
+
+**Symptoms:**
+```c
+void __u_add(void __u_x, void __u_y) {
+}  // No function body statements
 ```
 
+**Likely Causes:**
+- Statement lowering not emitting IR instructions
+- Basic block not being populated
+- Codegen not iterating over instructions
+- Instructions exist but emission is broken
+
+**Investigation Needed:**
+- Check if `lower_stmt` creates instructions
+- Verify instructions are added to basic block
+- Check if basic block has instruction count > 0
+- Verify `emit_instruction` is called for each instruction
+
+**Files:**
+- `stream5-lowering/src/lower.c` - Statement and expression lowering
+- `stream6-codegen/src/codegen.c` - Instruction emission
+
 ---
 
-### 2. IR Lowering
+## Remaining Implementation Work
 
-**Problem:** Stream 5 (lowering) exists but **async/coroutine lowering is not implemented**.
-
-**Current Status:**
-- Integration tests marked: "TODO: async syntax not supported"
-- No state machine generation
-- No suspend point handling
-- No coroutine frame layout implementation
+### 1. Fix Type System (Critical)
 
 **What's Needed:**
-- Lower AST to intermediate representation
-- Transform async functions into state machines
-- Generate state labels for suspend points
-- Pack live variables into coroutine frames (tagged unions)
-- Handle defer/errdefer cleanup in state machine context
-- Implement resume operation lowering
-
-**Files to Modify:**
-- `stream5-lowering/src/lower.c` - Add async transformation (~2000 LOC)
-- Tests in `stream5-lowering/test/` - Replace stubs with real tests
+- Debug type node creation in parser
+- Ensure all type nodes have correct AST kind
+- Verify type resolution stores results correctly
+- Test with simple function: `fn(x: i32) -> i32`
 
 **Acceptance Criteria:**
-- Can lower `examples/06_async_basic.tick` to IR
-- State machine structure properly generated
-- Live variable analysis integrated
-- All lowering tests actually test functionality (not stubs)
-
----
-
-### 3. Code Generation
-
-**Problem:** Stream 6 (codegen) exists but **C code generation from IR is not implemented**.
-
-**Current Status:**
-- Integration tests marked: "TODO: depends on IR lowering"
-- No state machine C code generation
-- No coroutine frame struct generation
-- No computed goto implementation
-
-**What's Needed:**
-- Generate C11 code from IR
-- Emit coroutine frame as tagged union structs
-- Generate state machine switch/goto implementation
-- Generate #line directives for debugging
-- Handle platform abstraction (async_submit calls)
-- Type translation (tick types → C types)
-- Cleanup code generation (defer/errdefer)
-
-**Files to Modify:**
-- `stream6-codegen/src/codegen.c` - Add IR→C translation (~1500 LOC)
-- Tests in `stream6-codegen/test/` - Replace stubs with real tests
-
-**Acceptance Criteria:**
-- Can generate valid C11 from lowered IR
-- Generated code compiles with: `gcc -std=c11 -Wall -Wextra -Werror -ffreestanding`
-- State machines use computed goto correctly
-- All codegen tests actually test functionality (not stubs)
-
----
-
-### 4. Integration Tests (63% Are Stubs)
-
-**Problem:** 27 out of 42 "passing" integration tests are empty stubs that don't test anything.
-
-**Breakdown:**
-| Test Suite | Real Tests | Stub Tests | Status |
-|------------|-----------|------------|--------|
-| test_lexer_parser | 7 | 0 | ✅ Real |
-| test_semantic | 8 | 0 | ✅ Real |
-| test_coroutine | 0 | 7 | ❌ Stubs |
-| test_lowering | 0 | 5 | ❌ Stubs |
-| test_codegen | 0 | 5 | ❌ Stubs |
-| test_full_compile | 0 | 5 | ❌ Stubs |
-| test_pipeline | 0 | 5 | ❌ Stubs |
-| **TOTAL** | **15** | **27** | **36% real** |
-
-**Example of Stub Test:**
 ```c
-// From test_full_compile.c
-static int test1(void) {
-    TEST("Full compilation simple (TODO: depends on complete pipeline)");
-    PASS();  // Just prints "PASS" without testing anything
-    return 1;
+// Input: let add = fn(x: i32, y: i32) -> i32 { ... };
+// Output:
+int32_t __u_add(int32_t __u_x, int32_t __u_y) {
+    // (body may still be incomplete)
 }
 ```
 
-**What's Needed:**
-- Replace all 27 stub tests with actual implementation tests
-- Tests should validate real functionality, not just print "PASS"
-- Add negative tests (error handling, invalid input)
-
-**Files to Modify:**
-- `integration/test_coroutine.c`
-- `integration/test_lowering.c`
-- `integration/test_codegen.c`
-- `integration/test_full_compile.c`
-- `integration/test_pipeline.c`
-
-**Acceptance Criteria:**
-- All tests validate actual compiler behavior
-- Tests fail when given invalid input
-- No more "TODO: depends on..." markers
-- Tests actually compile .tick files end-to-end
-
 ---
 
-### 5. End-to-End Validation
-
-**Problem:** Examples exist but have never been compiled or run.
+### 2. Complete Expression & Statement Lowering (Critical)
 
 **What's Needed:**
-- Successfully compile all 8 example programs
-- Generate valid C11 code for each
-- Compile generated C with gcc
-- Link with epoll runtime
-- Execute and validate behavior
-
-**Test Matrix:**
-| Example | Compile | Generate C | C Compiles | Links | Runs | Status |
-|---------|---------|------------|------------|-------|------|--------|
-| 01_hello.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 02_types.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 03_control_flow.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 04_errors.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 05_resources.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 06_async_basic.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 07_async_io.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
-| 08_tcp_echo_server.tick | ❌ | ❌ | ❌ | ❌ | ❌ | Not tested |
+- Verify expression lowering creates IR values
+- Verify statement lowering creates IR instructions
+- Debug why instructions aren't being added to blocks
+- Test with: `return x + y;`
 
 **Acceptance Criteria:**
-```bash
-# Must work for ALL examples
-$ ./tick compile examples/08_tcp_echo_server.tick -o tcp_server
-$ gcc -std=c11 -Wall -Wextra tcp_server.c examples/runtime/epoll_runtime.c -o tcp_server
-$ ./tcp_server
-# Server should accept connections, echo data, work correctly
+```c
+// Input: let add = fn(x: i32, y: i32) -> i32 { return x + y; };
+// Output:
+int32_t __u_add(int32_t __u_x, int32_t __u_y) {
+    int32_t t0 = __u_x + __u_y;
+    return t0;
+}
 ```
 
 ---
 
-## Additional Issues
+### 3. Complete Non-Async Features
 
-### Parser Conflicts
-- 119 shift/reduce conflicts in expression grammar
+**What's Needed:**
+- All primitive types (i8, i16, i32, i64, u8, u16, u32, u64, bool, isize, usize)
+- Binary operations (+, -, *, /, %, &, |, ^, <<, >>, ==, !=, <, >, <=, >=, &&, ||)
+- Unary operations (-, !, ~, &, *)
+- Variable declarations (let, var)
+- Assignments (=, +=, -=, *=, /=)
+- Control flow (if/else, for, while, switch/case)
+- Function calls
+- Struct types and field access
+- Array types and indexing
+- Pointer types and dereferencing
+
+**Test with examples:**
+- `examples/01_hello.tick` - Basic functions
+- `examples/02_types.tick` - Type system
+- `examples/03_control_flow.tick` - Control structures
+
+---
+
+### 4. Implement Coroutine Analysis
+
+**What's Needed:**
+- Analyze functions to detect async/await usage
+- Identify suspend points (await expressions)
+- Perform live variable analysis at each suspend point
+- Compute coroutine frame layout (which variables to save)
+- Annotate IR with coroutine metadata
+
+**Files to Complete:**
+- `stream4-coroutine/src/analysis.c` - Main analysis implementation
+- `stream4-coroutine/src/liveness.c` - Live variable analysis
+- `stream4-coroutine/src/frame_layout.c` - Frame packing
+
+**Acceptance Criteria:**
+- Can analyze `async fn() -> i32` functions
+- Correctly identifies suspend points
+- Computes minimal frame size
+- Handles nested async calls
+
+---
+
+### 5. Implement Async/Await Transformation
+
+**What's Needed:**
+- Transform async functions into state machines
+- Generate state labels for each suspend point
+- Pack live variables into coroutine frames (tagged unions)
+- Generate resume logic (jump to saved state)
+- Handle defer/errdefer in async context
+- Generate async_submit calls for I/O operations
+
+**Files to Complete:**
+- `stream5-lowering/src/lower.c` - Async transformation logic (~2000 LOC)
+- Integration with coroutine analysis results
+
+**Acceptance Criteria:**
+- Can lower `async fn` with await expressions
+- State machine structure correctly generated
+- Coroutine frames are tagged unions
+- Resume logic uses computed goto
+
+---
+
+### 6. Complete Async Code Generation
+
+**What's Needed:**
+- Generate coroutine frame structs (tagged unions)
+- Generate state machine switch/computed goto
+- Generate async_submit platform calls
+- Generate frame allocation/deallocation
+- Handle cleanup in state machine context
+
+**Files to Complete:**
+- `stream6-codegen/src/codegen.c` - State machine emission (~500 LOC)
+
+**Acceptance Criteria:**
+- Generated async functions compile with gcc
+- State machines work with epoll runtime
+- Can compile and run `examples/06_async_basic.tick`
+
+---
+
+### 7. End-to-End Testing
+
+**Test Matrix:**
+| Example | Parse | Type Check | Lower | Codegen | Compile | Run |
+|---------|-------|------------|-------|---------|---------|-----|
+| 01_hello.tick | ✅ | ⚠️ | ⚠️ | ⚠️ | ❌ | ❌ |
+| 02_types.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| 03_control_flow.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| 04_errors.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| 05_resources.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| 06_async_basic.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| 07_async_io.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| 08_tcp_echo_server.tick | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+
+**Legend:**
+- ✅ Working
+- ⚠️ Partial (infrastructure exists, bugs remain)
+- ❌ Not working
+
+---
+
+### 8. Integration Tests (Currently 63% Stubs)
+
+**Stub Tests to Implement:**
+- `integration/test_coroutine.c` - 7 stub tests
+- `integration/test_lowering.c` - 5 stub tests
+- `integration/test_codegen.c` - 5 stub tests
+- `integration/test_full_compile.c` - 5 stub tests
+- `integration/test_pipeline.c` - 5 stub tests
+
+**What's Needed:**
+- Replace stubs with real tests that validate functionality
+- Add negative tests (error handling)
+- Ensure tests fail on invalid input
+
+---
+
+## Known Issues
+
+### Parser
+- 119 shift/reduce conflicts (works but could be cleaner)
 - 1 test failing (struct initialization syntax)
-- Works for most cases but could be cleaner
 
-### Code Quality
-- Error messages could be more descriptive
-- No fuzzing or security testing
-- Memory leak checking needed (valgrind)
-- Test coverage analysis
+### Type System
+- Type nodes may not be created correctly in all grammar rules
+- Need comprehensive type resolution testing
 
-### Documentation
-- Examples documented but can't demonstrate until compiler works
-- Need troubleshooting guide
-- Interface headers need usage examples
+### Error Messages
+- Could be more descriptive
+- Need better source location tracking
+
+### Testing
+- No fuzzing
+- No memory leak checking (valgrind)
+- No test coverage analysis
+
+---
+
+## Development Approach
+
+### Recommended Order
+
+1. **Fix type resolution bug** (1-2 hours)
+   - Debug why types are void
+   - Ensure type nodes created properly
+   - Verify type storage in AST
+
+2. **Fix empty function bodies** (1-2 hours)
+   - Debug statement lowering
+   - Ensure instructions are emitted
+   - Verify basic blocks populated
+
+3. **Complete non-async features** (1-2 days)
+   - All expressions
+   - All statements
+   - Control flow
+   - Test with examples 01-05
+
+4. **Implement coroutine analysis** (2-3 days)
+   - Live variable analysis
+   - Frame layout computation
+   - Suspend point identification
+
+5. **Implement async transformation** (3-4 days)
+   - State machine generation
+   - Frame packing
+   - Resume logic
+
+6. **Complete async codegen** (1-2 days)
+   - Frame struct emission
+   - State machine C generation
+   - Platform integration
+
+7. **End-to-end testing** (1-2 days)
+   - Test all 8 examples
+   - Fix issues found
+   - Validate with runtime
 
 ---
 
 ## Definition of Done
 
-A tick compiler is **production-ready** when:
+The tick compiler is **production-ready** when:
 
 ### Must Have:
-1. ✅ Compiler executable exists and runs
-2. ✅ Can compile all 8 example programs
-3. ✅ Generated C code compiles with: `gcc -std=c11 -Wall -Wextra -Werror`
-4. ✅ Compiled executables run correctly
-5. ✅ TCP echo server works with epoll runtime
-6. ✅ All integration tests are real (no stubs)
-7. ✅ All tests pass
+1. ✅ Compiler executable exists (`compiler/tickc`)
+2. ✅ Can parse all 8 example programs
+3. ❌ Type system works correctly (no "void" bugs)
+4. ❌ Can compile all 8 example programs to C
+5. ❌ Generated C compiles with: `gcc -std=c11 -Wall -Wextra -Werror -ffreestanding`
+6. ❌ Compiled executables run correctly
+7. ❌ TCP echo server works with epoll runtime
+8. ❌ All integration tests are real (no stubs)
+9. ❌ All tests pass
 
 ### Should Have:
 - Parser conflicts resolved
 - Comprehensive error messages
 - Memory leak free (valgrind clean)
 - Multi-architecture testing (x86_64, ARM)
-- Performance benchmarks
 
 ### Nice to Have:
 - Fuzzing for robustness
@@ -256,78 +390,37 @@ A tick compiler is **production-ready** when:
 
 ---
 
-## Progress Tracking
+## Progress Summary
 
-### Compiler Driver
-- [ ] Create `src/main.c`
-- [ ] Add command-line argument parsing
-- [ ] Implement file I/O
-- [ ] Wire together compiler streams
-- [ ] Create root Makefile
-- [ ] Build `./tick` executable
+**Phase 1: Infrastructure** ✅ COMPLETE
+- Compiler driver built
+- All 7 streams integrated
+- File I/O working
+- Error reporting in place
 
-### IR Lowering
-- [ ] Implement simple function lowering
-- [ ] Add control flow lowering (if/for/switch)
-- [ ] Implement async function transformation
-- [ ] Add suspend point handling
-- [ ] Implement coroutine frame generation
-- [ ] Add cleanup (defer/errdefer) lowering
-- [ ] Replace all lowering stub tests
-- [ ] All lowering tests pass
+**Phase 2: Basic Compilation** ⚠️ IN PROGRESS
+- Parsing works ✅
+- Type checking infrastructure exists ✅
+- Type resolution has bugs ❌
+- IR lowering infrastructure exists ✅
+- Statement/expression lowering incomplete ❌
+- Code generation infrastructure exists ✅
+- Function body emission broken ❌
 
-### Code Generation
-- [ ] Implement basic C code generation
-- [ ] Add type translation (tick → C11)
-- [ ] Generate coroutine frame structs
-- [ ] Implement state machine generation
-- [ ] Add computed goto support
-- [ ] Generate platform abstraction calls
-- [ ] Add #line directives
-- [ ] Replace all codegen stub tests
-- [ ] All codegen tests pass
+**Phase 3: Non-Async Features** ❌ NOT STARTED
+- Expressions
+- Statements
+- Control flow
+- Examples 01-05
 
-### End-to-End Validation
-- [ ] Compile 01_hello.tick
-- [ ] Compile 02_types.tick
-- [ ] Compile 03_control_flow.tick
-- [ ] Compile 04_errors.tick
-- [ ] Compile 05_resources.tick
-- [ ] Compile 06_async_basic.tick
-- [ ] Compile 07_async_io.tick
-- [ ] Compile 08_tcp_echo_server.tick
-- [ ] TCP server runs and echoes data correctly
-- [ ] All examples validated
+**Phase 4: Async Features** ❌ NOT STARTED
+- Coroutine analysis
+- Async transformation
+- State machine codegen
+- Examples 06-08
 
-### Integration Tests
-- [ ] Replace test_coroutine stubs (7 tests)
-- [ ] Replace test_lowering stubs (5 tests)
-- [ ] Replace test_codegen stubs (5 tests)
-- [ ] Replace test_full_compile stubs (5 tests)
-- [ ] Replace test_pipeline stubs (5 tests)
-- [ ] All 42 integration tests are real
-- [ ] All integration tests pass
-
----
-
-## Resources
-
-### What Works (Use These)
-- `examples/runtime/` - Epoll runtime (complete, tested, production-ready)
-- `stream1-lexer/` - Lexer implementation (working)
-- `stream2-parser/` - Parser implementation (mostly working)
-- `stream3-semantic/` - Symbol resolution and type checking (basic functionality working)
-- `interfaces2/` - Interface definitions (use as reference)
-
-### What Doesn't Work (Need Implementation)
-- `stream5-lowering/src/lower.c` - Async lowering not implemented
-- `stream6-codegen/src/codegen.c` - Code generation not implemented
-- `integration/test_*.c` - 27 tests are stubs
-- No compiler driver executable
-- Examples cannot be compiled
-
-### Documentation (Reference)
-- `doc/design.md` - Language design and requirements
-- `doc/impl-guide.md` - Implementation specifications
-- `examples/INTEGRATION_GUIDE.md` - How compiler should integrate with runtime
-- `VALIDATION_REPORT.md` - Honest assessment of current state
+**Phase 5: Production Polish** ❌ NOT STARTED
+- Real integration tests
+- Memory leak checking
+- Error message improvements
+- Multi-architecture testing
