@@ -3,7 +3,8 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -I. -I../interfaces2
-LEMON = lemon
+LEMON = ../vendor/lemon/lemon
+LEMON_TEMPLATE = ../vendor/lemon/lempar.c
 
 # Directories
 SRC_DIR = src
@@ -38,10 +39,8 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 # Generate parser from Lemon grammar
-$(GENERATED_PARSER): $(GRAMMAR_SRC)
-	$(LEMON) -d$(BUILD_DIR) $(GRAMMAR_SRC)
-	mv $(BUILD_DIR)/grammar.c $(GENERATED_PARSER)
-	mv $(BUILD_DIR)/grammar.h $(BUILD_DIR)/grammar.h
+$(GENERATED_PARSER): $(GRAMMAR_SRC) $(LEMON)
+	$(LEMON) -T$(LEMON_TEMPLATE) -d$(BUILD_DIR) $(GRAMMAR_SRC)
 
 # Compile parser integration
 $(PARSER_OBJ): $(PARSER_SRC) $(GENERATED_PARSER)
