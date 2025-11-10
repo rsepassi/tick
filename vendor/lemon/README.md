@@ -131,7 +131,10 @@ statement_list(A) ::= statement_list(B) statement(C). {
 
 ## Documentation
 
-For complete documentation, see:
+**Local Documentation:**
+- **[lemon.html](lemon.html)** - Complete Lemon documentation (included in this directory)
+
+**Online Documentation:**
 - https://sqlite.org/lemon.html (Tutorial)
 - https://sqlite.org/src/doc/trunk/doc/lemon.html (Full documentation)
 
