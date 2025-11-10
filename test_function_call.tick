@@ -1,0 +1,8 @@
+let add = fn(a: i32, b: i32) -> i32 {
+    return a + b;
+};
+
+let calculate = fn(x: i32, y: i32) -> i32 {
+    let result = add(x, y);
+    return result;
+};

@@ -1,0 +1,14 @@
+pub let main = fn() -> i32 {
+    # let with initializer
+    let a = 10;
+
+    # var with initializer
+    var b = 20;
+
+    # var without initializer (declared but not initialized)
+    var c: i32;
+    c = 30;
+
+    let result = a + b + c;
+    return result;
+};

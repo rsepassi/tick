@@ -1,0 +1,44 @@
+// Comprehensive test of various features
+
+let factorial = fn(n: i32) -> i32 {
+    if n <= 1 {
+        return 1;
+    };
+    return n * factorial(n - 1);
+};
+
+let fibonacci = fn(n: i32) -> i32 {
+    if n <= 1 {
+        return n;
+    };
+    return fibonacci(n - 1) + fibonacci(n - 2);
+};
+
+let max = fn(a: i32, b: i32) -> i32 {
+    if a > b {
+        return a;
+    };
+    return b;
+};
+
+let min = fn(a: i32, b: i32) -> i32 {
+    if a < b {
+        return a;
+    };
+    return b;
+};
+
+let abs = fn(x: i32) -> i32 {
+    if x < 0 {
+        return -x;
+    };
+    return x;
+};
+
+let is_even = fn(n: i32) -> bool {
+    return (n % 2) == 0;
+};
+
+let is_odd = fn(n: i32) -> bool {
+    return (n % 2) != 0;
+};

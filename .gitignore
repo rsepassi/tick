@@ -2,22 +2,47 @@
 *.o
 *.a
 *.so
-*.dylib
-build/
-test_*
-!test_*.c
 
-# Compiler generated files
-*.out
-*.exe
+# Compiled executables
+tickc
 
-# Editor artifacts
-.vscode/
-.idea/
-*.swp
-*.swo
+# Generated C files from test runs
+test_*.c
+test_*.h
+test_*_out.c
+simple.c
+simple.h
+simple_test.c
+*_test.c
+
+# Backup files
+*.backup
 *~
 
-# OS artifacts
-.DS_Store
-Thumbs.db
+# Generated files in compiler/
+compiler/test_*.c
+
+# Generated files in integration/
+integration/lang_runtime.h
+
+# Generated examples
+03_control_flow.c
+03_control_flow.h
+
+# Root level lang_runtime.h (should be in integration/)
+/lang_runtime.h
+
+# Test executables
+test_add
+test_async_codegen
+test_main
+test_program
+integration/test_*
+!integration/test_*.c
+
+# Build directories
+build/
+*/build/
+
+# Test result directories
+test_results/

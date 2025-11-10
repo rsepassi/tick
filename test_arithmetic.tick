@@ -1,0 +1,61 @@
+// Test various arithmetic operations
+
+let add = fn(a: i32, b: i32) -> i32 {
+    return a + b;
+};
+
+let subtract = fn(a: i32, b: i32) -> i32 {
+    return a - b;
+};
+
+let multiply = fn(a: i32, b: i32) -> i32 {
+    return a * b;
+};
+
+let divide = fn(a: i32, b: i32) -> i32 {
+    return a / b;
+};
+
+let modulo = fn(a: i32, b: i32) -> i32 {
+    return a % b;
+};
+
+let negate = fn(x: i32) -> i32 {
+    return -x;
+};
+
+let bitwise_and = fn(a: i32, b: i32) -> i32 {
+    return a & b;
+};
+
+let bitwise_or = fn(a: i32, b: i32) -> i32 {
+    return a | b;
+};
+
+let bitwise_xor = fn(a: i32, b: i32) -> i32 {
+    return a ^ b;
+};
+
+let shift_left = fn(a: i32, b: i32) -> i32 {
+    return a << b;
+};
+
+let shift_right = fn(a: i32, b: i32) -> i32 {
+    return a >> b;
+};
+
+let equals = fn(a: i32, b: i32) -> bool {
+    return a == b;
+};
+
+let not_equals = fn(a: i32, b: i32) -> bool {
+    return a != b;
+};
+
+let less_than = fn(a: i32, b: i32) -> bool {
+    return a < b;
+};
+
+let greater_than = fn(a: i32, b: i32) -> bool {
+    return a > b;
+};

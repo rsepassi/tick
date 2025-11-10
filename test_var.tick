@@ -1,0 +1,8 @@
+pub let main = fn() -> i32 {
+    var x = 42;
+    var y: i32;
+    y = 10;
+
+    var z = x + y;
+    return z;
+};

@@ -1,0 +1,581 @@
+================================================================================
+COMPLETE ASYNC TRANSFORMATION EXAMPLE
+================================================================================
+
+This file shows a complete walkthrough of transforming an async function
+with suspend points into a state machine, including all phases.
+
+================================================================================
+PHASE 1: SOURCE CODE (Tick)
+================================================================================
+
+let download = fn(url: String) -> Result<String> {
+    let socket = try await connect(url);
+    defer socket.close();
+
+    let data = try await socket.read();
+    return data;
+};
+
+================================================================================
+PHASE 2: PARSED AST (After parsing)
+================================================================================
+
+FunctionDecl(
+  name: "download",
+  params: [Param(name: "url", type: String)],
+  return_type: Result<String>,
+  body: BlockStmt([
+    LetStmt(
+      name: "socket",
+      init: TryExpr(
+        AsyncCallExpr(callee: "connect", args: ["url"])
+      )
+    ),
+    DeferStmt(
+      body: CallExpr(
+        FieldAccess(object: "socket", field: "close"),
+        args: []
+      )
+    ),
+    LetStmt(
+      name: "data",
+      init: TryExpr(
+        AsyncCallExpr(
+          FieldAccess(object: "socket", field: "read"),
+          args: []
+        )
+      )
+    ),
+    ReturnStmt(value: "data")
+  ])
+)
+
+================================================================================
+PHASE 3: SEMANTIC ANALYSIS (Types resolved)
+================================================================================
+
+FunctionDecl(
+  name: "download",
+  type: Fn(String) -> Result<String>,
+  params: [Param(name: "url", type: String)],
+  return_type: Result<String>,
+  body: [
+    // let socket = try await connect(url);
+    LetStmt(
+      name: "socket",
+      type: Socket,  // ← Type inferred
+      init: TryExpr(
+        type: Socket,
+        AsyncCallExpr(
+          type: Result<Socket>,
+          callee: connect,  // ← Resolved to function
+          args: [IdentifierExpr(name: "url", type: String)]
+        )
+      )
+    ),
+
+    // defer socket.close();
+    DeferStmt(...),
+
+    // let data = try await socket.read();
+    LetStmt(
+      name: "data",
+      type: String,  // ← Type inferred
+      init: TryExpr(
+        type: String,
+        AsyncCallExpr(
+          type: Result<String>,
+          callee: Socket.read,  // ← Resolved method
+          args: [IdentifierExpr(name: "socket", type: Socket)]
+        )
+      )
+    ),
+
+    // return data;
+    ReturnStmt(
+      value: IdentifierExpr(name: "data", type: String)
+    )
+  ]
+)
+
+================================================================================
+PHASE 4: COROUTINE ANALYSIS (CFG + Liveness)
+================================================================================
+
+CFG Construction:
+----------------
+Block 0 (entry):
+  - let socket = try await connect(url)
+  - Successors: Block 1 (await), Block Error (error)
+
+Block 1 (after first await):
+  - defer socket.close()  // Registered
+  - let data = try await socket.read()
+  - Successors: Block 2 (await), Block Error (error)
+
+Block 2 (after second await):
+  - return data
+  - Successors: Block Exit
+
+Block Error (error handling):
+  - Execute errdefers
+  - Propagate error
+  - Successors: Block Exit
+
+Block Exit (exit):
+  - Execute defers
+  - Final cleanup
+
+Liveness Analysis:
+-----------------
+Block 0 (entry):
+  Gen:  {url}
+  Kill: {socket}
+  Out:  {socket}
+
+Block 1 (after await connect):
+  Gen:  {socket}
+  Kill: {data}
+  Out:  {socket, data}
+
+Block 2 (after await read):
+  Gen:  {data}
+  Kill: {}
+  Out:  {}
+
+Suspend Points:
+--------------
+Suspend 0 (after connect):
+  State ID: 0
+  Location: line 2
+  Live vars: {socket: Socket}
+
+Suspend 1 (after read):
+  State ID: 1
+  Location: line 5
+  Live vars: {socket: Socket, data: String}
+
+Frame Layout:
+------------
+struct CoroFrame_download {
+    uint32_t state;           // Offset 0, Size 4
+    union {                   // Offset 8 (aligned)
+        struct {
+            // State 0: empty (initial entry)
+        } s0;
+
+        struct {
+            Socket socket;    // Offset 0 within union
+        } s1;                 // Size: sizeof(Socket)
+
+        struct {
+            Socket socket;    // Offset 0
+            String data;      // Offset sizeof(Socket)
+        } s2;                 // Size: sizeof(Socket) + sizeof(String)
+    } data;
+};
+
+Total size: 8 + max(0, sizeof(Socket), sizeof(Socket)+sizeof(String))
+Alignment: max(4, alignof(Socket), alignof(String))
+
+================================================================================
+PHASE 5: IR LOWERING (Before state machine transformation)
+================================================================================
+
+function download(url: String) -> Result<String>:
+  entry:
+    ; Allocate local variables
+    %socket = alloca Socket
+    %data = alloca String
+
+    ; Call async connect
+    %connect_result = async_call @connect(%url)
+
+    ; Error check for connect
+    %connect_ok = error_check %connect_result
+    if not %connect_ok goto error_block_1
+
+    ; Store socket
+    %socket_val = extract_ok %connect_result
+    store %socket, %socket_val
+
+    ; SUSPEND POINT 0
+    suspend state=0
+
+  resume_after_connect:
+    ; Register defer
+    defer: call @socket_close(%socket)
+
+    ; Call async read
+    %read_result = async_call @socket_read(%socket)
+
+    ; Error check for read
+    %read_ok = error_check %read_result
+    if not %read_ok goto error_block_2
+
+    ; Store data
+    %data_val = extract_ok %read_result
+    store %data, %data_val
+
+    ; SUSPEND POINT 1
+    suspend state=1
+
+  resume_after_read:
+    ; Load data for return
+    %ret_val = load %data
+
+    ; Execute defers (normal path)
+    call @socket_close(%socket)
+
+    return %ret_val
+
+  error_block_1:
+    ; No defers registered yet
+    %error_1 = extract_error %connect_result
+    error_propagate %error_1
+
+  error_block_2:
+    ; Execute defers (error path)
+    call @socket_close(%socket)
+    %error_2 = extract_error %read_result
+    error_propagate %error_2
+
+================================================================================
+PHASE 6: STATE MACHINE TRANSFORMATION
+================================================================================
+
+function download(__coro_frame: *CoroFrame) -> Result<String>:
+
+  ; ============= DISPATCH BLOCK =============
+  dispatch:
+    ; Load current state from frame
+    %__coro_state = load (%__coro_frame + 0)  ; Load state field
+
+    ; State dispatch (linear for now, can optimize to computed goto)
+    %cmp_0 = eq %__coro_state, 0
+    if %cmp_0 goto state_0_entry else goto check_1
+
+  check_1:
+    %cmp_1 = eq %__coro_state, 1
+    if %cmp_1 goto resume_1 else goto check_2
+
+  check_2:
+    %cmp_2 = eq %__coro_state, 2
+    if %cmp_2 goto resume_2 else goto state_0_entry
+
+  ; ============= STATE 0: INITIAL ENTRY =============
+  state_0_entry:
+    ; Initialize locals
+    %socket = alloca Socket
+    %url = param(1)  ; Second param (first is frame)
+
+    ; Call async connect
+    %connect_result = async_call @connect(%url)
+
+    ; Error check
+    %connect_ok = error_check %connect_result
+    if not %connect_ok goto error_1
+
+    ; Extract and store socket
+    %socket_val = extract_ok %connect_result
+    store %socket, %socket_val
+
+    ; === STATE SAVE ===
+    state_save frame=%__coro_frame, state=1, vars=[%socket]
+    ; Generated code will:
+    ;   frame->state = 1
+    ;   frame->data.s1.socket = socket
+
+    ; Submit async operation to runtime
+    ; (This would be done by the async_call instruction)
+
+    ; Suspend and return control
+    suspend state=1
+    return Result.Pending()  ; Signals: suspended, not complete
+
+  ; ============= STATE 1: RESUME AFTER CONNECT =============
+  resume_1:
+    ; === STATE RESTORE ===
+    state_restore frame=%__coro_frame, state=1, vars=[%socket]
+    ; Generated code will:
+    ;   socket = frame->data.s1.socket
+
+    ; Register defer for cleanup
+    defer_register @socket_close(%socket)
+
+    ; Call async read
+    %read_result = async_call @socket_read(%socket)
+
+    ; Error check
+    %read_ok = error_check %read_result
+    if not %read_ok goto error_2
+
+    ; Extract and store data
+    %data_val = extract_ok %read_result
+    %data = alloca String
+    store %data, %data_val
+
+    ; === STATE SAVE ===
+    state_save frame=%__coro_frame, state=2, vars=[%socket, %data]
+    ; Generated code will:
+    ;   frame->state = 2
+    ;   frame->data.s2.socket = socket
+    ;   frame->data.s2.data = data
+
+    ; Suspend and return control
+    suspend state=2
+    return Result.Pending()
+
+  ; ============= STATE 2: RESUME AFTER READ =============
+  resume_2:
+    ; === STATE RESTORE ===
+    state_restore frame=%__coro_frame, state=2, vars=[%socket, %data]
+    ; Generated code will:
+    ;   socket = frame->data.s2.socket
+    ;   data = frame->data.s2.data
+
+    ; Load data for return
+    %ret_val = load %data
+
+    ; Execute defers (normal exit)
+    defer_execute all
+    call @socket_close(%socket)
+
+    ; Return final value
+    return Result.Ok(%ret_val)
+
+  ; ============= ERROR PATHS =============
+  error_1:
+    %error_val = extract_error %connect_result
+    ; No defers to execute yet
+    return Result.Err(%error_val)
+
+  error_2:
+    %error_val = extract_error %read_result
+    ; Execute defers (error exit)
+    defer_execute all
+    call @socket_close(%socket)
+    return Result.Err(%error_val)
+
+================================================================================
+PHASE 7: C CODE GENERATION (Conceptual output)
+================================================================================
+
+// Frame structure
+struct CoroFrame_download {
+    uint32_t state;
+    union {
+        struct { } s0;
+        struct {
+            Socket socket;
+        } s1;
+        struct {
+            Socket socket;
+            String data;
+        } s2;
+    } data;
+};
+
+// Resume function (called on each resume)
+Result_String download_resume(struct CoroFrame_download* frame, String url) {
+    // Dispatch to current state using computed goto
+    static void* resume_targets[] = {
+        &&STATE_0_ENTRY,
+        &&RESUME_1,
+        &&RESUME_2
+    };
+
+    goto *resume_targets[frame->state];
+
+STATE_0_ENTRY:
+    {
+        // Call async connect
+        Result_Socket connect_result = connect_async(url);
+
+        // Check for immediate error
+        if (connect_result.is_error) {
+            return Result_String_Error(connect_result.error);
+        }
+
+        // Save state and suspend
+        frame->state = 1;
+        frame->data.s1.socket = connect_result.ok_value;
+
+        return Result_String_Pending();  // Signal: suspended
+    }
+
+RESUME_1:
+    {
+        // Restore from frame
+        Socket socket = frame->data.s1.socket;
+
+        // Call async read
+        Result_String read_result = socket_read_async(socket);
+
+        // Check for immediate error
+        if (read_result.is_error) {
+            socket_close(socket);  // Defer
+            return Result_String_Error(read_result.error);
+        }
+
+        // Save state and suspend
+        frame->state = 2;
+        frame->data.s2.socket = socket;
+        frame->data.s2.data = read_result.ok_value;
+
+        return Result_String_Pending();  // Signal: suspended
+    }
+
+RESUME_2:
+    {
+        // Restore from frame
+        Socket socket = frame->data.s2.socket;
+        String data = frame->data.s2.data;
+
+        // Execute defers
+        socket_close(socket);
+
+        // Return final value
+        return Result_String_Ok(data);
+    }
+}
+
+// Initial call to start coroutine
+struct CoroFrame_download* download_start(String url) {
+    struct CoroFrame_download* frame = malloc(sizeof(*frame));
+    frame->state = 0;
+
+    // Run to first suspend
+    Result_String result = download_resume(frame, url);
+
+    if (result.is_pending) {
+        // Suspended - return frame for later resume
+        return frame;
+    } else {
+        // Completed immediately (error or unlikely fast path)
+        free(frame);
+        return NULL;
+    }
+}
+
+// Resume after async operation completes
+Result_String download_continue(struct CoroFrame_download* frame) {
+    return download_resume(frame, (String){0});  // url not needed for resume
+}
+
+// Cleanup if coroutine is dropped while suspended
+void download_destroy(struct CoroFrame_download* frame) {
+    // Execute defers based on current state
+    switch (frame->state) {
+        case 1:
+        case 2:
+            // Socket was acquired - must close it
+            socket_close(frame->data.s1.socket);
+            break;
+        case 0:
+            // Nothing to clean up
+            break;
+    }
+
+    free(frame);
+}
+
+================================================================================
+USAGE EXAMPLE
+================================================================================
+
+// Synchronous-style code (using the state machine)
+int main() {
+    // Start the coroutine
+    struct CoroFrame_download* coro = download_start(string_from("http://example.com"));
+
+    if (!coro) {
+        // Completed immediately (error)
+        return 1;
+    }
+
+    // Wait for first async operation (connect)
+    wait_for_io();
+
+    // Resume after connect completes
+    Result_String result1 = download_continue(coro);
+
+    if (result1.is_error) {
+        download_destroy(coro);
+        return 1;
+    }
+
+    if (result1.is_pending) {
+        // Still suspended, wait for read operation
+        wait_for_io();
+
+        // Resume after read completes
+        Result_String result2 = download_continue(coro);
+
+        if (result2.is_error) {
+            download_destroy(coro);
+            return 1;
+        }
+
+        // Got final result!
+        printf("Downloaded: %s\n", result2.ok_value.data);
+        download_destroy(coro);
+    }
+
+    return 0;
+}
+
+// Event-driven style (more realistic)
+void on_download_complete(struct async_t* op) {
+    struct CoroFrame_download* coro = op->ctx;
+
+    // Resume the coroutine
+    Result_String result = download_continue(coro);
+
+    if (result.is_pending) {
+        // Still more async operations pending
+        // Will be called again when next operation completes
+        return;
+    }
+
+    // Coroutine completed
+    if (result.is_error) {
+        handle_error(result.error);
+    } else {
+        handle_success(result.ok_value);
+    }
+
+    download_destroy(coro);
+}
+
+================================================================================
+KEY OBSERVATIONS
+================================================================================
+
+1. **Memory Efficiency**: Frame only stores live variables per state
+   - State 0: Nothing (just entered)
+   - State 1: socket (after connect)
+   - State 2: socket + data (after read)
+
+2. **Fast Dispatch**: Computed goto provides O(1) state dispatch
+   - No linear search through states
+   - Single indirect jump to correct label
+
+3. **Defer Safety**: Defers tracked and executed on all exit paths
+   - Normal return: defers execute
+   - Error return: defers execute
+   - Coroutine destruction: defers execute via destroy function
+
+4. **Type Safety**: All types preserved through transformation
+   - Socket, String, Result types maintained
+   - No type erasure or void* casts needed
+
+5. **Zero Overhead (Almost)**: When not suspended
+   - No heap allocation if completes immediately
+   - Direct function call if no suspend needed
+   - State machine only used when actually suspending
+
+================================================================================
+END OF TRANSFORMATION EXAMPLE
+================================================================================
