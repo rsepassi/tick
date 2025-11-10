@@ -11,13 +11,11 @@ ROOT = ..
 # Include paths for all interfaces
 INCLUDES = -I$(ROOT)/interfaces2 \
            -I$(ROOT)/stream6-codegen/include \
-           -I$(ROOT)/stream4-coroutine
+           -I$(ROOT)/stream4-coroutine \
+           -I$(ROOT)/stream2-parser/build
 
 # Source files from all streams
-LEXER_SRCS = $(ROOT)/stream1-lexer/src/lexer.c \
-             $(ROOT)/stream1-lexer/src/arena.c \
-             $(ROOT)/stream1-lexer/src/string_pool.c \
-             $(ROOT)/stream1-lexer/src/error.c
+LEXER_SRCS = $(ROOT)/stream1-lexer/src/lexer.c
 
 PARSER_SRCS = $(ROOT)/stream2-parser/src/parser.c
 
@@ -79,25 +77,29 @@ help:
 	@echo "  clean               - Remove all build artifacts"
 
 # Build test executables
-test_lexer_parser: test_lexer_parser.c $(LEXER_SRCS) $(PARSER_SRCS) $(INFRA_SRCS)
+# Compile grammar.c separately without -Werror since it's generated
+grammar.o: $(ROOT)/stream2-parser/build/grammar.c
+	$(CC) -Wall -Wextra -std=c11 -g $(INCLUDES) -c $< -o $@
+
+test_lexer_parser: test_lexer_parser.c $(LEXER_SRCS) $(ROOT)/stream2-parser/src/parser.c grammar.o $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
-test_semantic: test_semantic.c $(LEXER_SRCS) $(PARSER_SRCS) $(SEMANTIC_SRCS) $(INFRA_SRCS)
+test_semantic: test_semantic.c $(LEXER_SRCS) $(PARSER_SRCS) grammar.o $(SEMANTIC_SRCS) $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
-test_coroutine: test_coroutine.c $(LEXER_SRCS) $(PARSER_SRCS) $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(INFRA_SRCS)
+test_coroutine: test_coroutine.c $(LEXER_SRCS) $(PARSER_SRCS) grammar.o $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
-test_lowering: test_lowering.c $(LEXER_SRCS) $(PARSER_SRCS) $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(LOWERING_SRCS) $(INFRA_SRCS)
+test_lowering: test_lowering.c $(LEXER_SRCS) $(PARSER_SRCS) grammar.o $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(LOWERING_SRCS) $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
-test_codegen: test_codegen.c $(ALL_IMPL_SRCS) $(INFRA_SRCS)
+test_codegen: test_codegen.c $(LEXER_SRCS) $(PARSER_SRCS) grammar.o $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(LOWERING_SRCS) $(CODEGEN_SRCS) $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
-test_full_compile: test_full_compile.c $(ALL_IMPL_SRCS) $(INFRA_SRCS)
+test_full_compile: test_full_compile.c $(LEXER_SRCS) $(PARSER_SRCS) grammar.o $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(LOWERING_SRCS) $(CODEGEN_SRCS) $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
-test_pipeline: test_pipeline.c $(ALL_IMPL_SRCS) $(INFRA_SRCS)
+test_pipeline: test_pipeline.c $(LEXER_SRCS) $(PARSER_SRCS) grammar.o $(SEMANTIC_SRCS) $(COROUTINE_SRCS) $(LOWERING_SRCS) $(CODEGEN_SRCS) $(INFRA_SRCS)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS)
 
 # Run all tests
@@ -132,7 +134,7 @@ test: $(TESTS)
 	@echo "=========================================="
 
 clean:
-	rm -f $(TESTS) *.o
+	rm -f $(TESTS) *.o grammar.o
 	rm -rf $(BUILD_DIR)
 	rm -f generated_*.c generated_*.h
 

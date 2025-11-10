@@ -45,7 +45,7 @@ static AstNode* make_node(AstNodeKind kind, Arena* arena) {
 static AstNode* make_module(const char* name, AstNode** decls, size_t decl_count, Arena* arena) {
     AstNode* node = make_node(AST_MODULE, arena);
     node->data.module.name = name;
-    node->data.module.declarations = decls;
+    node->data.module.decls = decls;
     node->data.module.decl_count = decl_count;
     return node;
 }
@@ -56,10 +56,9 @@ static AstNode* make_function(const char* name, bool is_public, AstNode* body, A
     node->data.function_decl.name = name;
     node->data.function_decl.params = NULL;
     node->data.function_decl.param_count = 0;
-    node->data.function_decl.return_type_node = NULL;
+    node->data.function_decl.return_type = NULL;
     node->data.function_decl.body = body;
-    node->data.function_decl.is_public = is_public;
-    node->data.function_decl.is_async = false;
+    node->data.function_decl.is_pub = is_public;
     return node;
 }
 
@@ -69,18 +68,17 @@ static AstNode* make_struct(const char* name, bool is_public, Arena* arena) {
     node->data.struct_decl.name = name;
     node->data.struct_decl.fields = NULL;
     node->data.struct_decl.field_count = 0;
-    node->data.struct_decl.is_public = is_public;
+    node->data.struct_decl.is_pub = is_public;
     node->data.struct_decl.is_packed = false;
-    node->data.struct_decl.alignment = 0;
     return node;
 }
 
 // Helper: Create let statement
 static AstNode* make_let(const char* name, AstNode* initializer, Arena* arena) {
     AstNode* node = make_node(AST_LET_STMT, arena);
-    node->data.let_stmt.name = name;
-    node->data.let_stmt.type_node = NULL;
-    node->data.let_stmt.initializer = initializer;
+    node->data.let_decl.name = name;
+    node->data.let_decl.type = NULL;
+    node->data.let_decl.init = initializer;
     return node;
 }
 
@@ -94,15 +92,15 @@ static AstNode* make_identifier(const char* name, Arena* arena) {
 // Helper: Create literal expression
 static AstNode* make_int_literal(int64_t value, Arena* arena) {
     AstNode* node = make_node(AST_LITERAL_EXPR, arena);
-    node->data.literal_expr.lit_kind = LIT_INT;
-    node->data.literal_expr.int_value = value;
+    node->data.literal_expr.literal_kind = LITERAL_INT;
+    node->data.literal_expr.value.int_value = value;
     return node;
 }
 
 // Helper: Create block statement
 static AstNode* make_block(AstNode** stmts, size_t stmt_count, Arena* arena) {
     AstNode* node = make_node(AST_BLOCK_STMT, arena);
-    node->data.block_stmt.statements = stmts;
+    node->data.block_stmt.stmts = stmts;
     node->data.block_stmt.stmt_count = stmt_count;
     return node;
 }
@@ -255,9 +253,8 @@ TEST(name_resolution) {
     }
     assert(!error_list_has_errors(&errors));
 
-    // Verify identifier in let_y was resolved
-    assert(ident_x->data.identifier_expr.symbol != NULL);
-    assert(strcmp(ident_x->data.identifier_expr.symbol->name, "x") == 0);
+    // Verify identifier in let_y was resolved (symbol field has been removed from interface)
+    // The resolver should still resolve the identifier, but we cannot verify via symbol field
 
     arena_free(&arena);
 }

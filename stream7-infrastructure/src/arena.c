@@ -68,7 +68,7 @@ void* arena_alloc(Arena* arena, size_t size, size_t alignment) {
     // Align the current position
     size_t current_pos = arena->current->used;
     size_t aligned_pos = align_size(current_pos, alignment);
-    size_t padding = aligned_pos - current_pos;
+    (void)(aligned_pos - current_pos); // padding calculation, result unused
 
     // Check if we have space in current block
     if (aligned_pos + size <= arena->current->capacity) {

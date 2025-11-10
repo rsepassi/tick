@@ -40,11 +40,21 @@
 
 // Module
 module(M) ::= decl_list(D). {
-    M = ast_alloc(parser, AST_MODULE, D->loc);
+    M = ast_alloc(parser, AST_MODULE, ((AstNode*)D)->loc);
     if (M) {
         M->data.module.name = "main";
         M->data.module.decls = (AstNode**)D;
         M->data.module.decl_count = 0; // Will be set by parser
+    }
+    parser->root = M;
+}
+
+module(M) ::= . {
+    M = ast_alloc(parser, AST_MODULE, (SourceLocation){0, 0, ""});
+    if (M) {
+        M->data.module.name = "main";
+        M->data.module.decls = NULL;
+        M->data.module.decl_count = 0;
     }
     parser->root = M;
 }

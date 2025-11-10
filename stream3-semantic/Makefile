@@ -17,6 +17,13 @@ RESOLVER_SRC = $(SRC_DIR)/resolver.c
 TYPECK_SRC = $(SRC_DIR)/typeck.c
 ALL_SRC = $(RESOLVER_SRC) $(TYPECK_SRC)
 
+# Infrastructure source files
+INFRA_DIR = ../stream7-infrastructure/src
+ARENA_SRC = $(INFRA_DIR)/arena.c
+STRING_POOL_SRC = $(INFRA_DIR)/string_pool.c
+ERROR_SRC = $(INFRA_DIR)/error.c
+INFRA_SRC = $(ARENA_SRC) $(STRING_POOL_SRC) $(ERROR_SRC)
+
 # Test files
 TEST_RESOLVER_SRC = $(TEST_DIR)/test_resolver.c
 TEST_TYPECK_SRC = $(TEST_DIR)/test_typeck.c
@@ -34,12 +41,12 @@ all: tests
 tests: $(TEST_RESOLVER) $(TEST_TYPECK)
 
 # Resolver test executable
-$(TEST_RESOLVER): $(TEST_RESOLVER_SRC) $(RESOLVER_SRC)
+$(TEST_RESOLVER): $(TEST_RESOLVER_SRC) $(RESOLVER_SRC) $(INFRA_SRC)
 	@echo "Building resolver tests..."
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -o $@ $^
 
 # Type checker test executable (depends on both resolver and typeck)
-$(TEST_TYPECK): $(TEST_TYPECK_SRC) $(RESOLVER_SRC) $(TYPECK_SRC)
+$(TEST_TYPECK): $(TEST_TYPECK_SRC) $(RESOLVER_SRC) $(TYPECK_SRC) $(INFRA_SRC)
 	@echo "Building type checker tests..."
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -o $@ $^
 

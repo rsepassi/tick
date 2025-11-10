@@ -16,6 +16,7 @@
 #include "arena.h"
 #include "error.h"
 #include "ast.h"
+#include "string_pool.h"
 
 // Test result tracking
 static int tests_run = 0;
@@ -41,12 +42,19 @@ static int tests_passed = 0;
 
 // Helper function to run lexer + parser
 static AstNode* parse_source(const char* source, Arena* arena, ErrorList* errors) {
+    // Initialize string pool
+    StringPool string_pool;
+    string_pool_init(&string_pool, arena);
+
+    // Initialize lexer
     Lexer lexer;
-    lexer_init(&lexer, source, strlen(source), "test.tick");
+    lexer_init(&lexer, source, strlen(source), "test.tick", &string_pool, errors);
 
+    // Initialize parser
     Parser parser;
-    parser_init(&parser, &lexer, arena);
+    parser_init(&parser, &lexer, arena, errors);
 
+    // Parse
     AstNode* ast = parser_parse(&parser);
 
     return ast;
@@ -57,9 +65,9 @@ static int test_simple_function(void) {
     TEST("Simple function parsing");
 
     const char* source =
-        "fn add(a: i32, b: i32) i32 {\n"
+        "let add = fn(a: i32, b: i32) -> i32 {\n"
         "    return a + b;\n"
-        "}\n";
+        "};\n";
 
     Arena arena;
     arena_init(&arena, 4096);
@@ -69,21 +77,18 @@ static int test_simple_function(void) {
 
     AstNode* ast = parse_source(source, &arena, &errors);
 
-    if (!ast) {
-        arena_destroy(&arena);
-        FAIL("Failed to parse");
-    }
-
-    if (error_list_has_errors(&errors)) {
-        error_list_print(&errors, stderr);
-        arena_destroy(&arena);
-        FAIL("Parse errors occurred");
+    if (!ast || error_list_has_errors(&errors)) {
+        if (error_list_has_errors(&errors)) {
+            error_list_print(&errors, stderr);
+        }
+        arena_free(&arena);
+        FAIL(ast ? "Parse errors occurred" : "Failed to parse");
     }
 
     // Verify AST structure
     assert(ast->kind == AST_MODULE);
 
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
@@ -93,10 +98,12 @@ static int test_async_function(void) {
     TEST("Async function parsing");
 
     const char* source =
-        "pub async fn fetch_data(url: []u8) ![]u8 {\n"
-        "    let handle = suspend http_request(url);\n"
-        "    return resume handle;\n"
-        "}\n";
+        "pub let fetch_data = fn(url: []u8) -> void![]u8 {\n"
+        "    suspend;\n"
+        "    let handle = async http_request(url);\n"
+        "    resume handle;\n"
+        "    return url;\n"
+        "};\n";
 
     Arena arena;
     arena_init(&arena, 4096);
@@ -106,20 +113,17 @@ static int test_async_function(void) {
 
     AstNode* ast = parse_source(source, &arena, &errors);
 
-    if (!ast) {
-        arena_destroy(&arena);
-        FAIL("Failed to parse");
-    }
-
-    if (error_list_has_errors(&errors)) {
-        error_list_print(&errors, stderr);
-        arena_destroy(&arena);
-        FAIL("Parse errors occurred");
+    if (!ast || error_list_has_errors(&errors)) {
+        if (error_list_has_errors(&errors)) {
+            error_list_print(&errors, stderr);
+        }
+        arena_free(&arena);
+        FAIL(ast ? "Parse errors occurred" : "Failed to parse");
     }
 
     assert(ast->kind == AST_MODULE);
 
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
@@ -129,13 +133,13 @@ static int test_try_catch(void) {
     TEST("Try/catch parsing");
 
     const char* source =
-        "fn process() !void {\n"
+        "let process = fn() -> void!void {\n"
         "    try {\n"
         "        let result = risky_operation();\n"
-        "    } catch (err) {\n"
+        "    } catch |err| {\n"
         "        return err;\n"
         "    }\n"
-        "}\n";
+        "};\n";
 
     Arena arena;
     arena_init(&arena, 4096);
@@ -145,18 +149,15 @@ static int test_try_catch(void) {
 
     AstNode* ast = parse_source(source, &arena, &errors);
 
-    if (!ast) {
-        arena_destroy(&arena);
-        FAIL("Failed to parse");
+    if (!ast || error_list_has_errors(&errors)) {
+        if (error_list_has_errors(&errors)) {
+            error_list_print(&errors, stderr);
+        }
+        arena_free(&arena);
+        FAIL(ast ? "Parse errors occurred" : "Failed to parse");
     }
 
-    if (error_list_has_errors(&errors)) {
-        error_list_print(&errors, stderr);
-        arena_destroy(&arena);
-        FAIL("Parse errors occurred");
-    }
-
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
@@ -166,14 +167,13 @@ static int test_defer(void) {
     TEST("Defer/errdefer parsing");
 
     const char* source =
-        "fn allocate_resource() !void {\n"
+        "let allocate_resource = fn() -> void!void {\n"
         "    let resource = acquire();\n"
         "    defer release(resource);\n"
         "    errdefer cleanup(resource);\n"
-        "    \n"
         "    let result = use_resource(resource);\n"
         "    return result;\n"
-        "}\n";
+        "};\n";
 
     Arena arena;
     arena_init(&arena, 4096);
@@ -183,18 +183,15 @@ static int test_defer(void) {
 
     AstNode* ast = parse_source(source, &arena, &errors);
 
-    if (!ast) {
-        arena_destroy(&arena);
-        FAIL("Failed to parse");
+    if (!ast || error_list_has_errors(&errors)) {
+        if (error_list_has_errors(&errors)) {
+            error_list_print(&errors, stderr);
+        }
+        arena_free(&arena);
+        FAIL(ast ? "Parse errors occurred" : "Failed to parse");
     }
 
-    if (error_list_has_errors(&errors)) {
-        error_list_print(&errors, stderr);
-        arena_destroy(&arena);
-        FAIL("Parse errors occurred");
-    }
-
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
@@ -204,10 +201,10 @@ static int test_struct_definition(void) {
     TEST("Struct definition parsing");
 
     const char* source =
-        "struct Point {\n"
+        "let Point = struct {\n"
         "    x: i32,\n"
-        "    y: i32,\n"
-        "}\n";
+        "    y: i32\n"
+        "};\n";
 
     Arena arena;
     arena_init(&arena, 4096);
@@ -217,18 +214,15 @@ static int test_struct_definition(void) {
 
     AstNode* ast = parse_source(source, &arena, &errors);
 
-    if (!ast) {
-        arena_destroy(&arena);
-        FAIL("Failed to parse");
+    if (!ast || error_list_has_errors(&errors)) {
+        if (error_list_has_errors(&errors)) {
+            error_list_print(&errors, stderr);
+        }
+        arena_free(&arena);
+        FAIL(ast ? "Parse errors occurred" : "Failed to parse");
     }
 
-    if (error_list_has_errors(&errors)) {
-        error_list_print(&errors, stderr);
-        arena_destroy(&arena);
-        FAIL("Parse errors occurred");
-    }
-
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
@@ -238,7 +232,7 @@ static int test_syntax_error(void) {
     TEST("Syntax error handling");
 
     const char* source =
-        "fn broken(\n"  // Missing closing paren and body
+        "let broken = fn(\n"  // Missing closing paren and body
         "}\n";
 
     Arena arena;
@@ -251,11 +245,11 @@ static int test_syntax_error(void) {
 
     // Should fail to parse
     if (ast != NULL && !error_list_has_errors(&errors)) {
-        arena_destroy(&arena);
+        arena_free(&arena);
         FAIL("Should have detected syntax error");
     }
 
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
@@ -265,16 +259,16 @@ static int test_multiple_functions(void) {
     TEST("Multiple functions parsing");
 
     const char* source =
-        "fn foo() void {}\n"
+        "let foo = fn() -> void {};\n"
         "\n"
-        "fn bar() i32 {\n"
+        "let bar = fn() -> i32 {\n"
         "    return 42;\n"
-        "}\n"
+        "};\n"
         "\n"
-        "pub fn main() void {\n"
+        "pub let main = fn() -> void {\n"
         "    foo();\n"
         "    let x = bar();\n"
-        "}\n";
+        "};\n";
 
     Arena arena;
     arena_init(&arena, 4096);
@@ -284,18 +278,15 @@ static int test_multiple_functions(void) {
 
     AstNode* ast = parse_source(source, &arena, &errors);
 
-    if (!ast) {
-        arena_destroy(&arena);
-        FAIL("Failed to parse");
+    if (!ast || error_list_has_errors(&errors)) {
+        if (error_list_has_errors(&errors)) {
+            error_list_print(&errors, stderr);
+        }
+        arena_free(&arena);
+        FAIL(ast ? "Parse errors occurred" : "Failed to parse");
     }
 
-    if (error_list_has_errors(&errors)) {
-        error_list_print(&errors, stderr);
-        arena_destroy(&arena);
-        FAIL("Parse errors occurred");
-    }
-
-    arena_destroy(&arena);
+    arena_free(&arena);
     PASS();
     return 1;
 }
