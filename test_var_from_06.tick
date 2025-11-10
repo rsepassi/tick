@@ -1,0 +1,18 @@
+pub let main = fn() -> i32 {
+    # Test var statements from example 06
+    var x = 1;
+    var y = 2;
+    var z = x + y;
+
+    var result = 0;
+    result = result + 10;
+    result = result + 20;
+    result = result + 30;
+
+    var step = 0;
+    step = 1;
+    step = 2;
+    step = 3;
+
+    return step + result + z;
+};

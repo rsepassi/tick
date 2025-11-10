@@ -1,0 +1,5 @@
+let compute = fn(a: i32, b: i32, c: i32) -> i32 {
+    let temp1 = a + b;
+    let temp2 = temp1 * c;
+    return temp2;
+};

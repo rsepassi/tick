@@ -1,0 +1,10 @@
+let test_i8 = fn(a: i8) -> i8 { return a; };
+let test_i16 = fn(a: i16) -> i16 { return a; };
+let test_i32 = fn(a: i32, b: i32) -> i32 { return a; };
+let test_i64 = fn(a: i64) -> i64 { return a; };
+let test_u8 = fn(a: u8) -> u8 { return a; };
+let test_u16 = fn(a: u16) -> u16 { return a; };
+let test_u32 = fn(a: u32) -> u32 { return a; };
+let test_u64 = fn(a: u64) -> u64 { return a; };
+let test_bool = fn(a: bool) -> bool { return a; };
+let test_void = fn() { return; };

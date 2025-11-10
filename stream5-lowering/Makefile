@@ -13,7 +13,8 @@ TEST_SOURCES = $(TEST_DIR)/test_lower.c
 # Infrastructure dependencies
 INFRA_SOURCES = $(INFRA_DIR)/arena.c \
                 $(INFRA_DIR)/error.c \
-                $(INFRA_DIR)/string_pool.c
+                $(INFRA_DIR)/string_pool.c \
+                ../stream3-semantic/src/typeck.c
 
 # Targets
 .PHONY: all clean test

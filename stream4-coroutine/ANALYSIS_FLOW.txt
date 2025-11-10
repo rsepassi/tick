@@ -1,0 +1,207 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    COROUTINE ANALYSIS - COMPLETE FLOW                         ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ INPUT: Typed AST from Semantic Analysis                                       │
+│                                                                                │
+│   pub async fn example() -> i32 {                                             │
+│       let x: i32 = 1;                                                         │
+│       suspend;                                                                │
+│       let y: i32 = x + 2;                                                     │
+│       suspend;                                                                │
+│       return y;                                                               │
+│   }                                                                           │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ coro_build_cfg()
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 1: CFG Construction (lines 189-506)                                     │
+│                                                                                │
+│   Algorithm: Recursive descent with block splitting                           │
+│   Complexity: O(n) - single AST traversal                                     │
+│                                                                                │
+│   ┌──────────┐                                                                │
+│   │ Block 0  │  let x = 1; suspend;                                          │
+│   │ (entry)  │─────────┐                                                     │
+│   │SUSPEND 0 │         │                                                     │
+│   └──────────┘         │                                                     │
+│                        │                                                      │
+│                        ▼                                                      │
+│                   ┌──────────┐                                               │
+│                   │ Block 2  │  let y = x + 2; suspend;                      │
+│                   │SUSPEND 1 │─────────┐                                     │
+│                   └──────────┘         │                                     │
+│                                        │                                      │
+│                                        ▼                                      │
+│                                   ┌──────────┐                               │
+│                                   │ Block 3  │  return y;                    │
+│                                   └──────────┘                               │
+│                                        │                                      │
+│                                        ▼                                      │
+│                                   ┌──────────┐                               │
+│                                   │ Block 1  │  [exit]                       │
+│                                   │  (exit)  │                               │
+│                                   └──────────┘                               │
+│                                                                                │
+│   Variables tracked: {x, y}                                                   │
+│   Suspend points: 2 (state 0, state 1)                                       │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ coro_compute_liveness()
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 2: Liveness Analysis (lines 508-627)                                    │
+│                                                                                │
+│   Algorithm: Backward dataflow with fixed-point iteration                     │
+│   Complexity: O(b × v × i) where i < 5                                        │
+│                                                                                │
+│   Step 1: Compute Gen/Kill Sets                                               │
+│   ────────────────────────────────                                            │
+│   Block 0:  GEN = {}     KILL = {x}    (x defined, nothing used first)       │
+│   Block 2:  GEN = {x}    KILL = {y}    (x used, y defined)                   │
+│   Block 3:  GEN = {y}    KILL = {}     (y used, nothing defined)             │
+│                                                                                │
+│   Step 2: Dataflow Iteration (backward)                                       │
+│   ────────────────────────────────────                                        │
+│   Iteration 1:                                                                │
+│     Block 1 (exit):  LIVE_IN = {},  LIVE_OUT = {}                            │
+│     Block 3:         LIVE_IN = {y}, LIVE_OUT = {}                            │
+│     Block 2:         LIVE_IN = {x}, LIVE_OUT = {y}                           │
+│     Block 0:         LIVE_IN = {},  LIVE_OUT = {x}                           │
+│                                                                                │
+│   Iteration 2: No changes → CONVERGED ✓                                       │
+│                                                                                │
+│   Result: Live Variables at Each Point                                        │
+│   ──────────────────────────────────────                                      │
+│   Suspend 0 (Block 0): LIVE_OUT = {x}  → x must be saved                     │
+│   Suspend 1 (Block 2): LIVE_OUT = {y}  → y must be saved                     │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ Extract suspend points
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 3: Suspend Point Extraction (lines 744-832)                             │
+│                                                                                │
+│   For each suspend block:                                                     │
+│   1. Extract state ID                                                         │
+│   2. Get live variables from LIVE_OUT                                         │
+│   3. Look up type information                                                 │
+│   4. Create state struct                                                      │
+│                                                                                │
+│   ┌─────────────────────────────────────────┐                                │
+│   │ Suspend Point 0                         │                                │
+│   │   state_id: 0                           │                                │
+│   │   block: 0                              │                                │
+│   │   live_vars: [x : i32]                  │                                │
+│   └─────────────────────────────────────────┘                                │
+│                                                                                │
+│   ┌─────────────────────────────────────────┐                                │
+│   │ Suspend Point 1                         │                                │
+│   │   state_id: 1                           │                                │
+│   │   block: 2                              │                                │
+│   │   live_vars: [y : i32]                  │                                │
+│   └─────────────────────────────────────────┘                                │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ coro_compute_frame_layout()
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 4: Frame Layout Computation (lines 629-708)                             │
+│                                                                                │
+│   Algorithm: Tagged union with per-state structs                              │
+│   Complexity: O(s × f)                                                         │
+│                                                                                │
+│   Step 1: Compute State Struct Layouts                                        │
+│   ────────────────────────────────────────                                    │
+│   State 0: {i32 x}                                                            │
+│     Field x: offset=0, size=4, align=4                                        │
+│     Struct: size=4, align=4                                                   │
+│                                                                                │
+│   State 1: {i32 y}                                                            │
+│     Field y: offset=0, size=4, align=4                                        │
+│     Struct: size=4, align=4                                                   │
+│                                                                                │
+│   Step 2: Compute Union Layout                                                │
+│   ────────────────────────────────                                            │
+│   Union size = max(State0.size, State1.size) = 4 bytes                       │
+│   Union align = max(State0.align, State1.align) = 4 bytes                    │
+│                                                                                │
+│   Step 3: Compute Frame Layout                                                │
+│   ────────────────────────────────                                            │
+│   Tag:   offset=0, size=4 (uint32_t)                                         │
+│   Union: offset=4 (aligned to 4)                                             │
+│   Total: align_to(4 + 4, 4) = 8 bytes                                        │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ OUTPUT: Complete Coroutine Metadata                                           │
+│                                                                                │
+│   CoroMetadata {                                                              │
+│     function_name: "example"                                                  │
+│     cfg: [5 blocks with edges]                                               │
+│     suspend_count: 2                                                          │
+│     suspend_points: [                                                         │
+│       {state_id: 0, live_vars: [x]},                                         │
+│       {state_id: 1, live_vars: [y]}                                          │
+│     ]                                                                         │
+│     state_structs: [                                                          │
+│       {state_id: 0, fields: [{x, i32, offset=0}], size: 4},                 │
+│       {state_id: 1, fields: [{y, i32, offset=0}], size: 4}                  │
+│     ]                                                                         │
+│     total_frame_size: 8                                                       │
+│     frame_alignment: 4                                                        │
+│     tag_offset: 0                                                             │
+│     union_offset: 4                                                           │
+│   }                                                                           │
+│                                                                                │
+│   Generated C Structure:                                                      │
+│   ──────────────────────                                                      │
+│   struct CoroFrame {                                                          │
+│       uint32_t state_tag;    // 4 bytes at offset 0                          │
+│       union {                // 4 bytes at offset 4                          │
+│           struct { i32 x; } state_0;                                         │
+│           struct { i32 y; } state_1;                                         │
+│       } data;                                                                 │
+│   };  // total: 8 bytes, align: 4                                            │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │ Pass to IR Lowering (Stream 5)
+                                      ▼
+                     [ State Machine Transformation ]
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                           IMPLEMENTATION DETAILS
+═══════════════════════════════════════════════════════════════════════════════
+
+Files:
+  • coro_analyze.c (837 lines) - Complete implementation
+  • coro_metadata.h (172 lines) - Interface definitions
+  • test_coro_analyze.c (609 lines) - Comprehensive tests
+
+Key Data Structures:
+  • CFG - Control flow graph with blocks and edges
+  • BasicBlock - CFG node with liveness sets
+  • VarRef - Variable use/definition tracking
+  • CoroMetadata - Complete analysis results
+
+Algorithms:
+  • CFG Construction: Recursive descent, O(n)
+  • Liveness Analysis: Backward dataflow, O(b×v×i)
+  • Frame Layout: Tagged union, O(s×f)
+
+Testing:
+  ✓ 9 test cases covering all functionality
+  ✓ All tests passing
+  ✓ Demo program showing analysis results
+
+Integration:
+  → Input: Typed AST from semantic analysis
+  → Output: Metadata for IR lowering and codegen
+  → Status: Ready for integration
+
+═══════════════════════════════════════════════════════════════════════════════

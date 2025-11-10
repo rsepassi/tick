@@ -19,6 +19,7 @@ typedef struct CodegenContext {
     FILE* header_out;   // For .h file
     FILE* source_out;   // For .c file
     int indent_level;
+    IrFunction* current_function;  // Track current function for error propagation
 } CodegenContext;
 
 // Initialize context

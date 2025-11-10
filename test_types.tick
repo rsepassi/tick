@@ -1,0 +1,15 @@
+let test_u32 = fn(a: u32) -> u32 {
+    return a;
+};
+
+let test_i64 = fn(b: i64, c: i64) -> i64 {
+    return b;
+};
+
+let test_bool = fn(flag: bool) -> bool {
+    return flag;
+};
+
+let test_void = fn() {
+    return;
+};
