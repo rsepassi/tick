@@ -527,8 +527,31 @@ static Type* resolve_type_from_node(TypeChecker* tc, AstNode* type_node) {
         }
 
         case AST_TYPE_NAMED: {
-            // For now, lookup type by name from scope or return opaque type
-            // TODO: proper symbol resolution for: tnode->data.named.name
+            const char* name = tnode->data.named.name;
+
+            if (!name) {
+                error_list_add(tc->errors, ERROR_TYPE, type_node->loc,
+                              "Type name is NULL");
+                return TYPE_VOID_SINGLETON;
+            }
+
+            // Check for primitive types
+            if (strcmp(name, "i8") == 0) return TYPE_I8_SINGLETON;
+            if (strcmp(name, "i16") == 0) return TYPE_I16_SINGLETON;
+            if (strcmp(name, "i32") == 0) return TYPE_I32_SINGLETON;
+            if (strcmp(name, "i64") == 0) return TYPE_I64_SINGLETON;
+            if (strcmp(name, "isize") == 0) return TYPE_ISIZE_SINGLETON;
+            if (strcmp(name, "u8") == 0) return TYPE_U8_SINGLETON;
+            if (strcmp(name, "u16") == 0) return TYPE_U16_SINGLETON;
+            if (strcmp(name, "u32") == 0) return TYPE_U32_SINGLETON;
+            if (strcmp(name, "u64") == 0) return TYPE_U64_SINGLETON;
+            if (strcmp(name, "usize") == 0) return TYPE_USIZE_SINGLETON;
+            if (strcmp(name, "bool") == 0) return TYPE_BOOL_SINGLETON;
+            if (strcmp(name, "void") == 0) return TYPE_VOID_SINGLETON;
+
+            // TODO: proper symbol resolution for user-defined types
+            error_list_add(tc->errors, ERROR_TYPE, type_node->loc,
+                          "Unknown type: %s", name);
             Type* named_type = TYPE_VOID_SINGLETON; // placeholder
             type_node->type = named_type;
             return named_type;
@@ -881,11 +904,30 @@ static Type* check_expression(TypeChecker* tc, AstNode* expr) {
         }
 
         case AST_IDENTIFIER_EXPR: {
-            // Identifiers need to be resolved via symbol table lookup
-            // For now, return error as we don't have symbol resolution integrated
-            error_list_add(tc->errors, ERROR_TYPE, expr->loc,
-                          "Identifier resolution not implemented: %s", expr->data.identifier_expr.name);
-            return NULL;
+            // Look up identifier in symbol table
+            Symbol* sym = scope_lookup(tc->symbol_table->module_scope, expr->data.identifier_expr.name);
+            if (!sym) {
+                error_list_add(tc->errors, ERROR_TYPE, expr->loc,
+                              "Undefined identifier: %s", expr->data.identifier_expr.name);
+                return NULL;
+            }
+
+            // Get type from symbol
+            Type* sym_type = sym->type;
+
+            // For functions, get type from ast_node if not set on symbol
+            if (!sym_type && sym->kind == SYMBOL_FUNCTION && sym->data.function.ast_node) {
+                sym_type = sym->data.function.ast_node->type;
+            }
+
+            if (!sym_type) {
+                error_list_add(tc->errors, ERROR_TYPE, expr->loc,
+                              "Symbol has no type: %s", expr->data.identifier_expr.name);
+                return NULL;
+            }
+
+            expr->type = sym_type;
+            return expr->type;
         }
 
         case AST_BINARY_EXPR: {

@@ -731,10 +731,11 @@ try_catch_stmt(S) ::= TRY(T) block(Try) CATCH PIPE IDENTIFIER(Err) PIPE block(Ca
 
 // Block
 block(B) ::= LBRACE(T) stmt_list(S) RBRACE. {
+    AstNodeList* list = (AstNodeList*)S;
     B = ast_alloc(parser, AST_BLOCK_STMT, (SourceLocation){T.line, T.column, T.start});
     if (B) {
-        B->data.block_stmt.stmts = (AstNode**)S;
-        B->data.block_stmt.stmt_count = 0; // Set by parser
+        B->data.block_stmt.stmts = list->nodes;
+        B->data.block_stmt.stmt_count = list->count;
     }
 }
 
@@ -746,8 +747,15 @@ block(B) ::= LBRACE(T) RBRACE. {
     }
 }
 
-stmt_list(L) ::= stmt(S). { L = S; }
-stmt_list(L) ::= stmt_list(Prev) stmt(S). { L = S; }
+stmt_list(L) ::= stmt(S). {
+    L = node_list_create(parser);
+    node_list_append(parser, L, S);
+}
+
+stmt_list(L) ::= stmt_list(Prev) stmt(S). {
+    L = Prev;
+    node_list_append(parser, L, S);
+}
 
 // Expression statement
 expr_stmt(S) ::= expr(E) SEMICOLON. {
@@ -1103,7 +1111,7 @@ primary_expr(E) ::= BOOL_LITERAL(T). {
 primary_expr(E) ::= IDENTIFIER(T). {
     E = ast_alloc(parser, AST_IDENTIFIER_EXPR, (SourceLocation){T.line, T.column, T.start});
     if (E) {
-        E->data.identifier_expr.name = T.start;
+        E->data.identifier_expr.name = T.literal.str_value;
     }
 }
 
@@ -1132,6 +1140,8 @@ type(T) ::= IDENTIFIER(Name). {
     T = ast_alloc(parser, AST_TYPE_NAMED, (SourceLocation){Name.line, Name.column, Name.literal.str_value});
     if (T) {
         // Store type name
+        AstTypeNode* tnode = (AstTypeNode*)T;
+        tnode->data.named.name = Name.literal.str_value;
     }
 }
 

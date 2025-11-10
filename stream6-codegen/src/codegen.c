@@ -30,6 +30,7 @@ void codegen_init(CodegenContext* ctx, Arena* arena, ErrorList* errors,
     ctx->indent_level = 0;
     ctx->header_out = NULL;
     ctx->source_out = NULL;
+    ctx->current_function = NULL;
 }
 
 // Generate prefixed identifier to avoid name collisions
@@ -105,10 +106,14 @@ const char* codegen_type_to_c(Type* type, Arena* arena) {
 
 // Emit #line directive for source mapping
 static void emit_line_directive(SourceLocation loc, CodegenContext* ctx) {
-    if (!ctx->emit_line_directives || !ctx->source_out) return;
-    if (!loc.filename) return;
+    // Disable line directives for now - source locations are corrupted
+    (void)loc;
+    (void)ctx;
+    return;
 
-    fprintf(ctx->source_out, "#line %u \"%s\"\n", loc.line, loc.filename);
+    // if (!ctx->emit_line_directives || !ctx->source_out) return;
+    // if (!loc.filename) return;
+    // fprintf(ctx->source_out, "#line %u \"%s\"\n", loc.line, loc.filename);
 }
 
 // Binary operator to C string
@@ -326,6 +331,150 @@ static void emit_instruction(IrInstruction* instr, CodegenContext* ctx) {
             fprintf(ctx->source_out, ";\n");
             break;
 
+        case IR_PHI:
+            // PHI nodes in SSA form - in structured C code with gotos,
+            // these are typically handled by predecessor blocks setting
+            // the value before jumping. For now, emit as a comment.
+            INDENT(ctx);
+            fprintf(ctx->source_out, "/* PHI: ");
+            emit_value(instr->data.phi.dest, ctx);
+            fprintf(ctx->source_out, " = phi(");
+            for (size_t i = 0; i < instr->data.phi.value_count; i++) {
+                if (i > 0) fprintf(ctx->source_out, ", ");
+                emit_value(instr->data.phi.values[i], ctx);
+            }
+            fprintf(ctx->source_out, ") */\n");
+            break;
+
+        case IR_ERROR_CHECK:
+            // Check if a Result type value contains an error
+            // If so, store the error and jump to the error handler
+            INDENT(ctx);
+            fprintf(ctx->source_out, "if (!");
+            emit_value(instr->data.error_check.value, ctx);
+            fprintf(ctx->source_out, ".is_ok) {\n");
+            ctx->indent_level++;
+            if (instr->data.error_check.error_dest) {
+                INDENT(ctx);
+                emit_value(instr->data.error_check.error_dest, ctx);
+                fprintf(ctx->source_out, " = ");
+                emit_value(instr->data.error_check.value, ctx);
+                fprintf(ctx->source_out, ".error;\n");
+            }
+            INDENT(ctx);
+            fprintf(ctx->source_out, "goto %s;\n",
+                   codegen_prefix_identifier(instr->data.error_check.error_label->label, ctx->arena));
+            ctx->indent_level--;
+            INDENT(ctx);
+            fprintf(ctx->source_out, "}\n");
+            // Extract the success value
+            INDENT(ctx);
+            emit_value(instr->data.error_check.value, ctx);
+            fprintf(ctx->source_out, " = ");
+            emit_value(instr->data.error_check.value, ctx);
+            fprintf(ctx->source_out, ".value;\n");
+            break;
+
+        case IR_ERROR_PROPAGATE:
+            // Propagate an error by returning a Result with is_ok = false
+            INDENT(ctx);
+            fprintf(ctx->source_out, "return (");
+            // Need to construct the result type - get the return type
+            if (ctx->current_function && ctx->current_function->return_type) {
+                fprintf(ctx->source_out, "%s",
+                       codegen_type_to_c(ctx->current_function->return_type, ctx->arena));
+            }
+            fprintf(ctx->source_out, "){ .is_ok = false, .error = ");
+            emit_value(instr->data.error_propagate.error_value, ctx);
+            fprintf(ctx->source_out, " };\n");
+            break;
+
+        case IR_SUSPEND:
+            // Suspend coroutine execution - save state and return
+            INDENT(ctx);
+            fprintf(ctx->source_out, "/* SUSPEND at state_%u - save %zu live variables and yield control */\n",
+                   instr->data.suspend.state_id, instr->data.suspend.live_var_count);
+
+            // Set the resume point for next call
+            INDENT(ctx);
+            const char* func_prefix = ctx->current_function ?
+                codegen_prefix_identifier(ctx->current_function->name, ctx->arena) : "func";
+            fprintf(ctx->source_out, "machine.resume_point = &&%s_state_%u;\n",
+                   func_prefix, instr->data.suspend.state_id);
+
+            // Update state discriminator (for switch-based dispatch fallback)
+            INDENT(ctx);
+            fprintf(ctx->source_out, "machine.state = %u;\n", instr->data.suspend.state_id);
+
+            // Save live variables into the appropriate state struct in the union
+            for (size_t i = 0; i < instr->data.suspend.live_var_count; i++) {
+                INDENT(ctx);
+                fprintf(ctx->source_out, "machine.data.state_%u.",
+                       instr->data.suspend.state_id);
+                emit_value(instr->data.suspend.live_vars[i], ctx);
+                fprintf(ctx->source_out, " = ");
+                emit_value(instr->data.suspend.live_vars[i], ctx);
+                fprintf(ctx->source_out, ";\n");
+            }
+
+            // Return control to caller
+            INDENT(ctx);
+            fprintf(ctx->source_out, "return");
+            if (ctx->current_function && ctx->current_function->return_type &&
+                ctx->current_function->return_type->kind != TYPE_VOID) {
+                // For functions with return values, we need to signal "suspended" state
+                // The runtime will check this special value
+                fprintf(ctx->source_out, " (%s){0} /* suspended */",
+                       codegen_type_to_c(ctx->current_function->return_type, ctx->arena));
+            }
+            fprintf(ctx->source_out, ";\n");
+            break;
+
+        case IR_RESUME:
+            // Resume coroutine execution - jump to saved state
+            INDENT(ctx);
+            fprintf(ctx->source_out, "/* RESUME state_%u */\n", instr->data.resume.state_id);
+            INDENT(ctx);
+            fprintf(ctx->source_out, "goto *");
+            emit_value(instr->data.resume.coro_handle, ctx);
+            fprintf(ctx->source_out, "->state;\n");
+            break;
+
+        case IR_STATE_SAVE:
+            // Save live variables to coroutine frame union
+            INDENT(ctx);
+            fprintf(ctx->source_out, "/* STATE_SAVE state_%u - save %zu variables */\n",
+                   instr->data.state_save.state_id, instr->data.state_save.var_count);
+            // Update state discriminator
+            INDENT(ctx);
+            fprintf(ctx->source_out, "machine.state = %u;\n", instr->data.state_save.state_id);
+            // Save each live variable into the state's struct in the union
+            for (size_t i = 0; i < instr->data.state_save.var_count; i++) {
+                INDENT(ctx);
+                fprintf(ctx->source_out, "machine.data.state_%u.", instr->data.state_save.state_id);
+                emit_value(instr->data.state_save.vars[i], ctx);
+                fprintf(ctx->source_out, " = ");
+                emit_value(instr->data.state_save.vars[i], ctx);
+                fprintf(ctx->source_out, ";\n");
+            }
+            break;
+
+        case IR_STATE_RESTORE:
+            // Restore live variables from coroutine frame union
+            INDENT(ctx);
+            fprintf(ctx->source_out, "/* STATE_RESTORE state_%u - restore %zu variables */\n",
+                   instr->data.state_restore.state_id, instr->data.state_restore.var_count);
+            // Restore each live variable from the state's struct in the union
+            for (size_t i = 0; i < instr->data.state_restore.var_count; i++) {
+                INDENT(ctx);
+                emit_value(instr->data.state_restore.vars[i], ctx);
+                fprintf(ctx->source_out, " = machine.data.state_%u.",
+                       instr->data.state_restore.state_id);
+                emit_value(instr->data.state_restore.vars[i], ctx);
+                fprintf(ctx->source_out, ";\n");
+            }
+            break;
+
         default:
             INDENT(ctx);
             fprintf(ctx->source_out, "/* unsupported instruction kind: %d */\n", instr->kind);
@@ -354,32 +503,53 @@ static void emit_state_machine(IrFunction* func, CodegenContext* ctx) {
     if (!func->coro_meta) return;
 
     CoroMetadata* meta = func->coro_meta;
+    const char* func_prefix = codegen_prefix_identifier(func->name, ctx->arena);
 
-    // Generate state struct type definition
+    // Generate local state machine struct variable
     INDENT(ctx);
-    fprintf(ctx->source_out, "struct %s_state {\n",
-           codegen_prefix_identifier(func->name, ctx->arena));
+    fprintf(ctx->source_out, "/* Coroutine state machine for %s */\n", func->name);
+    INDENT(ctx);
+    fprintf(ctx->source_out, "struct {\n");
     ctx->indent_level++;
 
+    // State discriminator for switch-based fallback
     INDENT(ctx);
-    fprintf(ctx->source_out, "void* state;  /* Current state label */\n");
+    fprintf(ctx->source_out, "uint32_t state;  /* Current state ID */\n");
+
+    // Resume point for computed goto
+    INDENT(ctx);
+    fprintf(ctx->source_out, "void* resume_point;  /* Resume label */\n");
 
     // Generate union of all state structs
     INDENT(ctx);
     fprintf(ctx->source_out, "union {\n");
     ctx->indent_level++;
 
+    // Always generate state_0 even if empty (initial entry)
+    INDENT(ctx);
+    fprintf(ctx->source_out, "struct { int __placeholder; } state_0;  /* Initial entry */\n");
+
+    // Generate structs for each suspend point's live variables
     for (size_t i = 0; i < meta->state_count; i++) {
         StateStruct* state = &meta->state_structs[i];
+        if (state->state_id == 0) continue;  // Already handled above
+
         INDENT(ctx);
         fprintf(ctx->source_out, "struct {\n");
         ctx->indent_level++;
 
-        for (size_t j = 0; j < state->field_count; j++) {
+        if (state->field_count == 0) {
+            // Empty state - add placeholder to make struct valid
             INDENT(ctx);
-            const char* field_type = codegen_type_to_c(state->fields[j].type, ctx->arena);
-            const char* field_name = codegen_prefix_identifier(state->fields[j].name, ctx->arena);
-            fprintf(ctx->source_out, "%s %s;\n", field_type, field_name);
+            fprintf(ctx->source_out, "int __placeholder;\n");
+        } else {
+            // Emit fields for live variables at this state
+            for (size_t j = 0; j < state->field_count; j++) {
+                INDENT(ctx);
+                const char* field_type = codegen_type_to_c(state->fields[j].type, ctx->arena);
+                const char* field_name = codegen_prefix_identifier(state->fields[j].name, ctx->arena);
+                fprintf(ctx->source_out, "%s %s;\n", field_type, field_name);
+            }
         }
 
         ctx->indent_level--;
@@ -395,47 +565,177 @@ static void emit_state_machine(IrFunction* func, CodegenContext* ctx) {
     INDENT(ctx);
     fprintf(ctx->source_out, "} machine;\n\n");
 
-    // Initialize machine state
+    // Initialize machine to state 0 (first entry)
     INDENT(ctx);
-    fprintf(ctx->source_out, "machine.state = &&%s_state_0;\n",
-           codegen_prefix_identifier(func->name, ctx->arena));
+    fprintf(ctx->source_out, "machine.state = 0;\n");
+    INDENT(ctx);
+    fprintf(ctx->source_out, "machine.resume_point = &&%s_state_0;\n\n", func_prefix);
 
     // Computed goto dispatcher
     INDENT(ctx);
-    fprintf(ctx->source_out, "goto *machine.state;\n\n");
+    fprintf(ctx->source_out, "/* Dispatch to current state using computed goto */\n");
+    INDENT(ctx);
+    fprintf(ctx->source_out, "goto *machine.resume_point;\n\n");
 
-    // Generate state labels and code
+    // Generate state 0 (initial entry point)
+    fprintf(ctx->source_out, "%s_state_0:\n", func_prefix);
+    ctx->indent_level++;
+    INDENT(ctx);
+    fprintf(ctx->source_out, "/* Initial entry - execute function from start */\n");
+    ctx->indent_level--;
+
+    // Emit all basic blocks for the initial state
+    // The lowering phase should have split these appropriately
+    for (size_t i = 0; i < func->block_count; i++) {
+        emit_basic_block(func->blocks[i], ctx);
+    }
+
+    fprintf(ctx->source_out, "\n");
+
+    // Generate resume labels for each suspend point
     for (size_t i = 0; i < meta->suspend_count; i++) {
         SuspendPoint* sp = &meta->suspend_points[i];
-        const char* label = codegen_prefix_identifier(func->name, ctx->arena);
-        fprintf(ctx->source_out, "%s_state_%u:\n", label, sp->state_id);
+        fprintf(ctx->source_out, "%s_state_%u:\n", func_prefix, sp->state_id);
 
         ctx->indent_level++;
         INDENT(ctx);
-        fprintf(ctx->source_out, "/* State %u: %u live variables */\n",
-               sp->state_id, (unsigned)sp->live_var_count);
+        fprintf(ctx->source_out, "/* Resume point %u: %zu live variables */\n",
+               sp->state_id, sp->live_var_count);
 
-        // Restore live variables from state struct
+        // Restore live variables from the state struct
         for (size_t j = 0; j < sp->live_var_count; j++) {
             VarLiveness* var = &sp->live_vars[j];
             if (var->is_live) {
                 INDENT(ctx);
                 const char* var_name = codegen_prefix_identifier(var->var_name, ctx->arena);
-                fprintf(ctx->source_out, "%s = machine.data.state_%u.%s;\n",
-                       var_name, sp->state_id, var_name);
+                const char* type_str = codegen_type_to_c(var->var_type, ctx->arena);
+                fprintf(ctx->source_out, "%s %s = machine.data.state_%u.%s;\n",
+                       type_str, var_name, sp->state_id, var_name);
             }
         }
 
+        // Generate code to continue execution from this point
+        // This would be populated by the lowering phase with the appropriate
+        // basic blocks for this resume point
         INDENT(ctx);
-        fprintf(ctx->source_out, "/* TODO: Resume execution */\n");
+        fprintf(ctx->source_out, "/* TODO: Continue execution after resume */\n");
+        INDENT(ctx);
+        fprintf(ctx->source_out, "/* Lowering phase should generate continuation blocks */\n");
+
         ctx->indent_level--;
         fprintf(ctx->source_out, "\n");
+    }
+}
+
+// Helper structure to track temp declarations
+typedef struct {
+    IrValue* temp;
+    bool declared;
+} TempDecl;
+
+// Collect all temporaries used in a function
+static void collect_temps_from_value(IrValue* value, TempDecl** temps, size_t* temp_count, size_t* temp_capacity, Arena* arena) {
+    if (!value || value->kind != IR_VALUE_TEMP) return;
+
+    // Check if already collected
+    for (size_t i = 0; i < *temp_count; i++) {
+        if ((*temps)[i].temp == value) return;
+    }
+
+    // Add new temp
+    if (*temp_count >= *temp_capacity) {
+        *temp_capacity = (*temp_capacity == 0) ? 16 : (*temp_capacity * 2);
+        TempDecl* new_temps = arena_alloc(arena, sizeof(TempDecl) * (*temp_capacity), 8);
+        if (*temp_count > 0) {
+            memcpy(new_temps, *temps, sizeof(TempDecl) * (*temp_count));
+        }
+        *temps = new_temps;
+    }
+
+    (*temps)[*temp_count].temp = value;
+    (*temps)[*temp_count].declared = false;
+    (*temp_count)++;
+}
+
+static void collect_temps_from_instruction(IrInstruction* instr, TempDecl** temps, size_t* temp_count, size_t* temp_capacity, Arena* arena) {
+    if (!instr) return;
+
+    switch (instr->kind) {
+        case IR_ASSIGN:
+            collect_temps_from_value(instr->data.assign.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.assign.src, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_BINARY_OP:
+            collect_temps_from_value(instr->data.binary_op.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.binary_op.left, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.binary_op.right, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_UNARY_OP:
+            collect_temps_from_value(instr->data.unary_op.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.unary_op.operand, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_CALL:
+        case IR_ASYNC_CALL:
+            collect_temps_from_value(instr->data.call.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.call.func, temps, temp_count, temp_capacity, arena);
+            for (size_t i = 0; i < instr->data.call.arg_count; i++) {
+                collect_temps_from_value(instr->data.call.args[i], temps, temp_count, temp_capacity, arena);
+            }
+            break;
+        case IR_LOAD:
+            collect_temps_from_value(instr->data.load.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.load.addr, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_STORE:
+            collect_temps_from_value(instr->data.store.addr, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.store.value, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_ALLOCA:
+            collect_temps_from_value(instr->data.alloca.dest, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_GET_FIELD:
+            collect_temps_from_value(instr->data.get_field.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.get_field.base, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_GET_INDEX:
+            collect_temps_from_value(instr->data.get_index.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.get_index.base, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.get_index.index, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_CAST:
+            collect_temps_from_value(instr->data.cast.dest, temps, temp_count, temp_capacity, arena);
+            collect_temps_from_value(instr->data.cast.value, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_RETURN:
+            collect_temps_from_value(instr->data.ret.value, temps, temp_count, temp_capacity, arena);
+            break;
+        case IR_COND_JUMP:
+            collect_temps_from_value(instr->data.cond_jump.cond, temps, temp_count, temp_capacity, arena);
+            break;
+        default:
+            break;
+    }
+}
+
+static void collect_all_temps(IrFunction* func, TempDecl** temps, size_t* temp_count, Arena* arena) {
+    size_t temp_capacity = 0;
+    *temps = NULL;
+    *temp_count = 0;
+
+    for (size_t i = 0; i < func->block_count; i++) {
+        IrBasicBlock* block = func->blocks[i];
+        for (size_t j = 0; j < block->instruction_count; j++) {
+            collect_temps_from_instruction(block->instructions[j], temps, temp_count, &temp_capacity, arena);
+        }
     }
 }
 
 // Emit a function
 static void emit_function(IrFunction* func, CodegenContext* ctx) {
     if (!func) return;
+
+    // Set current function for error propagation
+    ctx->current_function = func;
 
     const char* func_name = codegen_prefix_identifier(func->name, ctx->arena);
     const char* return_type = codegen_type_to_c(func->return_type, ctx->arena);
@@ -472,6 +772,36 @@ static void emit_function(IrFunction* func, CodegenContext* ctx) {
         fprintf(ctx->source_out, ") {\n");
 
         ctx->indent_level++;
+
+        // Declare temporaries
+        TempDecl* temps = NULL;
+        size_t temp_count = 0;
+        collect_all_temps(func, &temps, &temp_count, ctx->arena);
+        
+        if (temp_count > 0) {
+            INDENT(ctx);
+            fprintf(ctx->source_out, "/* Temporaries */\n");
+            for (size_t i = 0; i < temp_count; i++) {
+                IrValue* temp = temps[i].temp;
+                const char* type_str = codegen_type_to_c(temp->type, ctx->arena);
+
+                // If type is void or unknown, use int32_t as default (TODO: fix type inference)
+                if (strcmp(type_str, "void") == 0 && temp->kind == IR_VALUE_TEMP) {
+                    type_str = "int32_t";
+                }
+
+                INDENT(ctx);
+                if (temp->data.temp.name) {
+                    // Named temporary - use the name
+                    fprintf(ctx->source_out, "%s %s;\n", type_str,
+                           codegen_prefix_identifier(temp->data.temp.name, ctx->arena));
+                } else {
+                    // Unnamed temporary - use tN
+                    fprintf(ctx->source_out, "%s t%u;\n", type_str, temp->data.temp.id);
+                }
+            }
+            fprintf(ctx->source_out, "\n");
+        }
 
         // Check if this is a state machine function
         if (func->is_state_machine && func->coro_meta) {

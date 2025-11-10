@@ -28,9 +28,9 @@ LOWERING_SRCS = $(ROOT)/stream5-lowering/src/lower.c
 
 CODEGEN_SRCS = $(ROOT)/stream6-codegen/src/codegen.c
 
-INFRA_SRCS = $(ROOT)/stream7-infrastructure/src/arena.c \
-             $(ROOT)/stream7-infrastructure/src/string_pool.c \
-             $(ROOT)/stream7-infrastructure/src/error.c
+INFRA_SRCS = $(ROOT)/stream1-lexer/src/arena.c \
+             $(ROOT)/stream1-lexer/src/string_pool.c \
+             $(ROOT)/stream1-lexer/src/error.c
 
 # All implementation sources
 ALL_IMPL_SRCS = $(LEXER_SRCS) $(PARSER_SRCS) $(SEMANTIC_SRCS) \

@@ -229,6 +229,19 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // DEBUG: Print IR info
+    if (opts.verbose) {
+        printf("IR lowering complete. Module has %zu functions\n", ir->function_count);
+        for (size_t i = 0; i < ir->function_count; i++) {
+            IrFunction* func = ir->functions[i];
+            printf("  Function %zu: %s\n", i, func->name);
+            printf("    Blocks: %zu\n", func->block_count);
+            for (size_t j = 0; j < func->block_count; j++) {
+                printf("      Block %zu: %u instructions\n", j, (unsigned)func->blocks[j]->instruction_count);
+            }
+        }
+    }
+
     // Phase 5: Code generation
     if (opts.verbose) printf("Phase 5: Code generation...\n");
 
@@ -253,6 +266,7 @@ int main(int argc, char** argv) {
     codegen_init(&codegen_ctx, arena, &errors, opts.output_base);
     codegen_ctx.header_out = header_file;
     codegen_ctx.source_out = source_file;
+    codegen_ctx.emit_line_directives = false;  // Disable line directives for cleaner output
 
     IrNode* ir_node = arena_alloc(arena, sizeof(IrNode), 8);
     ir_node->kind = IR_MODULE;
