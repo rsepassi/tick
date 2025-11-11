@@ -22,26 +22,47 @@ endif
 # Build directory
 BUILD_DIR := build
 
+# Lemon parser generator
+LEMON := $(BUILD_DIR)/vendor/lemon
+LEMON_TEMPLATE := vendor/lemon/lempar.c
+
+# Generated parser (in build/gen/)
+GRAMMAR_SRC := src/tick.y
+GENPARSESRC := $(BUILD_DIR)/gen/tick_grammar.c
+
 # Source files
 HDRS := $(shell find src -name '*.h')
 SRCS := $(shell find src -name '*.c')
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
+# Add generated parser object
+GENPARSEOBJ := $(BUILD_DIR)/gen/tick_grammar.o
+
 # Main target
 BINARY := $(BUILD_DIR)/tick
 
 .PHONY: all clean format test tree
+.SUFFIXES:  # Disable built-in suffix rules (prevents yacc from running on .y files)
 
 all: $(BINARY)
 
-$(BINARY): $(OBJS) $(SRCS) $(HDRS)
-	$(LD) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
+$(BINARY): $(OBJS) $(GENPARSEOBJ) $(SRCS) $(HDRS)
+	$(LD) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(GENPARSEOBJ)
 
 $(BUILD_DIR)/%.o: %.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/vendor/lemon:
+$(GENPARSESRC): $(GRAMMAR_SRC) $(LEMON)
+	@mkdir -p $(BUILD_DIR)/gen
+	$(LEMON) -T$(LEMON_TEMPLATE) -d$(BUILD_DIR)/gen -p -s $(GRAMMAR_SRC)
+	@mv $(BUILD_DIR)/gen/tick.c $(GENPARSESRC)
+	@mv $(BUILD_DIR)/gen/tick.h $(BUILD_DIR)/gen/tick_grammar.h
+
+$(GENPARSEOBJ): $(GENPARSESRC)
+	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-variable -c $(GENPARSESRC) -o $(GENPARSEOBJ)
+
+$(LEMON):
 	@mkdir -p $(dir $@)
 	$(CC) -o $@ -std=c99 vendor/lemon/lemon.c
 

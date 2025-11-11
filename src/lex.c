@@ -28,6 +28,7 @@ static const keyword_entry_t keywords[] = {
   {"embed_file", TICK_TOK_EMBED_FILE},
   {"enum", TICK_TOK_ENUM},
   {"errdefer", TICK_TOK_ERRDEFER},
+  {"export", TICK_TOK_EXPORT},
   {"false", TICK_TOK_BOOL_LITERAL},
   {"fn", TICK_TOK_FN},
   {"for", TICK_TOK_FOR},
@@ -483,6 +484,7 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_EMBED_FILE: return "embed_file";
     case TICK_TOK_ENUM: return "enum";
     case TICK_TOK_ERRDEFER: return "errdefer";
+    case TICK_TOK_EXPORT: return "export";
     case TICK_TOK_FN: return "fn";
     case TICK_TOK_FOR: return "for";
     case TICK_TOK_IF: return "if";

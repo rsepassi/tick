@@ -66,15 +66,15 @@ int main(int argc, char** argv) {
     tick_lex_next(&lex, &tok);
 
     char tok_buf[256];
-    DLOG("%s", tick_tok_format(&tok, tok_buf, sizeof(tok_buf)));
+    DLOG("[lex] %s", tick_tok_format(&tok, tok_buf, sizeof(tok_buf)));
 
     if (tok.type == TICK_TOK_ERR)
       COMPILE_ERR();
     if (tick_parse_tok(&parse, &tok) != TICK_OK)
       COMPILE_ERR();
-  } while (tok.type != TICK_TOK_EOF);
-  if (tick_parse_tok(&parse, NULL) != TICK_OK)
+    if (parse.has_error)
       COMPILE_ERR();
+  } while (tok.type != TICK_TOK_EOF);
 
   // analyze, typecheck, lower
   tick_ast_t root = parse.root;

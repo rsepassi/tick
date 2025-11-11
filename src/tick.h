@@ -55,6 +55,10 @@ typedef struct {
 } tick_allocator_config_t;
 
 typedef struct {
+  // buf->sz=0 -> malloc
+  // buf->sz>0 -> realloc
+  // newsz=0 -> free
+  // config=NULL -> defaults
   tick_err_t (*realloc)(void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config);
   void* ctx;
 } tick_alloc_t;
@@ -86,6 +90,7 @@ typedef enum {
 } tick_cli_result_t;
 
 typedef enum {
+  TICK_TOK_UNKNOWN,
   TICK_TOK_EOF,
   TICK_TOK_ERR,
 
@@ -125,6 +130,7 @@ typedef enum {
   TICK_TOK_EMBED_FILE,
   TICK_TOK_ENUM,
   TICK_TOK_ERRDEFER,
+  TICK_TOK_EXPORT,
   TICK_TOK_FN,
   TICK_TOK_FOR,
   TICK_TOK_IF,
@@ -218,7 +224,107 @@ typedef struct {
   usz col;
 } tick_lex_t;
 
+// AST node types
+typedef enum {
+  TICK_AST_LITERAL,
+  TICK_AST_ERROR,
+  TICK_AST_MODULE,
+  TICK_AST_IMPORT_DECL,
+  TICK_AST_LET_DECL,
+  TICK_AST_FUNCTION_DECL,
+  TICK_AST_RETURN_STMT,
+  TICK_AST_BLOCK_STMT,
+  TICK_AST_EXPR_STMT,
+  TICK_AST_BINARY_EXPR,
+  TICK_AST_IDENTIFIER_EXPR,
+  TICK_AST_TYPE_NAMED,
+  TICK_AST_EXPORT_STMT,
+} tick_ast_node_kind_t;
+
+// AST node location
+typedef struct {
+  usz line;
+  usz col;
+} tick_ast_loc_t;
+
+// Forward declare for recursive types
 typedef struct tick_ast_node_t tick_ast_node_t;
+
+// Binary operators
+typedef enum {
+  BINOP_ADD,
+  BINOP_SUB,
+  BINOP_MUL,
+  BINOP_DIV,
+} tick_binop_t;
+
+// Function parameter
+typedef struct {
+  tick_buf_t name;
+  tick_ast_node_t* type;
+  tick_ast_loc_t loc;
+} tick_ast_param_t;
+
+// AST node structure
+struct tick_ast_node_t {
+  tick_ast_node_kind_t kind;
+  tick_ast_loc_t loc;
+  tick_ast_node_t* next;  // For building linked lists during parsing
+  union {
+    struct {
+      uint64_t value;
+    } literal;
+    struct {
+      tick_buf_t name;
+      tick_ast_node_t** decls;
+      usz decl_count;
+    } module;
+    struct {
+      tick_buf_t name;
+      tick_buf_t path;
+      bool is_pub;
+    } import_decl;
+    struct {
+      tick_buf_t name;
+      tick_ast_node_t* type;
+      tick_ast_node_t* init;
+      bool is_pub;
+    } let_decl;
+    struct {
+      tick_buf_t name;
+      tick_ast_param_t* params;
+      usz param_count;
+      tick_ast_node_t* return_type;
+      tick_ast_node_t* body;
+      bool is_pub;
+    } function_decl;
+    struct {
+      tick_ast_node_t* value;
+    } return_stmt;
+    struct {
+      tick_ast_node_t** stmts;
+      usz stmt_count;
+    } block_stmt;
+    struct {
+      tick_ast_node_t* expr;
+    } expr_stmt;
+    struct {
+      tick_binop_t op;
+      tick_ast_node_t* left;
+      tick_ast_node_t* right;
+    } binary_expr;
+    struct {
+      tick_buf_t name;
+    } identifier_expr;
+    struct {
+      tick_buf_t name;
+    } type_named;
+    struct {
+      tick_buf_t name;
+    } export_stmt;
+  } data;
+};
+
 typedef struct {
   tick_ast_node_t* root;
 } tick_ast_t;
@@ -227,6 +333,8 @@ typedef struct {
   tick_alloc_t alloc;
   tick_buf_t errbuf;
   tick_ast_t root;
+  void* lemon_parser;  // Lemon parser instance
+  bool has_error;      // Set to true when parse error occurs
 } tick_parse_t;
 
 typedef struct {
@@ -257,6 +365,7 @@ void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf)
 tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok);
 
 // AST functions
+const char* tick_ast_kind_str(tick_ast_node_kind_t kind);
 tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_buf_t errbuf);
 tick_err_t tick_ast_lower(tick_ast_t* ast, tick_buf_t errbuf);
 
