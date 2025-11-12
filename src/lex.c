@@ -26,7 +26,6 @@ static const keyword_entry_t keywords[] = {
   {"default", TICK_TOK_DEFAULT},
   {"defer", TICK_TOK_DEFER},
   {"else", TICK_TOK_ELSE},
-  {"embed_file", TICK_TOK_EMBED_FILE},
   {"enum", TICK_TOK_ENUM},
   {"errdefer", TICK_TOK_ERRDEFER},
   {"false", TICK_TOK_BOOL_LITERAL},
@@ -490,7 +489,6 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_DEFAULT: return "default";
     case TICK_TOK_DEFER: return "defer";
     case TICK_TOK_ELSE: return "else";
-    case TICK_TOK_EMBED_FILE: return "embed_file";
     case TICK_TOK_ENUM: return "enum";
     case TICK_TOK_ERRDEFER: return "errdefer";
     case TICK_TOK_FN: return "fn";
@@ -540,6 +538,10 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_MINUS_PIPE: return "-|";
     case TICK_TOK_STAR_PIPE: return "*|";
     case TICK_TOK_SLASH_PIPE: return "/|";
+    case TICK_TOK_PLUS_PERCENT: return "+%";
+    case TICK_TOK_MINUS_PERCENT: return "-%";
+    case TICK_TOK_STAR_PERCENT: return "*%";
+    case TICK_TOK_SLASH_PERCENT: return "/%";
     case TICK_TOK_BANG_EQ: return "!=";
     case TICK_TOK_EQ_EQ: return "==";
     case TICK_TOK_LT_EQ: return "<=";
@@ -643,6 +645,8 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
     case '+':
       if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_PLUS_PIPE, start);
+      } else if (match(lex, '%')) {
+        make_token(lex, tok, TICK_TOK_PLUS_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_PLUS, start);
       }
@@ -653,6 +657,8 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
         scan_number(lex, tok, start, true);
       } else if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_MINUS_PIPE, start);
+      } else if (match(lex, '%')) {
+        make_token(lex, tok, TICK_TOK_MINUS_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_MINUS, start);
       }
@@ -660,6 +666,8 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
     case '*':
       if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_STAR_PIPE, start);
+      } else if (match(lex, '%')) {
+        make_token(lex, tok, TICK_TOK_STAR_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_STAR, start);
       }
@@ -667,6 +675,8 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
     case '/':
       if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_SLASH_PIPE, start);
+      } else if (match(lex, '%')) {
+        make_token(lex, tok, TICK_TOK_SLASH_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_SLASH, start);
       }
