@@ -528,6 +528,7 @@ typedef enum {
   TICK_AST_LET_STMT,
   TICK_AST_VAR_STMT,
   TICK_AST_ASSIGN_STMT,
+  TICK_AST_UNUSED_STMT,
   TICK_AST_IF_STMT,
   TICK_AST_FOR_STMT,
   TICK_AST_SWITCH_STMT,
@@ -686,7 +687,9 @@ typedef enum {
 struct tick_ast_node_s {
   tick_ast_node_kind_t kind;
   tick_ast_loc_t loc;
-  tick_ast_node_t* next;  // For building linked lists during parsing
+  tick_ast_node_t* next;  // Next node in list
+  tick_ast_node_t* prev;  // Previous node in list
+  tick_ast_node_t* tail;  // For list heads: pointer to last node (used during parsing)
   union {
     struct {
       tick_literal_kind_t kind;
@@ -749,6 +752,9 @@ struct tick_ast_node_s {
       tick_assign_op_t op;
       tick_ast_node_t* rhs;
     } assign_stmt;
+    struct {
+      tick_ast_node_t* expr;
+    } unused_stmt;
     struct {
       tick_ast_node_t* condition;
       tick_ast_node_t* then_block;
@@ -933,6 +939,10 @@ tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok);
 const char* tick_ast_kind_str(tick_ast_node_kind_t kind);
 tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf);
 tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf);
+
+// AST list helpers
+void tick_ast_list_init(tick_ast_node_t* node);
+tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head, tick_ast_node_t* node);
 
 // Output functions
 tick_err_t tick_output_format_name(tick_buf_t output_path, tick_path_t* output_h, tick_path_t* output_c);

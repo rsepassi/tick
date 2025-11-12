@@ -1,0 +1,16 @@
+# Test forward declarations with multiple structs
+
+pub let Point = struct {
+  x: i32,
+  y: i32,
+};
+
+pub let Node = struct {
+  value: i32,
+  next: *Node,
+};
+
+pub let LinkedList = struct {
+  head: *Node,
+  tail: *Node,
+};

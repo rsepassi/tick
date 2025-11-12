@@ -365,6 +365,34 @@ const char* tick_ast_kind_str(tick_ast_node_kind_t kind) {
   }
 }
 
+// Initialize a single-node list
+void tick_ast_list_init(tick_ast_node_t* node) {
+  node->next = NULL;
+  node->prev = NULL;
+  node->tail = node;  // Single node is its own tail
+}
+
+// Append a node to a list, maintaining doubly-linked structure
+// Returns the head of the list (unchanged)
+tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head, tick_ast_node_t* node) {
+  if (head == NULL) {
+    // Empty list: initialize the node as a single-element list
+    tick_ast_list_init(node);
+    return node;
+  }
+
+  // Initialize the new node
+  tick_ast_list_init(node);
+
+  // Append to the tail of the existing list
+  tick_ast_node_t* tail = head->tail;
+  tail->next = node;
+  node->prev = tail;
+  head->tail = node;  // Update head's tail pointer
+
+  return head;
+}
+
 // ============================================================================
 // Output functions
 // ============================================================================

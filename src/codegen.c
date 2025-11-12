@@ -294,7 +294,6 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
 static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx);
 static tick_builtin_t map_binop_to_builtin(tick_binop_t op, tick_builtin_type_t type);
 static const char* get_builtin_function_name(tick_builtin_t builtin, tick_builtin_type_t type);
-static tick_ast_node_t* reverse_list(tick_ast_node_t* head);
 
 static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   switch (node->data.literal.kind) {
@@ -847,9 +846,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
       CHECK_OK(write_str(ctx->writer, "{ "));
 
-      // Reverse the element list since parser builds it in reverse order
-      tick_ast_node_t* elems_reversed = reverse_list(expr->data.array_init_expr.elements);
-      tick_ast_node_t* elem = elems_reversed;
+      // Iterate elements in source order
+      tick_ast_node_t* elem = expr->data.array_init_expr.elements;
       bool first = true;
       while (elem) {
         if (!first) {
@@ -860,8 +858,6 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
         CHECK_OK(codegen_expr(elem, ctx));
         elem = elem->next;
       }
-      // Restore original order in AST
-      expr->data.array_init_expr.elements = reverse_list(elems_reversed);
 
       CHECK_OK(write_str(ctx->writer, " }"));
       return TICK_OK;
@@ -946,6 +942,15 @@ static tick_err_t codegen_assign_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_str(ctx->writer, " = "));
   CHECK_OK(codegen_expr(node->data.assign_stmt.rhs, ctx));
   CHECK_OK(write_str(ctx->writer, ";\n"));
+  return TICK_OK;
+}
+
+static tick_err_t codegen_unused_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+  CHECK_OK(write_line_directive(ctx, node->loc.line));
+  CHECK_OK(write_indent(ctx->writer, indent));
+  CHECK_OK(write_str(ctx->writer, "TICK_UNUSED("));
+  CHECK_OK(codegen_expr(node->data.unused_stmt.expr, ctx));
+  CHECK_OK(write_str(ctx->writer, ");\n"));
   return TICK_OK;
 }
 
@@ -1153,6 +1158,8 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int in
       return codegen_let_or_var_stmt(stmt, ctx, indent, true);
     case TICK_AST_ASSIGN_STMT:
       return codegen_assign_stmt(stmt, ctx, indent);
+    case TICK_AST_UNUSED_STMT:
+      return codegen_unused_stmt(stmt, ctx, indent);
     case TICK_AST_EXPR_STMT:
       return codegen_expr_stmt(stmt, ctx, indent);
     case TICK_AST_IF_STMT:
@@ -1198,19 +1205,6 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int in
 // Utility Functions
 // ============================================================================
 
-// Reverse a linked list (parser builds lists in reverse order)
-static tick_ast_node_t* reverse_list(tick_ast_node_t* head) {
-  tick_ast_node_t* prev = NULL;
-  tick_ast_node_t* curr = head;
-  while (curr) {
-    tick_ast_node_t* next = curr->next;
-    curr->next = prev;
-    prev = curr;
-    curr = next;
-  }
-  return prev;
-}
-
 // ============================================================================
 // Type Declaration Generation
 // ============================================================================
@@ -1252,9 +1246,8 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, b
   CHECK_OK(write_ident(w, decl->data.decl.name));
   CHECK_OK(write_str(w, " {\n"));
 
-  // Emit fields (reverse the list since parser builds in reverse)
-  tick_ast_node_t* fields_reversed = reverse_list(struct_node->data.struct_decl.fields);
-  tick_ast_node_t* field = fields_reversed;
+  // Emit fields in source order
+  tick_ast_node_t* field = struct_node->data.struct_decl.fields;
   while (field) {
     CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in struct");
 
@@ -1274,8 +1267,6 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, b
     CHECK_OK(write_str(w, ";\n"));
     field = field->next;
   }
-  // Restore original order
-  struct_node->data.struct_decl.fields = reverse_list(fields_reversed);
 
   CHECK_OK(write_str(w, "};\n\n"));
 
@@ -1374,9 +1365,8 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w, bo
   // Emit data union
   CHECK_OK(write_str(w, "  union {\n"));
 
-  // Emit fields (reverse the list)
-  tick_ast_node_t* fields_reversed = reverse_list(union_node->data.union_decl.fields);
-  tick_ast_node_t* field = fields_reversed;
+  // Emit fields in source order
+  tick_ast_node_t* field = union_node->data.union_decl.fields;
   while (field) {
     CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in union");
 
@@ -1388,8 +1378,6 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w, bo
 
     field = field->next;
   }
-  // Restore original order
-  union_node->data.union_decl.fields = reverse_list(fields_reversed);
 
   CHECK_OK(write_str(w, "  } data;\n"));
   CHECK_OK(write_str(w, "};\n\n"));
@@ -1401,7 +1389,7 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w, bo
 // Function Generation
 // ============================================================================
 
-static tick_err_t codegen_function_signature(tick_ast_node_t* decl, codegen_ctx_t* ctx) {
+static tick_err_t codegen_function_signature(tick_ast_node_t* decl, codegen_ctx_t* ctx, bool include_param_names) {
   tick_ast_node_t* func = decl->data.decl.init;
 
   // Return type
@@ -1411,10 +1399,9 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl, codegen_ctx_
   // Function name (with __u_ prefix)
   CHECK_OK(write_decl_name(ctx->writer, decl));
 
-  // Parameters (reverse the list since parser builds in reverse)
+  // Parameters in source order
   CHECK_OK(write_str(ctx->writer, "("));
-  tick_ast_node_t* params_reversed = reverse_list(func->data.function.params);
-  tick_ast_node_t* param = params_reversed;
+  tick_ast_node_t* param = func->data.function.params;
 
   // In C, empty parameter list should be (void) not ()
   if (!param) {
@@ -1428,23 +1415,25 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl, codegen_ctx_
       first = false;
 
       CHECK_OK(codegen_type(param->data.param.type, ctx->writer));
-      CHECK_OK(write_str(ctx->writer, " "));
-      // Parameter names get __u_ prefix
-      CHECK_OK(write_str(ctx->writer, "__u_"));
-      CHECK_OK(write_ident(ctx->writer, param->data.param.name));
+
+      // Include parameter names only in implementation
+      if (include_param_names) {
+        CHECK_OK(write_str(ctx->writer, " "));
+        // Parameter names get __u_ prefix
+        CHECK_OK(write_str(ctx->writer, "__u_"));
+        CHECK_OK(write_ident(ctx->writer, param->data.param.name));
+      }
 
       param = param->next;
     }
   }
-  // Reverse back to preserve original order in AST
-  func->data.function.params = reverse_list(params_reversed);
   CHECK_OK(write_str(ctx->writer, ")"));
 
   return TICK_OK;
 }
 
 static tick_err_t codegen_function_decl_h(tick_ast_node_t* decl, codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_function_signature(decl, ctx));
+  CHECK_OK(codegen_function_signature(decl, ctx, false));  // No parameter names in header
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
@@ -1456,7 +1445,7 @@ static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl, codegen_ctx_t* 
   CHECK_OK(write_line_directive(ctx, decl->loc.line));
 
   // Function signature
-  CHECK_OK(codegen_function_signature(decl, ctx));
+  CHECK_OK(codegen_function_signature(decl, ctx, true));  // Include parameter names in implementation
   CHECK_OK(write_str(ctx->writer, " "));
 
   // Function body

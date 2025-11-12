@@ -152,7 +152,7 @@ module(M) ::= decl_list(D). {
 
 // Declaration list - builds linked list
 decl_list(L) ::= . { L = NULL; }
-decl_list(L) ::= decl_list(Prev) decl(D). { PLOG("Adding to decl list"); L = D; L->next = Prev; }
+decl_list(L) ::= decl_list(Head) decl(D). { PLOG("Adding to decl list"); L = tick_ast_list_append(Head, D); }
 
 // Identifier - immediately copy from ephemeral token to prevent data loss
 %type name { tick_ident_t }
@@ -267,9 +267,9 @@ expr(E) ::= STRUCT(T) struct_quals(Q) LBRACE field_list(F) RBRACE. {
 
 // Field list - builds linked list
 field_list(L) ::= . { L = NULL; }
-field_list(L) ::= field(F). { L = F; L->next = NULL; }
-field_list(L) ::= field_list(Prev) COMMA field(F). { L = F; L->next = Prev; }
-field_list(L) ::= field_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+field_list(L) ::= field(F). { tick_ast_list_init(F); L = F; }
+field_list(L) ::= field_list(Head) COMMA field(F). { L = tick_ast_list_append(Head, F); }
+field_list(L) ::= field_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Field
 field(F) ::= name(Name) COLON type(T) align_spec(Align). {
@@ -289,9 +289,9 @@ expr(E) ::= ENUM(T) LPAREN type(Ty) RPAREN LBRACE enum_value_list(V) RBRACE. {
 
 // Enum value list - builds linked list
 enum_value_list(L) ::= . { L = NULL; }
-enum_value_list(L) ::= enum_value(V). { L = V; L->next = NULL; }
-enum_value_list(L) ::= enum_value_list(Prev) COMMA enum_value(V). { L = V; L->next = Prev; }
-enum_value_list(L) ::= enum_value_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+enum_value_list(L) ::= enum_value(V). { tick_ast_list_init(V); L = V; }
+enum_value_list(L) ::= enum_value_list(Head) COMMA enum_value(V). { L = tick_ast_list_append(Head, V); }
+enum_value_list(L) ::= enum_value_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Enum value
 enum_value(V) ::= name(Name). {
@@ -326,9 +326,9 @@ expr(E) ::= UNION(T) tag_type(Tag) align_spec(Align) LBRACE field_list(F) RBRACE
 }
 
 // Parameter list - builds linked list using next pointer
-param_list(L) ::= param(P). { L = P; L->next = NULL; }
-param_list(L) ::= param_list(Prev) COMMA param(P). { L = P; L->next = Prev; }
-param_list(L) ::= param_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+param_list(L) ::= param(P). { tick_ast_list_init(P); L = P; }
+param_list(L) ::= param_list(Head) COMMA param(P). { L = tick_ast_list_append(Head, P); }
+param_list(L) ::= param_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Parameter
 param(P) ::= name(Name) COLON type(T). {
@@ -434,14 +434,13 @@ fn_type_params(L) ::= LPAREN fn_type_param_list(R) RPAREN. { L = R; }
 
 // Function type parameter list - supports both name:type and just type
 fn_type_param_list(L) ::= fn_type_param(P). {
+    tick_ast_list_init(P);
     L = P;
-    L->next = NULL;
 }
-fn_type_param_list(L) ::= fn_type_param_list(Prev) COMMA fn_type_param(P). {
-    L = P;
-    L->next = Prev;
+fn_type_param_list(L) ::= fn_type_param_list(Head) COMMA fn_type_param(P). {
+    L = tick_ast_list_append(Head, P);
 }
-fn_type_param_list(L) ::= fn_type_param_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+fn_type_param_list(L) ::= fn_type_param_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Function type parameter - can be "name: type" or just "type"
 fn_type_param(P) ::= name(Name) COLON type(T). {
@@ -490,6 +489,7 @@ stmt(S) ::= VAR name(Name) EQ expr(E) SEMICOLON. {
     S->data.decl.quals = (tick_qualifier_flags_t){.is_var = true};
 }
 stmt(S) ::= assign_stmt(A). { S = A; }
+stmt(S) ::= unused_stmt(U). { S = U; }
 stmt(S) ::= return_stmt(R). { S = R; }
 stmt(S) ::= if_stmt(I). { S = I; }
 stmt(S) ::= for_stmt(F). { S = F; }
@@ -518,6 +518,16 @@ expr_stmt(S) ::= expr(E) SEMICOLON. {
 
 // Assignment statements
 assign_stmt(S) ::= expr(L) EQ(T) expr(R) SEMICOLON. { ASSIGN_RULE(S, L, T, R, ASSIGN_EQ); }
+
+// Unused statement (discard pattern)
+unused_stmt(S) ::= UNDERSCORE(T) EQ name(N) SEMICOLON. {
+    PLOG("Parsing unused statement");
+    S = ast_alloc(parse, TICK_AST_UNUSED_STMT, T.line, T.col);
+    tick_ast_node_t* ident = ast_alloc(parse, TICK_AST_IDENTIFIER_EXPR, N.line, N.col);
+    ident->data.identifier_expr.name = N.text;
+    ident->data.identifier_expr.at_builtin = TICK_AT_BUILTIN_UNKNOWN;
+    S->data.unused_stmt.expr = ident;
+}
 
 // If statements
 if_stmt(S) ::= IF(T) expr(Cond) block(Then). {
@@ -634,7 +644,7 @@ switch_stmt(S) ::= SWITCH(T) expr(Val) LBRACE case_list(Cases) RBRACE. {
 
 // Case list - builds linked list
 case_list(L) ::= . { L = NULL; }
-case_list(L) ::= case_list(Prev) case_clause(C). { L = C; L->next = Prev; }
+case_list(L) ::= case_list(Head) case_clause(C). { L = tick_ast_list_append(Head, C); }
 
 // Case clause
 case_clause(C) ::= CASE(T) case_value_list(V) COLON stmt_list(S). {
@@ -653,9 +663,9 @@ case_clause(C) ::= DEFAULT(T) COLON stmt_list(S). {
 
 // Case value list - builds linked list
 case_value_list(L) ::= . { L = NULL; }
-case_value_list(L) ::= expr(E). { L = E; L->next = NULL; }
-case_value_list(L) ::= case_value_list(Prev) COMMA expr(E). { L = E; L->next = Prev; }
-case_value_list(L) ::= case_value_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+case_value_list(L) ::= expr(E). { tick_ast_list_init(E); L = E; }
+case_value_list(L) ::= case_value_list(Head) COMMA expr(E). { L = tick_ast_list_append(Head, E); }
+case_value_list(L) ::= case_value_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Break and continue statements
 break_stmt(S) ::= BREAK(T) SEMICOLON. {
@@ -724,7 +734,7 @@ block(B) ::= LBRACE(T) stmt_list(S) RBRACE. {
 
 // Statement list - builds linked list
 stmt_list(L) ::= . { L = NULL; }
-stmt_list(L) ::= stmt_list(Prev) stmt(S). { L = S; L->next = Prev; }
+stmt_list(L) ::= stmt_list(Head) stmt(S). { L = tick_ast_list_append(Head, S); }
 
 // Expressions - Binary operators
 // Arithmetic
@@ -892,9 +902,9 @@ expr(E) ::= AT LBRACE(T) struct_init_list(Fields) RBRACE. {
 
 // Struct initializer field list - builds linked list
 struct_init_list(L) ::= . { L = NULL; }
-struct_init_list(L) ::= struct_init_field(F). { L = F; L->next = NULL; }
-struct_init_list(L) ::= struct_init_list(Prev) COMMA struct_init_field(F). { L = F; L->next = Prev; }
-struct_init_list(L) ::= struct_init_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+struct_init_list(L) ::= struct_init_field(F). { tick_ast_list_init(F); L = F; }
+struct_init_list(L) ::= struct_init_list(Head) COMMA struct_init_field(F). { L = tick_ast_list_append(Head, F); }
+struct_init_list(L) ::= struct_init_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Struct initializer field
 struct_init_field(F) ::= name(Name) COLON expr(Val). {
@@ -927,9 +937,9 @@ expr(E) ::= expr(Operand) AS(T) type(Ty). {
 
 // Expression list - builds linked list
 expr_list(L) ::= . { L = NULL; }
-expr_list(L) ::= expr(E). { L = E; L->next = NULL; }
-expr_list(L) ::= expr_list(Prev) COMMA expr(E). { L = E; L->next = Prev; }
-expr_list(L) ::= expr_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+expr_list(L) ::= expr(E). { tick_ast_list_init(E); L = E; }
+expr_list(L) ::= expr_list(Head) COMMA expr(E). { L = tick_ast_list_append(Head, E); }
+expr_list(L) ::= expr_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // =============================================================================
 // Precedence (lowest to highest)

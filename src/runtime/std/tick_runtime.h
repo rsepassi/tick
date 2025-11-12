@@ -9,6 +9,8 @@
 #include <stdarg.h>
 #include <limits.h>
 
+#define TICK_UNUSED(x) (void)(x)
+
 // Type aliases matching Tick primitive types
 typedef int8_t i8;
 typedef int16_t i16;

@@ -518,46 +518,26 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
   CHECK_OK(analyze_type(enum_node->data.enum_decl.underlying_type, type_symbols, alloc));
 
   // Walk the enum values and calculate auto-increment
-  // Note: The list is in reverse order at this point (parser builds it that way)
-  // The lowering pass will reverse it later to get source order
-  // We need to calculate values in REVERSE order to handle explicit values correctly
+  // The list is in source order (parser builds it with append)
+  // We can process it directly to assign auto-increment values
 
-  // First pass: collect all explicit values and find the maximum
-  int64_t max_explicit = -1;
-  bool has_explicit = false;
+  // First pass: reduce all explicit values to literals
   for (tick_ast_node_t* value_node = enum_node->data.enum_decl.values;
        value_node;
        value_node = value_node->next) {
     if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
 
     if (value_node->data.enum_value.value != NULL) {
-      has_explicit = true;
       // Reduce to literal if needed
-      if (reduce_to_literal(&value_node->data.enum_value.value, alloc) == TICK_OK) {
-        int64_t val = value_node->data.enum_value.value->data.literal.data.int_value;
-        if (val > max_explicit) max_explicit = val;
-      }
+      reduce_to_literal(&value_node->data.enum_value.value, alloc);
     }
   }
 
-  // Second pass: assign auto-increment values working backwards
-  // This is tricky because the list is reversed, so we work from head to tail
-  // which is actually last-to-first in source order
-  int64_t current_value = has_explicit ? max_explicit + 1 : 0;
-
-  // We need to process in reverse order (source order), so reverse temporarily
-  tick_ast_node_t* reversed = NULL;
-  tick_ast_node_t* curr = enum_node->data.enum_decl.values;
-  while (curr) {
-    tick_ast_node_t* next = curr->next;
-    curr->next = reversed;
-    reversed = curr;
-    curr = next;
-  }
-
-  // Now process in source order
-  current_value = 0;
-  for (tick_ast_node_t* value_node = reversed; value_node; value_node = value_node->next) {
+  // Second pass: assign auto-increment values in source order
+  int64_t current_value = 0;
+  for (tick_ast_node_t* value_node = enum_node->data.enum_decl.values;
+       value_node;
+       value_node = value_node->next) {
     if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
 
     if (value_node->data.enum_value.value == NULL) {
@@ -573,18 +553,6 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
     // Increment for next value
     current_value++;
   }
-
-  // Reverse back to maintain parser's reversed order
-  // The lowering pass will reverse it again to get final source order
-  curr = reversed;
-  reversed = NULL;
-  while (curr) {
-    tick_ast_node_t* next = curr->next;
-    curr->next = reversed;
-    reversed = curr;
-    curr = next;
-  }
-  enum_node->data.enum_decl.values = reversed;
 
   return TICK_OK;
 }
@@ -762,207 +730,6 @@ static tick_ast_node_t* alloc_ast_node(tick_alloc_t alloc) {
   return (tick_ast_node_t*)buf.buf;
 }
 
-// Collect all user-defined types that need forward declarations for a struct/union
-static void collect_forward_decl_types(tick_ast_node_t* decl, type_symbol_t** needed_types, tick_alloc_t alloc) {
-  if (!decl || decl->kind != TICK_AST_DECL) return;
-
-  tick_ast_node_t* init = decl->data.decl.init;
-  if (!init) return;
-
-  // Only process struct and union declarations
-  if (init->kind != TICK_AST_STRUCT_DECL && init->kind != TICK_AST_UNION_DECL) {
-    return;
-  }
-
-  // Walk fields
-  tick_ast_node_t* fields = (init->kind == TICK_AST_STRUCT_DECL) ?
-    init->data.struct_decl.fields : init->data.union_decl.fields;
-
-  for (tick_ast_node_t* field = fields; field; field = field->next) {
-    if (field->kind != TICK_AST_FIELD) continue;
-
-    tick_ast_node_t* field_type = field->data.field.type;
-
-    // Check if field type contains a pointer to a user-defined type
-    if (field_type && field_type->kind == TICK_AST_TYPE_POINTER) {
-      tick_ast_node_t* pointee = field_type->data.type_pointer.pointee_type;
-      if (pointee && pointee->kind == TICK_AST_TYPE_NAMED &&
-          pointee->data.type_named.builtin_type == TICK_TYPE_USER_DEFINED) {
-        // Add to needed types list if not already present
-        tick_buf_t type_name = pointee->data.type_named.name;
-
-        // Check if already in list
-        bool found = false;
-        for (type_symbol_t* sym = *needed_types; sym; sym = sym->next) {
-          if (sym->name.sz == type_name.sz &&
-              memcmp(sym->name.buf, type_name.buf, type_name.sz) == 0) {
-            found = true;
-            break;
-          }
-        }
-
-        if (!found) {
-          // Add to list
-          register_type_symbol(needed_types, type_name, pointee->data.type_named.type_decl, alloc);
-        }
-      }
-    }
-  }
-}
-
-// Helper to reverse a linked list of AST nodes
-static tick_ast_node_t* reverse_list(tick_ast_node_t* head) {
-  tick_ast_node_t* reversed = NULL;
-  tick_ast_node_t* curr = head;
-  while (curr) {
-    tick_ast_node_t* next = curr->next;
-    curr->next = reversed;
-    reversed = curr;
-    curr = next;
-  }
-  return reversed;
-}
-
-// Forward declaration for mutual recursion
-static void reverse_expr_lists(tick_ast_node_t* expr);
-static void reverse_stmt_lists(tick_ast_node_t* stmt);
-
-// Reverse all lists within an expression (for struct init, array init, call args, etc.)
-static void reverse_expr_lists(tick_ast_node_t* expr) {
-  if (!expr) return;
-
-  switch (expr->kind) {
-    case TICK_AST_STRUCT_INIT_EXPR:
-      // Reverse field initializer list
-      expr->data.struct_init_expr.fields = reverse_list(expr->data.struct_init_expr.fields);
-      // Recursively reverse expressions in field values
-      for (tick_ast_node_t* field = expr->data.struct_init_expr.fields; field; field = field->next) {
-        if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
-          reverse_expr_lists(field->data.struct_init_field.value);
-        }
-      }
-      break;
-
-    case TICK_AST_ARRAY_INIT_EXPR:
-      // Reverse element list
-      expr->data.array_init_expr.elements = reverse_list(expr->data.array_init_expr.elements);
-      // Recursively reverse expressions in elements
-      for (tick_ast_node_t* elem = expr->data.array_init_expr.elements; elem; elem = elem->next) {
-        reverse_expr_lists(elem);
-      }
-      break;
-
-    case TICK_AST_CALL_EXPR:
-      // Reverse argument list
-      expr->data.call_expr.args = reverse_list(expr->data.call_expr.args);
-      // Recursively reverse callee and arguments
-      reverse_expr_lists(expr->data.call_expr.callee);
-      for (tick_ast_node_t* arg = expr->data.call_expr.args; arg; arg = arg->next) {
-        reverse_expr_lists(arg);
-      }
-      break;
-
-    case TICK_AST_BINARY_EXPR:
-      reverse_expr_lists(expr->data.binary_expr.left);
-      reverse_expr_lists(expr->data.binary_expr.right);
-      break;
-
-    case TICK_AST_UNARY_EXPR:
-      reverse_expr_lists(expr->data.unary_expr.operand);
-      break;
-
-    case TICK_AST_CAST_EXPR:
-      reverse_expr_lists(expr->data.cast_expr.expr);
-      break;
-
-    case TICK_AST_FIELD_ACCESS_EXPR:
-      reverse_expr_lists(expr->data.field_access_expr.object);
-      break;
-
-    case TICK_AST_INDEX_EXPR:
-      reverse_expr_lists(expr->data.index_expr.array);
-      reverse_expr_lists(expr->data.index_expr.index);
-      break;
-
-    case TICK_AST_UNWRAP_PANIC_EXPR:
-      reverse_expr_lists(expr->data.unwrap_panic_expr.operand);
-      break;
-
-    default:
-      // Other expression types don't contain lists
-      break;
-  }
-}
-
-// Reverse all lists within a statement
-static void reverse_stmt_lists(tick_ast_node_t* stmt) {
-  if (!stmt) return;
-
-  switch (stmt->kind) {
-    case TICK_AST_BLOCK_STMT:
-      // Reverse statement list in block
-      stmt->data.block_stmt.stmts = reverse_list(stmt->data.block_stmt.stmts);
-      // Recursively reverse nested statements
-      for (tick_ast_node_t* s = stmt->data.block_stmt.stmts; s; s = s->next) {
-        reverse_stmt_lists(s);
-      }
-      break;
-
-    case TICK_AST_IF_STMT:
-      reverse_expr_lists(stmt->data.if_stmt.condition);
-      reverse_stmt_lists(stmt->data.if_stmt.then_block);
-      reverse_stmt_lists(stmt->data.if_stmt.else_block);
-      break;
-
-    case TICK_AST_FOR_STMT:
-      reverse_stmt_lists(stmt->data.for_stmt.init_stmt);
-      reverse_expr_lists(stmt->data.for_stmt.condition);
-      reverse_stmt_lists(stmt->data.for_stmt.step_stmt);
-      reverse_stmt_lists(stmt->data.for_stmt.body);
-      break;
-
-    case TICK_AST_SWITCH_STMT:
-      reverse_expr_lists(stmt->data.switch_stmt.value);
-      // Reverse case list
-      stmt->data.switch_stmt.cases = reverse_list(stmt->data.switch_stmt.cases);
-      // Recursively reverse each case
-      for (tick_ast_node_t* c = stmt->data.switch_stmt.cases; c; c = c->next) {
-        if (c->kind == TICK_AST_SWITCH_CASE) {
-          // Reverse case value list
-          c->data.switch_case.values = reverse_list(c->data.switch_case.values);
-          // Reverse statement list in case body
-          c->data.switch_case.stmts = reverse_list(c->data.switch_case.stmts);
-          // Recursively reverse case statements
-          for (tick_ast_node_t* s = c->data.switch_case.stmts; s; s = s->next) {
-            reverse_stmt_lists(s);
-          }
-        }
-      }
-      break;
-
-    case TICK_AST_RETURN_STMT:
-      reverse_expr_lists(stmt->data.return_stmt.value);
-      break;
-
-    case TICK_AST_EXPR_STMT:
-      reverse_expr_lists(stmt->data.expr_stmt.expr);
-      break;
-
-    case TICK_AST_ASSIGN_STMT:
-      reverse_expr_lists(stmt->data.assign_stmt.lhs);
-      reverse_expr_lists(stmt->data.assign_stmt.rhs);
-      break;
-
-    case TICK_AST_DECL:
-      reverse_expr_lists(stmt->data.decl.init);
-      break;
-
-    default:
-      // Other statement types
-      break;
-  }
-}
-
 tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf) {
   UNUSED(errbuf);
 
@@ -972,92 +739,35 @@ tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf
 
   tick_ast_node_t* module = ast->root;
 
-  // PASS 0: Reverse the declaration list to get source order
-  // The parser builds lists in reverse order (prepending), so we need to reverse them
-  module->data.module.decls = reverse_list(module->data.module.decls);
-
-  // Also reverse all nested lists within each declaration
-  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
-    if (decl->kind != TICK_AST_DECL) continue;
-
-    // Reverse lists in the initializer expression
-    if (decl->data.decl.init) {
-      tick_ast_node_t* init = decl->data.decl.init;
-
-      // Handle function declarations
-      if (init->kind == TICK_AST_FUNCTION) {
-        // Reverse parameter list
-        init->data.function.params = reverse_list(init->data.function.params);
-        // Reverse statements in function body
-        reverse_stmt_lists(init->data.function.body);
-      }
-      // Handle struct declarations
-      else if (init->kind == TICK_AST_STRUCT_DECL) {
-        // Reverse field list
-        init->data.struct_decl.fields = reverse_list(init->data.struct_decl.fields);
-      }
-      // Handle union declarations
-      else if (init->kind == TICK_AST_UNION_DECL) {
-        // Reverse field list
-        init->data.union_decl.fields = reverse_list(init->data.union_decl.fields);
-      }
-      // Handle enum declarations
-      else if (init->kind == TICK_AST_ENUM_DECL) {
-        // Reverse enum value list to get source order
-        init->data.enum_decl.values = reverse_list(init->data.enum_decl.values);
-      }
-      // Handle regular variable initializers
-      else {
-        reverse_expr_lists(init);
-      }
-    }
-  }
-
-  // PASS 1: Collect all types that need forward declarations
-  type_symbol_t* needed_forward_decls = NULL;
-
-  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
-    if (decl->kind == TICK_AST_DECL && decl->data.decl.init) {
-      tick_ast_node_t* init = decl->data.decl.init;
-      if (init->kind == TICK_AST_STRUCT_DECL || init->kind == TICK_AST_UNION_DECL) {
-        collect_forward_decl_types(decl, &needed_forward_decls, alloc);
-      }
-    }
-  }
-
-  // PASS 2: Build new declaration list with forward declarations at the beginning
+  // PASS 1: Build new declaration list with forward declarations at the beginning
+  // Create forward declarations for ALL struct/enum/union types
   tick_ast_node_t* new_decls = NULL;
   tick_ast_node_t* new_decls_tail = NULL;
 
-  // Insert all forward declarations first
-  for (type_symbol_t* sym = needed_forward_decls; sym; sym = sym->next) {
-    if (!sym->decl) continue;
+  // First, emit forward declarations for all user-defined types
+  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+    if (decl->kind == TICK_AST_DECL && decl->data.decl.init) {
+      tick_ast_node_t* init = decl->data.decl.init;
 
-    // Find the parent DECL node of this type
-    tick_ast_node_t* type_parent_decl = NULL;
-    for (tick_ast_node_t* d = module->data.module.decls; d; d = d->next) {
-      if (d->kind == TICK_AST_DECL && d->data.decl.init == sym->decl) {
-        type_parent_decl = d;
-        break;
-      }
-    }
+      // Create forward declaration for struct/enum/union types
+      if (init->kind == TICK_AST_STRUCT_DECL ||
+          init->kind == TICK_AST_ENUM_DECL ||
+          init->kind == TICK_AST_UNION_DECL) {
+        tick_ast_node_t* fwd_decl = alloc_ast_node(alloc);
+        if (fwd_decl) {
+          // Copy the declaration but mark as forward
+          *fwd_decl = *decl;
+          fwd_decl->data.decl.quals.is_forward_decl = true;
+          fwd_decl->next = NULL;
 
-    if (type_parent_decl) {
-      // Create forward declaration node
-      tick_ast_node_t* fwd_decl = alloc_ast_node(alloc);
-      if (fwd_decl) {
-        // Copy the declaration but mark as forward
-        *fwd_decl = *type_parent_decl;
-        fwd_decl->data.decl.quals.is_forward_decl = true;
-        fwd_decl->next = NULL;
-
-        // Append forward declaration
-        if (!new_decls) {
-          new_decls = fwd_decl;
-          new_decls_tail = fwd_decl;
-        } else {
-          new_decls_tail->next = fwd_decl;
-          new_decls_tail = fwd_decl;
+          // Append forward declaration
+          if (!new_decls) {
+            new_decls = fwd_decl;
+            new_decls_tail = fwd_decl;
+          } else {
+            new_decls_tail->next = fwd_decl;
+            new_decls_tail = fwd_decl;
+          }
         }
       }
     }
