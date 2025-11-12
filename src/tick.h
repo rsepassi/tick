@@ -134,6 +134,7 @@ typedef enum {
 
   // Keywords
   TICK_TOK_AND,
+  TICK_TOK_AS,
   TICK_TOK_ASYNC,
   TICK_TOK_BREAK,
   TICK_TOK_CASE,
@@ -144,6 +145,7 @@ typedef enum {
   TICK_TOK_ELSE,
   TICK_TOK_ENUM,
   TICK_TOK_ERRDEFER,
+  TICK_TOK_EXTERN,
   TICK_TOK_FN,
   TICK_TOK_FOR,
   TICK_TOK_IF,
@@ -151,6 +153,7 @@ typedef enum {
   TICK_TOK_LET,
   TICK_TOK_ALIGN,
   TICK_TOK_OR,
+  TICK_TOK_ORELSE,
   TICK_TOK_PACKED,
   TICK_TOK_PUB,
   TICK_TOK_RESUME,
@@ -176,6 +179,7 @@ typedef enum {
   TICK_TOK_COLON,       // :
   TICK_TOK_DOT,         // .
   TICK_TOK_QUESTION,    // ?
+  TICK_TOK_DOT_QUESTION,  // .?
   TICK_TOK_UNDERSCORE,  // _
   TICK_TOK_AT,          // @
 
@@ -543,6 +547,7 @@ typedef enum {
   TICK_AST_BUILTIN_CALL,
   TICK_AST_FIELD_ACCESS_EXPR,
   TICK_AST_INDEX_EXPR,
+  TICK_AST_UNWRAP_PANIC_EXPR,
   TICK_AST_STRUCT_INIT_EXPR,
   TICK_AST_ARRAY_INIT_EXPR,
   TICK_AST_CAST_EXPR,
@@ -554,6 +559,7 @@ typedef enum {
   TICK_AST_TYPE_POINTER,
   TICK_AST_TYPE_OPTIONAL,
   TICK_AST_TYPE_ERROR_UNION,
+  TICK_AST_TYPE_FUNCTION,
   TICK_AST_FIELD,
   TICK_AST_ENUM_VALUE,
   TICK_AST_SWITCH_CASE,
@@ -575,6 +581,7 @@ typedef struct {
   bool is_var;  // false = let, true = var
   bool is_pub;
   bool is_volatile;
+  bool is_extern;  // true = extern declaration (no definition)
   bool is_forward_decl;  // true = forward decl only (set by lowering)
 } tick_qualifier_flags_t;
 
@@ -612,6 +619,7 @@ typedef enum {
   BINOP_WRAP_SUB,
   BINOP_WRAP_MUL,
   BINOP_WRAP_DIV,
+  BINOP_ORELSE,
 } tick_binop_t;
 
 // Unary operators
@@ -791,6 +799,10 @@ struct tick_ast_node_s {
       tick_ast_node_t* resolved_type;  // Filled by analysis pass (result type)
     } cast_expr;
     struct {
+      tick_ast_node_t* operand;
+      tick_ast_node_t* resolved_type;  // Filled by analysis pass (inner type)
+    } unwrap_panic_expr;
+    struct {
       tick_buf_t name;
     } identifier_expr;
     struct {
@@ -843,6 +855,10 @@ struct tick_ast_node_s {
       tick_ast_node_t* error_type;  // NULL for !T shorthand
       tick_ast_node_t* value_type;
     } type_error_union;
+    struct {
+      tick_ast_node_t* params;       // Linked list of params (may have NULL names)
+      tick_ast_node_t* return_type;  // NULL = void
+    } type_function;
     struct {
       tick_buf_t name;
       tick_ast_node_t* type;
@@ -915,4 +931,4 @@ tick_err_t tick_output_format_name(tick_buf_t output_path, tick_path_t* output_h
 tick_writer_t tick_file_writer(FILE* f);
 
 // Codegen functions
-tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename, tick_writer_t writer_h, tick_writer_t writer_c);
+tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename, const char* header_filename, tick_writer_t writer_h, tick_writer_t writer_c);

@@ -1,0 +1,3 @@
+pub let x = 42;
+pub let y = x as i64;
+pub let ptr = 0 as *i32;

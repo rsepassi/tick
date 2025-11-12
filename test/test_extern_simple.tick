@@ -1,0 +1,4 @@
+# Test simple extern declaration
+extern foo: i32;
+
+pub bar: i32 = 42;

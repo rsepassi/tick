@@ -17,6 +17,7 @@ typedef struct {
 static const keyword_entry_t keywords[] = {
   {"align", TICK_TOK_ALIGN},
   {"and", TICK_TOK_AND},
+  {"as", TICK_TOK_AS},
   {"async", TICK_TOK_ASYNC},
   {"bool", TICK_TOK_BOOL},
   {"break", TICK_TOK_BREAK},
@@ -28,6 +29,7 @@ static const keyword_entry_t keywords[] = {
   {"else", TICK_TOK_ELSE},
   {"enum", TICK_TOK_ENUM},
   {"errdefer", TICK_TOK_ERRDEFER},
+  {"extern", TICK_TOK_EXTERN},
   {"false", TICK_TOK_BOOL_LITERAL},
   {"fn", TICK_TOK_FN},
   {"for", TICK_TOK_FOR},
@@ -41,6 +43,7 @@ static const keyword_entry_t keywords[] = {
   {"let", TICK_TOK_LET},
   {"null", TICK_TOK_NULL},
   {"or", TICK_TOK_OR},
+  {"orelse", TICK_TOK_ORELSE},
   {"packed", TICK_TOK_PACKED},
   {"pub", TICK_TOK_PUB},
   {"resume", TICK_TOK_RESUME},
@@ -481,6 +484,7 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_VOID: return "void";
     case TICK_TOK_ALIGN: return "align";
     case TICK_TOK_AND: return "and";
+    case TICK_TOK_AS: return "as";
     case TICK_TOK_ASYNC: return "async";
     case TICK_TOK_BREAK: return "break";
     case TICK_TOK_CASE: return "case";
@@ -491,12 +495,14 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_ELSE: return "else";
     case TICK_TOK_ENUM: return "enum";
     case TICK_TOK_ERRDEFER: return "errdefer";
+    case TICK_TOK_EXTERN: return "extern";
     case TICK_TOK_FN: return "fn";
     case TICK_TOK_FOR: return "for";
     case TICK_TOK_IF: return "if";
     case TICK_TOK_IMPORT: return "import";
     case TICK_TOK_LET: return "let";
     case TICK_TOK_OR: return "or";
+    case TICK_TOK_ORELSE: return "orelse";
     case TICK_TOK_PACKED: return "packed";
     case TICK_TOK_PUB: return "pub";
     case TICK_TOK_RESUME: return "resume";
@@ -519,6 +525,7 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_COLON: return ":";
     case TICK_TOK_DOT: return ".";
     case TICK_TOK_QUESTION: return "?";
+    case TICK_TOK_DOT_QUESTION: return ".?";
     case TICK_TOK_UNDERSCORE: return "_";
     case TICK_TOK_AT: return "@";
     case TICK_TOK_PLUS: return "+";
@@ -711,7 +718,11 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
       }
       return;
     case '.':
-      make_token(lex, tok, TICK_TOK_DOT, start);
+      if (match(lex, '?')) {
+        make_token(lex, tok, TICK_TOK_DOT_QUESTION, start);
+      } else {
+        make_token(lex, tok, TICK_TOK_DOT, start);
+      }
       return;
 
     // String literal

@@ -1,0 +1,4 @@
+pub let x = 42;
+pub let y = 3 + 5;
+pub let z = 10 - 2;
+pub let a = 4 * 8;

@@ -1,0 +1,3 @@
+pub let x = 42;
+pub let ptr: *i32 = &x;
+pub let val = *ptr;

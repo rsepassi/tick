@@ -1,0 +1,9 @@
+pub let Color = enum(i32) {
+  Red,
+  Green = 1+1,
+  Blue
+};
+
+pub let test = fn () i32 {
+  return 0;
+};

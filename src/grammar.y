@@ -60,13 +60,13 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 
 // Macros to reduce repetition in grammar rules
 #define TYPE_RULE(T, Name) do { \
-    T = ast_alloc(parse, TICK_AST_TYPE_NAMED, Name->line, Name->col); \
-    T->data.type_named.name = Name->text; \
+    T = ast_alloc(parse, TICK_AST_TYPE_NAMED, Name.line, Name.col); \
+    T->data.type_named.name = Name.text; \
 } while (0)
 
 #define BINOP_RULE(E, L, T, R, op_name, binop_enum) do { \
     PLOG("Parsing " op_name); \
-    E = ast_alloc(parse, TICK_AST_BINARY_EXPR, T->line, T->col); \
+    E = ast_alloc(parse, TICK_AST_BINARY_EXPR, T.line, T.col); \
     E->data.binary_expr.op = binop_enum; \
     E->data.binary_expr.left = L; \
     E->data.binary_expr.right = R; \
@@ -74,13 +74,13 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 
 #define UNOP_RULE(E, T, Operand, op_name, unop_enum) do { \
     PLOG("Parsing " op_name); \
-    E = ast_alloc(parse, TICK_AST_UNARY_EXPR, T->line, T->col); \
+    E = ast_alloc(parse, TICK_AST_UNARY_EXPR, T.line, T.col); \
     E->data.unary_expr.op = unop_enum; \
     E->data.unary_expr.operand = Operand; \
 } while (0)
 
 #define ASSIGN_RULE(S, L, T, R, assign_enum) do { \
-    S = ast_alloc(parse, TICK_AST_ASSIGN_STMT, T->line, T->col); \
+    S = ast_alloc(parse, TICK_AST_ASSIGN_STMT, T.line, T.col); \
     S->data.assign_stmt.lhs = L; \
     S->data.assign_stmt.op = assign_enum; \
     S->data.assign_stmt.rhs = R; \
@@ -91,7 +91,7 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 %syntax_error {
     // TOKEN is the current lookahead token that caused the error
     char tok_buf[256];
-    const char* tok_str = tick_tok_format(TOKEN, tok_buf, sizeof(tok_buf));
+    const char* tok_str = tick_tok_format(&TOKEN, tok_buf, sizeof(tok_buf));
 
     char err_msg[512];
     snprintf(err_msg, sizeof(err_msg), "Syntax error at %s", tok_str);
@@ -107,7 +107,7 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 // Lemon directives
 // =============================================================================
 %token_prefix TICK_TOK_
-%token_type { tick_tok_t* }
+%token_type { tick_tok_t }
 %extra_argument { tick_parse_t* parse }
 
 // Declare tokens in the same order as tick_tok_type_t enum
@@ -116,12 +116,12 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 %token IDENT.
 %token UINT_LITERAL INT_LITERAL STRING_LITERAL BOOL_LITERAL NULL.
 %token BOOL I8 I16 I32 I64 ISZ U8 U16 U32 U64 USZ VOID.
-%token AND ASYNC BREAK CASE CATCH CONTINUE DEFAULT DEFER ELSE.
-%token ENUM ERRDEFER FN FOR IF IMPORT LET ALIGN.
-%token OR PACKED PUB RESUME RETURN STRUCT SUSPEND SWITCH TRY UNDEFINED.
+%token AND AS ASYNC BREAK CASE CATCH CONTINUE DEFAULT DEFER ELSE.
+%token ENUM ERRDEFER EXTERN FN FOR IF IMPORT LET ALIGN.
+%token OR ORELSE PACKED PUB RESUME RETURN STRUCT SUSPEND SWITCH TRY UNDEFINED.
 %token UNION VAR VOLATILE.
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET.
-%token COMMA SEMICOLON COLON DOT QUESTION UNDERSCORE AT.
+%token COMMA SEMICOLON COLON DOT QUESTION DOT_QUESTION UNDERSCORE AT.
 %token PLUS MINUS STAR SLASH PERCENT AMPERSAND PIPE CARET TILDE BANG.
 %token EQ LT GT.
 %token PLUS_PIPE MINUS_PIPE STAR_PIPE SLASH_PIPE.
@@ -131,6 +131,7 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 
 // Precedence-only tokens (not real tokens, just for precedence declarations)
 %token PREC_UNARY_MINUS PREC_UNARY_AMPERSAND PREC_UNARY_STAR.
+%token PREC_RETURN_TYPE.
 
 // Default type for non-terminals
 %default_type { tick_ast_node_t* }
@@ -156,39 +157,39 @@ decl_list(L) ::= decl_list(Prev) decl(D). { PLOG("Adding to decl list"); L = D; 
 // Identifier - immediately copy from ephemeral token to prevent data loss
 %type name { tick_ident_t }
 name(N) ::= IDENT(T). {
-    N.text = T->text;  // Copy buf pointer and size while token is still valid
-    N.line = T->line;
-    N.col = T->col;
+    N.text = T.text;  // Copy buf pointer and size while token is still valid
+    N.line = T.line;
+    N.col = T.col;
 }
 
 // Literals - immediately copy from ephemeral token to prevent data loss
 %type uint_literal { tick_literal_t }
 uint_literal(L) ::= UINT_LITERAL(T). {
-    L.value = T->literal;
-    L.line = T->line;
-    L.col = T->col;
+    L.value = T.literal;
+    L.line = T.line;
+    L.col = T.col;
 }
 
 %type int_literal { tick_literal_t }
 int_literal(L) ::= INT_LITERAL(T). {
-    L.value = T->literal;
-    L.line = T->line;
-    L.col = T->col;
+    L.value = T.literal;
+    L.line = T.line;
+    L.col = T.col;
 }
 
 %type bool_literal { tick_literal_t }
 bool_literal(L) ::= BOOL_LITERAL(T). {
-    L.value = T->literal;
-    L.line = T->line;
-    L.col = T->col;
+    L.value = T.literal;
+    L.line = T.line;
+    L.col = T.col;
 }
 
 // String literal - preserves text buffer
 %type string_literal { tick_ident_t }
 string_literal(S) ::= STRING_LITERAL(T). {
-    S.text = T->text;
-    S.line = T->line;
-    S.col = T->col;
+    S.text = T.text;
+    S.line = T.line;
+    S.col = T.col;
 }
 
 // Declaration qualifiers (can appear in any order)
@@ -198,6 +199,7 @@ decl_qualifiers(Q) ::= decl_qualifiers(Prev) LET. { Q = Prev; Q.is_var = false; 
 decl_qualifiers(Q) ::= decl_qualifiers(Prev) VAR. { Q = Prev; Q.is_var = true; }
 decl_qualifiers(Q) ::= decl_qualifiers(Prev) PUB. { Q = Prev; Q.is_pub = true; }
 decl_qualifiers(Q) ::= decl_qualifiers(Prev) VOLATILE. { Q = Prev; Q.is_volatile = true; }
+decl_qualifiers(Q) ::= decl_qualifiers(Prev) EXTERN. { Q = Prev; Q.is_extern = true; }
 
 decl(D) ::= decl_qualifiers(Q) name(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
     PLOG("Parsing declaration with type and initializer");
@@ -217,14 +219,23 @@ decl(D) ::= decl_qualifiers(Q) name(Name) EQ expr(E) SEMICOLON. {
     D->data.decl.quals = Q;
 }
 
+decl(D) ::= decl_qualifiers(Q) name(Name) COLON type(Ty) SEMICOLON. {
+    PLOG("Parsing declaration without initializer (extern)");
+    D = ast_alloc(parse, TICK_AST_DECL, Name.line, Name.col);
+    D->data.decl.name = Name.text;
+    D->data.decl.type = Ty;
+    D->data.decl.init = NULL;
+    D->data.decl.quals = Q;
+}
+
 // Optional return type
-return_type(R) ::= . { R = NULL; }  // NULL means void
-return_type(R) ::= type(T). { R = T; }
+return_type(R) ::= . [PREC_RETURN_TYPE] { R = NULL; }  // NULL means void
+return_type(R) ::= type(T). [PREC_RETURN_TYPE] { R = T; }
 
 // Function expression: fn (params) return_type { body }
 expr(E) ::= FN(T) fn_params(P) return_type(Ret) block(B). {
     PLOG("Parsing function");
-    E = ast_alloc(parse, TICK_AST_FUNCTION, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_FUNCTION, T.line, T.col);
     E->data.function.params = P;
     E->data.function.return_type = Ret;
     E->data.function.body = B;
@@ -248,7 +259,7 @@ struct_quals(Q) ::= ALIGN LPAREN expr(E) RPAREN PACKED. { Q.is_packed = true; Q.
 // Struct definition
 expr(E) ::= STRUCT(T) struct_quals(Q) LBRACE field_list(F) RBRACE. {
     PLOG("Parsing struct");
-    E = ast_alloc(parse, TICK_AST_STRUCT_DECL, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_STRUCT_DECL, T.line, T.col);
     E->data.struct_decl.fields = F;
     E->data.struct_decl.is_packed = Q.is_packed;
     E->data.struct_decl.alignment = Q.alignment;
@@ -272,7 +283,7 @@ field(F) ::= name(Name) COLON type(T) align_spec(Align). {
 // Enum definition
 expr(E) ::= ENUM(T) LPAREN type(Ty) RPAREN LBRACE enum_value_list(V) RBRACE. {
     PLOG("Parsing enum");
-    E = ast_alloc(parse, TICK_AST_ENUM_DECL, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_ENUM_DECL, T.line, T.col);
     E->data.enum_decl.underlying_type = Ty; E->data.enum_decl.values = V;
 }
 
@@ -308,7 +319,7 @@ align_spec(A) ::= ALIGN LPAREN expr(E) RPAREN. { A = E; }
 // Union definition
 expr(E) ::= UNION(T) tag_type(Tag) align_spec(Align) LBRACE field_list(F) RBRACE. {
     PLOG("Parsing union");
-    E = ast_alloc(parse, TICK_AST_UNION_DECL, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_UNION_DECL, T.line, T.col);
     E->data.union_decl.tag_type = Tag;
     E->data.union_decl.fields = F;
     E->data.union_decl.alignment = Align;
@@ -344,47 +355,59 @@ type(T) ::= I8(Name).    { TYPE_RULE(T, Name); }
 type(T) ::= VOID(Name).  { TYPE_RULE(T, Name); }
 type(T) ::= BOOL(Name).  { TYPE_RULE(T, Name); }
 
-// Array length (explicit size or inferred with _)
-array_len(L) ::= expr(E). { L = E; }
-array_len(L) ::= UNDERSCORE(T). {
-    PLOG("Parsing inferred array length");
-    L = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
-    L->data.literal.kind = TICK_LIT_UINT;
-    L->data.literal.data.uint_value = 0;  // Special marker for inferred
+// Array type: [i32; 10] or [i32; _]
+type(T) ::= LBRACKET(Tok) type(Elem) SEMICOLON expr(Size) RBRACKET. {
+    PLOG("Parsing array type");
+    T = ast_alloc(parse, TICK_AST_TYPE_ARRAY, Tok.line, Tok.col);
+    T->data.type_array.element_type = Elem; T->data.type_array.size = Size;
+}
+type(T) ::= LBRACKET(Tok) type(Elem) SEMICOLON UNDERSCORE(U) RBRACKET. {
+    PLOG("Parsing array type with inferred length");
+    T = ast_alloc(parse, TICK_AST_TYPE_ARRAY, Tok.line, Tok.col);
+    T->data.type_array.element_type = Elem;
+    tick_ast_node_t* size = ast_alloc(parse, TICK_AST_LITERAL, U.line, U.col);
+    size->data.literal.kind = TICK_LIT_UINT;
+    size->data.literal.data.uint_value = 0;  // Special marker for inferred
+    T->data.type_array.size = size;
 }
 
-// Array type: [10]i32 or [_]i32
-type(T) ::= LBRACKET(Tok) array_len(Size) RBRACKET type(Elem). {
-    PLOG("Parsing array type");
-    T = ast_alloc(parse, TICK_AST_TYPE_ARRAY, Tok->line, Tok->col);
-    T->data.type_array.element_type = Elem; T->data.type_array.size = Size;
+// Array type (alternate syntax): [10]i32
+type(T) ::= LBRACKET(Tok) uint_literal(Size) RBRACKET type(Elem). {
+    PLOG("Parsing array type (size-first syntax)");
+    T = ast_alloc(parse, TICK_AST_TYPE_ARRAY, Tok.line, Tok.col);
+    T->data.type_array.element_type = Elem;
+    // Convert literal to expression node
+    tick_ast_node_t* size_expr = ast_alloc(parse, TICK_AST_LITERAL, Size.line, Size.col);
+    size_expr->data.literal.kind = TICK_LIT_UINT;
+    size_expr->data.literal.data.uint_value = Size.value.u64;
+    T->data.type_array.size = size_expr;
 }
 
 // Slice type: []i32
 type(T) ::= LBRACKET(Tok) RBRACKET type(Elem). {
     PLOG("Parsing slice type");
-    T = ast_alloc(parse, TICK_AST_TYPE_SLICE, Tok->line, Tok->col);
+    T = ast_alloc(parse, TICK_AST_TYPE_SLICE, Tok.line, Tok.col);
     T->data.type_array.element_type = Elem; T->data.type_array.size = NULL;
 }
 
 // Pointer type: *i32
 type(T) ::= STAR(Tok) type(Pointee). {
     PLOG("Parsing pointer type");
-    T = ast_alloc(parse, TICK_AST_TYPE_POINTER, Tok->line, Tok->col);
+    T = ast_alloc(parse, TICK_AST_TYPE_POINTER, Tok.line, Tok.col);
     T->data.type_pointer.pointee_type = Pointee;
 }
 
 // Optional type: ?i32
 type(T) ::= QUESTION(Tok) type(Inner). {
     PLOG("Parsing optional type");
-    T = ast_alloc(parse, TICK_AST_TYPE_OPTIONAL, Tok->line, Tok->col);
+    T = ast_alloc(parse, TICK_AST_TYPE_OPTIONAL, Tok.line, Tok.col);
     T->data.type_optional.inner_type = Inner;
 }
 
 // Error union type: A!B (error type A OR value type B)
 type(T) ::= type(ErrorType) BANG(Tok) type(ValueType). {
     PLOG("Parsing error union type");
-    T = ast_alloc(parse, TICK_AST_TYPE_ERROR_UNION, Tok->line, Tok->col);
+    T = ast_alloc(parse, TICK_AST_TYPE_ERROR_UNION, Tok.line, Tok.col);
     T->data.type_error_union.error_type = ErrorType;
     T->data.type_error_union.value_type = ValueType;
 }
@@ -392,9 +415,44 @@ type(T) ::= type(ErrorType) BANG(Tok) type(ValueType). {
 // Error union type shorthand: !T (default error type)
 type(T) ::= BANG(Tok) type(ValueType). {
     PLOG("Parsing error union type with default error");
-    T = ast_alloc(parse, TICK_AST_TYPE_ERROR_UNION, Tok->line, Tok->col);
+    T = ast_alloc(parse, TICK_AST_TYPE_ERROR_UNION, Tok.line, Tok.col);
     T->data.type_error_union.error_type = NULL;  // NULL indicates default/generic error
     T->data.type_error_union.value_type = ValueType;
+}
+
+// Function type: fn(params) return_type
+type(T) ::= FN(Tok) fn_type_params(P) return_type(Ret). {
+    PLOG("Parsing function type");
+    T = ast_alloc(parse, TICK_AST_TYPE_FUNCTION, Tok.line, Tok.col);
+    T->data.type_function.params = P;
+    T->data.type_function.return_type = Ret;
+}
+
+// Function type parameters (just types, no names)
+fn_type_params(L) ::= LPAREN RPAREN. { L = NULL; }
+fn_type_params(L) ::= LPAREN fn_type_param_list(R) RPAREN. { L = R; }
+
+// Function type parameter list - supports both name:type and just type
+fn_type_param_list(L) ::= fn_type_param(P). {
+    L = P;
+    L->next = NULL;
+}
+fn_type_param_list(L) ::= fn_type_param_list(Prev) COMMA fn_type_param(P). {
+    L = P;
+    L->next = Prev;
+}
+fn_type_param_list(L) ::= fn_type_param_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+
+// Function type parameter - can be "name: type" or just "type"
+fn_type_param(P) ::= name(Name) COLON type(T). {
+    P = ast_alloc(parse, TICK_AST_PARAM, Name.line, Name.col);
+    P->data.param.name = Name.text;
+    P->data.param.type = T;
+}
+fn_type_param(P) ::= type(T). {
+    P = ast_alloc(parse, TICK_AST_PARAM, T->loc.line, T->loc.col);
+    P->data.param.name = (tick_buf_t){.buf = NULL, .sz = 0};  // No name
+    P->data.param.type = T;
 }
 
 // Statements
@@ -448,7 +506,7 @@ return_value(V) ::= expr(E). { V = E; }
 // Return statement
 return_stmt(S) ::= RETURN(T) return_value(V) SEMICOLON. {
     PLOG("Parsing return statement");
-    S = ast_alloc(parse, TICK_AST_RETURN_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_RETURN_STMT, T.line, T.col);
     S->data.return_stmt.value = V;
 }
 
@@ -464,7 +522,7 @@ assign_stmt(S) ::= expr(L) EQ(T) expr(R) SEMICOLON. { ASSIGN_RULE(S, L, T, R, AS
 // If statements
 if_stmt(S) ::= IF(T) expr(Cond) block(Then). {
     PLOG("Parsing if statement");
-    S = ast_alloc(parse, TICK_AST_IF_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_IF_STMT, T.line, T.col);
     S->data.if_stmt.condition = Cond;
     S->data.if_stmt.then_block = Then;
     S->data.if_stmt.else_block = NULL;
@@ -472,7 +530,7 @@ if_stmt(S) ::= IF(T) expr(Cond) block(Then). {
 
 if_stmt(S) ::= IF(T) expr(Cond) block(Then) ELSE block(Else). {
     PLOG("Parsing if-else statement");
-    S = ast_alloc(parse, TICK_AST_IF_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_IF_STMT, T.line, T.col);
     S->data.if_stmt.condition = Cond;
     S->data.if_stmt.then_block = Then;
     S->data.if_stmt.else_block = Else;
@@ -480,7 +538,7 @@ if_stmt(S) ::= IF(T) expr(Cond) block(Then) ELSE block(Else). {
 
 if_stmt(S) ::= IF(T) expr(Cond) block(Then) ELSE if_stmt(Elif). {
     PLOG("Parsing if-else if statement");
-    S = ast_alloc(parse, TICK_AST_IF_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_IF_STMT, T.line, T.col);
     S->data.if_stmt.condition = Cond;
     S->data.if_stmt.then_block = Then;
     S->data.if_stmt.else_block = Elif;
@@ -534,7 +592,7 @@ simple_stmt(S) ::= expr(E). {
 // For loop: infinite, while, or C-style
 for_stmt(S) ::= FOR(T) block(Body). {
     PLOG("Parsing infinite for loop");
-    S = ast_alloc(parse, TICK_AST_FOR_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_FOR_STMT, T.line, T.col);
     S->data.for_stmt.init_stmt = NULL;
     S->data.for_stmt.condition = NULL;
     S->data.for_stmt.step_stmt = NULL;
@@ -543,7 +601,7 @@ for_stmt(S) ::= FOR(T) block(Body). {
 
 for_stmt(S) ::= FOR(T) expr(Cond) block(Body). {
     PLOG("Parsing while-style for loop");
-    S = ast_alloc(parse, TICK_AST_FOR_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_FOR_STMT, T.line, T.col);
     S->data.for_stmt.init_stmt = NULL;
     S->data.for_stmt.condition = Cond;
     S->data.for_stmt.step_stmt = NULL;
@@ -552,7 +610,7 @@ for_stmt(S) ::= FOR(T) expr(Cond) block(Body). {
 
 for_stmt(S) ::= FOR(T) simple_stmt(Init) SEMICOLON expr(Cond) SEMICOLON simple_stmt(Step) block(Body). {
     PLOG("Parsing C-style for loop");
-    S = ast_alloc(parse, TICK_AST_FOR_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_FOR_STMT, T.line, T.col);
     S->data.for_stmt.init_stmt = Init;
     S->data.for_stmt.condition = Cond;
     S->data.for_stmt.step_stmt = Step;
@@ -562,7 +620,7 @@ for_stmt(S) ::= FOR(T) simple_stmt(Init) SEMICOLON expr(Cond) SEMICOLON simple_s
 // For-switch statement (computed goto pattern)
 stmt(S) ::= FOR(T) SWITCH expr(Val) LBRACE case_list(Cases) RBRACE. {
     PLOG("Parsing for-switch statement");
-    S = ast_alloc(parse, TICK_AST_FOR_SWITCH_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_FOR_SWITCH_STMT, T.line, T.col);
     S->data.for_switch_stmt.value = Val;
     S->data.for_switch_stmt.body = Cases;
 }
@@ -570,7 +628,7 @@ stmt(S) ::= FOR(T) SWITCH expr(Val) LBRACE case_list(Cases) RBRACE. {
 // Switch statement
 switch_stmt(S) ::= SWITCH(T) expr(Val) LBRACE case_list(Cases) RBRACE. {
     PLOG("Parsing switch statement");
-    S = ast_alloc(parse, TICK_AST_SWITCH_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_SWITCH_STMT, T.line, T.col);
     S->data.switch_stmt.value = Val; S->data.switch_stmt.cases = Cases;
 }
 
@@ -581,14 +639,14 @@ case_list(L) ::= case_list(Prev) case_clause(C). { L = C; L->next = Prev; }
 // Case clause
 case_clause(C) ::= CASE(T) case_value_list(V) COLON stmt_list(S). {
     PLOG("Parsing case clause");
-    C = ast_alloc(parse, TICK_AST_SWITCH_CASE, T->line, T->col);
+    C = ast_alloc(parse, TICK_AST_SWITCH_CASE, T.line, T.col);
     C->data.switch_case.values = V;
     C->data.switch_case.stmts = S;
 }
 
 case_clause(C) ::= DEFAULT(T) COLON stmt_list(S). {
     PLOG("Parsing default clause");
-    C = ast_alloc(parse, TICK_AST_SWITCH_CASE, T->line, T->col);
+    C = ast_alloc(parse, TICK_AST_SWITCH_CASE, T.line, T.col);
     C->data.switch_case.values = NULL;  // NULL for default case
     C->data.switch_case.stmts = S;
 }
@@ -602,29 +660,29 @@ case_value_list(L) ::= case_value_list(Prev) COMMA. { L = Prev; }  // Trailing c
 // Break and continue statements
 break_stmt(S) ::= BREAK(T) SEMICOLON. {
     PLOG("Parsing break statement");
-    S = ast_alloc(parse, TICK_AST_BREAK_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_BREAK_STMT, T.line, T.col);
 }
 continue_stmt(S) ::= CONTINUE(T) SEMICOLON. {
     PLOG("Parsing continue statement");
-    S = ast_alloc(parse, TICK_AST_CONTINUE_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_CONTINUE_STMT, T.line, T.col);
 }
 
 // Continue-switch statement (computed goto pattern)
 stmt(S) ::= CONTINUE(T) SWITCH expr(Val) SEMICOLON. {
     PLOG("Parsing continue-switch statement");
-    S = ast_alloc(parse, TICK_AST_CONTINUE_SWITCH_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_CONTINUE_SWITCH_STMT, T.line, T.col);
     S->data.continue_switch_stmt.value = Val;
 }
 
 // Coroutine statements
 stmt(S) ::= SUSPEND(T) SEMICOLON. {
     PLOG("Parsing suspend statement");
-    S = ast_alloc(parse, TICK_AST_SUSPEND_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_SUSPEND_STMT, T.line, T.col);
 }
 
 stmt(S) ::= RESUME(T) expr(Handle) SEMICOLON. {
     PLOG("Parsing resume statement");
-    S = ast_alloc(parse, TICK_AST_RESUME_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_RESUME_STMT, T.line, T.col);
     S->data.resume_stmt.handle = Handle;
 }
 
@@ -638,7 +696,7 @@ capture(C) ::= PIPE name(Name) PIPE. {
 // Try-catch statement
 stmt(S) ::= TRY(T) expr(Call) CATCH capture(Cap) stmt(CatchStmt). {
     PLOG("Parsing try-catch statement");
-    S = ast_alloc(parse, TICK_AST_TRY_CATCH_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_TRY_CATCH_STMT, T.line, T.col);
     S->data.try_catch_stmt.call = Call;
     S->data.try_catch_stmt.capture = Cap;
     S->data.try_catch_stmt.catch_stmt = CatchStmt;
@@ -647,20 +705,20 @@ stmt(S) ::= TRY(T) expr(Call) CATCH capture(Cap) stmt(CatchStmt). {
 // Defer and errdefer statements
 stmt(S) ::= DEFER(T) stmt(Deferred). {
     PLOG("Parsing defer statement");
-    S = ast_alloc(parse, TICK_AST_DEFER_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_DEFER_STMT, T.line, T.col);
     S->data.defer_stmt.stmt = Deferred;
 }
 
 stmt(S) ::= ERRDEFER(T) stmt(Deferred). {
     PLOG("Parsing errdefer statement");
-    S = ast_alloc(parse, TICK_AST_ERRDEFER_STMT, T->line, T->col);
+    S = ast_alloc(parse, TICK_AST_ERRDEFER_STMT, T.line, T.col);
     S->data.errdefer_stmt.stmt = Deferred;
 }
 
 // Block
 block(B) ::= LBRACE(T) stmt_list(S) RBRACE. {
     PLOG("Parsing block");
-    B = ast_alloc(parse, TICK_AST_BLOCK_STMT, T->line, T->col);
+    B = ast_alloc(parse, TICK_AST_BLOCK_STMT, T.line, T.col);
     B->data.block_stmt.stmts = S;
 }
 
@@ -707,6 +765,9 @@ expr(E) ::= expr(L) RSHIFT(T) expr(R).    { BINOP_RULE(E, L, T, R, "right shift"
 expr(E) ::= expr(L) AND(T) expr(R). { BINOP_RULE(E, L, T, R, "logical and", BINOP_LOGICAL_AND); }
 expr(E) ::= expr(L) OR(T) expr(R).  { BINOP_RULE(E, L, T, R, "logical or", BINOP_LOGICAL_OR); }
 
+// Optional operators
+expr(E) ::= expr(L) ORELSE(T) expr(R). { BINOP_RULE(E, L, T, R, "orelse", BINOP_ORELSE); }
+
 // Unary operators
 expr(E) ::= MINUS(T) expr(Operand). [PREC_UNARY_MINUS] { UNOP_RULE(E, T, Operand, "negation", UNOP_NEG); }
 expr(E) ::= BANG(T) expr(Operand). { UNOP_RULE(E, T, Operand, "logical not", UNOP_NOT); }
@@ -726,13 +787,13 @@ expr(E) ::= name(N). {
 
 expr(E) ::= IMPORT(T) string_literal(Path). {
     PLOG("Parsing import expression");
-    E = ast_alloc(parse, TICK_AST_IMPORT, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_IMPORT, T.line, T.col);
     E->data.import.path = Path.text;
 }
 
 expr(E) ::= ASYNC(T) expr(Call) COMMA expr(Frame). {
     PLOG("Parsing async expression");
-    E = ast_alloc(parse, TICK_AST_ASYNC_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_ASYNC_EXPR, T.line, T.col);
     E->data.async_expr.call = Call;
     E->data.async_expr.frame = Frame;
 }
@@ -763,42 +824,50 @@ expr(E) ::= bool_literal(L). {
 }
 expr(E) ::= UNDEFINED(T). {
     PLOG("Parsing undefined");
-    E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_LITERAL, T.line, T.col);
     E->data.literal.kind = TICK_LIT_UNDEFINED;
 }
 expr(E) ::= NULL(T). {
     PLOG("Parsing null");
-    E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_LITERAL, T.line, T.col);
     E->data.literal.kind = TICK_LIT_NULL;
 }
 
 // Function calls
 expr(E) ::= expr(Callee) LPAREN(T) expr_list(Args) RPAREN. {
     PLOG("Parsing function call");
-    E = ast_alloc(parse, TICK_AST_CALL_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_CALL_EXPR, T.line, T.col);
     E->data.call_expr.callee = Callee; E->data.call_expr.args = Args;
 }
 
 // Field access (dot implies dereference for pointers)
 expr(E) ::= expr(Obj) DOT(T) name(Field). {
     PLOG("Parsing field access");
-    E = ast_alloc(parse, TICK_AST_FIELD_ACCESS_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_FIELD_ACCESS_EXPR, T.line, T.col);
     E->data.field_access_expr.object = Obj;
     E->data.field_access_expr.field_name = Field.text;
     E->data.field_access_expr.is_arrow = false;
 }
 
+// Unwrap panic: a.? (unwrap optional or panic)
+expr(E) ::= expr(Operand) DOT_QUESTION(T). {
+    PLOG("Parsing unwrap panic");
+    E = ast_alloc(parse, TICK_AST_UNWRAP_PANIC_EXPR, T.line, T.col);
+    E->data.unwrap_panic_expr.operand = Operand;
+    E->data.unwrap_panic_expr.resolved_type = NULL;
+}
+
 // Array indexing
 expr(E) ::= expr(Arr) LBRACKET(T) expr(Idx) RBRACKET. {
     PLOG("Parsing array index");
-    E = ast_alloc(parse, TICK_AST_INDEX_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_INDEX_EXPR, T.line, T.col);
     E->data.index_expr.array = Arr; E->data.index_expr.index = Idx;
 }
 
 // Struct literal: Point@{ field: value, ... }
 expr(E) ::= name(TypeName) AT LBRACE(T) struct_init_list(Fields) RBRACE. {
     PLOG("Parsing named struct literal");
-    E = ast_alloc(parse, TICK_AST_STRUCT_INIT_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_STRUCT_INIT_EXPR, T.line, T.col);
     tick_ast_node_t* type_node = ast_alloc(parse, TICK_AST_TYPE_NAMED, TypeName.line, TypeName.col);
     type_node->data.type_named.name = TypeName.text;
     E->data.struct_init_expr.type = type_node;
@@ -808,7 +877,7 @@ expr(E) ::= name(TypeName) AT LBRACE(T) struct_init_list(Fields) RBRACE. {
 // Anonymous struct literal: @{ field: value, ... }
 expr(E) ::= AT LBRACE(T) struct_init_list(Fields) RBRACE. {
     PLOG("Parsing anonymous struct literal");
-    E = ast_alloc(parse, TICK_AST_STRUCT_INIT_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_STRUCT_INIT_EXPR, T.line, T.col);
     E->data.struct_init_expr.type = NULL;
     E->data.struct_init_expr.fields = Fields;
 }
@@ -828,16 +897,23 @@ struct_init_field(F) ::= name(Name) COLON expr(Val). {
 }
 
 // Array literal: [1, 2, 3, 4]
-expr(E) ::= LBRACKET(T) expr_list(Elements) RBRACKET. {
+expr(E) ::= LBRACKET(T) expr_list(Elements) RBRACKET. [COMMA] {
     PLOG("Parsing array literal");
-    E = ast_alloc(parse, TICK_AST_ARRAY_INIT_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_ARRAY_INIT_EXPR, T.line, T.col);
     E->data.array_init_expr.elements = Elements;
 }
 
 // Type cast: val.(i64)
 expr(E) ::= expr(Operand) DOT(T) LPAREN type(Ty) RPAREN. {
     PLOG("Parsing type cast");
-    E = ast_alloc(parse, TICK_AST_CAST_EXPR, T->line, T->col);
+    E = ast_alloc(parse, TICK_AST_CAST_EXPR, T.line, T.col);
+    E->data.cast_expr.type = Ty; E->data.cast_expr.expr = Operand;
+}
+
+// Type cast with 'as': val as i64
+expr(E) ::= expr(Operand) AS(T) type(Ty). {
+    PLOG("Parsing as cast");
+    E = ast_alloc(parse, TICK_AST_CAST_EXPR, T.line, T.col);
     E->data.cast_expr.type = Ty; E->data.cast_expr.expr = Operand;
 }
 
@@ -850,11 +926,13 @@ expr_list(L) ::= expr_list(Prev) COMMA. { L = Prev; }  // Trailing comma
 // =============================================================================
 // Precedence (lowest to highest)
 // =============================================================================
+%left PREC_RETURN_TYPE.
 %left COMMA.
 %right EQ.
+%nonassoc ORELSE AS.
 %nonassoc LT GT LT_EQ GT_EQ EQ_EQ BANG_EQ OR AND PIPE CARET AMPERSAND.
 %left PLUS MINUS PLUS_PIPE MINUS_PIPE PLUS_PERCENT MINUS_PERCENT.
 %left STAR SLASH PERCENT STAR_PIPE SLASH_PIPE STAR_PERCENT SLASH_PERCENT LSHIFT RSHIFT.
 %right QUESTION.
 %right BANG TILDE PREC_UNARY_MINUS PREC_UNARY_AMPERSAND PREC_UNARY_STAR.
-%left DOT LBRACKET LPAREN.
+%left DOT DOT_QUESTION LBRACKET LPAREN.

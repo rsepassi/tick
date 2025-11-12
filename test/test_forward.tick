@@ -1,0 +1,12 @@
+# Test forward references between structs
+pub let A = struct {
+  b: *B,
+};
+
+pub let B = struct {
+  a: *A,
+};
+
+pub let main = fn () i32 {
+  return 0;
+};

@@ -1,0 +1,6 @@
+pub let main = fn () i32 {
+    let a: bool = true;
+    let b: bool = false;
+
+    return 0;
+};

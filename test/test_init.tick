@@ -1,0 +1,13 @@
+# Test struct initialization
+pub let Point = struct {
+  x: i32,
+  y: i32,
+};
+
+pub let make_point = fn (a: i32, b: i32) Point {
+  return Point @ { x: a, y: b };
+};
+
+pub let main = fn () i32 {
+  return 0;
+};

@@ -1,0 +1,4 @@
+pub let nums = fn () i32 {
+  let arr: [i32; 2+3] = [10, 20, 30, 40, 50];
+  return arr[0];
+};

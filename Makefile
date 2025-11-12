@@ -22,36 +22,26 @@ else
 	CFLAGS += -O2
 endif
 
-# Lemon parser generator
-LEMON := $(BUILD_DIR)/vendor/lemon
-LEMON_TEMPLATE := vendor/lemon/lempar.c
+.PHONY: all grammar clean format test tree compile-lib compile-exe runtime
+COMPILER := $(BUILD_DIR)/tick
+all: $(COMPILER)
 
-# Generated parser (in build/gen/)
-GRAMMAR_SRC := src/tick.y
-GENPARSESRC := $(BUILD_DIR)/gen/tick_grammar.c
+# ==============================================================================
+# Tick compiler
+# ==============================================================================
+# Source files (exclude runtime - it's built separately)
+HDRS := $(shell find src -name '*.h')
+SRCS := $(shell find src -name '*.c' -not -path 'src/runtime/*')
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
 # Embedded runtime header
-RUNTIME_HEADER := src/tick_runtime.h
+RUNTIME_HEADER := src/runtime/std/tick_runtime.h
 RUNTIME_EMBEDDED := $(BUILD_DIR)/gen/tick_runtime_embedded.h
-
-# Source files
-HDRS := $(shell find src -name '*.h')
-SRCS := $(shell find src -name '*.c')
-OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
 # Add generated parser object
 GENPARSEOBJ := $(BUILD_DIR)/gen/tick_grammar.o
 
-# Main target
-BINARY := $(BUILD_DIR)/tick
-
-.PHONY: all grammar clean format test tree compile
-
-all: $(BINARY)
-
-grammar: $(GENPARSEOBJ)
-
-$(BINARY): $(RUNTIME_EMBEDDED) $(OBJS) $(GENPARSEOBJ) $(SRCS) $(HDRS)
+$(COMPILER): $(RUNTIME_EMBEDDED) $(OBJS) $(GENPARSEOBJ) $(SRCS) $(HDRS)
 	$(LD) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(GENPARSEOBJ)
 
 $(BUILD_DIR)/src/codegen.o: src/codegen.c $(HDRS) $(RUNTIME_EMBEDDED)
@@ -61,15 +51,6 @@ $(BUILD_DIR)/src/codegen.o: src/codegen.c $(HDRS) $(RUNTIME_EMBEDDED)
 $(BUILD_DIR)/%.o: %.c $(HDRS)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
-
-$(GENPARSESRC): $(GRAMMAR_SRC) $(LEMON)
-	@mkdir -p $(BUILD_DIR)/gen
-	$(LEMON) -T$(LEMON_TEMPLATE) -d$(BUILD_DIR)/gen -p $(GRAMMAR_SRC)
-	@mv $(BUILD_DIR)/gen/tick.c $(GENPARSESRC)
-	@mv $(BUILD_DIR)/gen/tick.h $(BUILD_DIR)/gen/tick_grammar.h
-
-$(GENPARSEOBJ): $(GENPARSESRC)
-	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-variable -c $(GENPARSESRC) -o $(GENPARSEOBJ)
 
 $(RUNTIME_EMBEDDED): $(RUNTIME_HEADER)
 	@mkdir -p $(BUILD_DIR)/gen
@@ -85,10 +66,85 @@ $(RUNTIME_EMBEDDED): $(RUNTIME_HEADER)
 	@echo "" >> $@
 	@echo "#endif  // TICK_RUNTIME_EMBEDDED_H_" >> $@
 
+# ==============================================================================
+# Tick grammer
+# ==============================================================================
+grammar: $(GENPARSEOBJ)
+
+# Lemon parser generator
+LEMON := $(BUILD_DIR)/vendor/lemon
+LEMON_TEMPLATE := vendor/lemon/lempar.c
+
+# Generated parser (in build/gen/)
+GRAMMAR_SRC := src/grammar.y
+GENPARSESRC := $(BUILD_DIR)/gen/tick_grammar.c
+
+$(GENPARSESRC): $(GRAMMAR_SRC) $(LEMON)
+	@mkdir -p $(BUILD_DIR)/gen
+	$(LEMON) -T$(LEMON_TEMPLATE) -d$(BUILD_DIR)/gen -p $(GRAMMAR_SRC)
+	@mv $(BUILD_DIR)/gen/$(notdir $(GRAMMAR_SRC:.y=.c)) $(GENPARSESRC)
+	@mv $(BUILD_DIR)/gen/$(notdir $(GRAMMAR_SRC:.y=.h)) $(BUILD_DIR)/gen/tick_grammar.h
+
+$(GENPARSEOBJ): $(GENPARSESRC)
+	$(CC) $(CFLAGS) -Wno-unused-parameter -Wno-unused-variable -c $(GENPARSESRC) -o $(GENPARSEOBJ)
+
 $(LEMON):
 	@mkdir -p $(dir $@)
 	$(CC) -o $@ -std=c99 vendor/lemon/lemon.c
 
+# ==============================================================================
+# Use the tick compiler and the C compiler to compile tick libraries and
+# executables
+# ==============================================================================
+# Runtime library flags
+RUNTIME_CFLAGS := -std=c11 -Wpedantic -Wall -Werror -Wextra -Wvla -O2 \
+									-Isrc/runtime/std
+STD_CFLAGS := $(RUNTIME_CFLAGS) -ffreestanding
+
+# Standard library (freestanding)
+STD_SRCS := $(wildcard src/runtime/std/*.c)
+STD_OBJS := $(patsubst src/runtime/std/%.c,$(BUILD_DIR)/runtime/std/%.o,$(STD_SRCS))
+STD_LIB := $(BUILD_DIR)/runtime/libtick_std.a
+
+# Platform library (platform-specific)
+PLATFORM_SRCS := $(wildcard src/runtime/platform/*.c)
+PLATFORM_OBJS := $(patsubst src/runtime/platform/%.c,$(BUILD_DIR)/runtime/platform/%.o,$(PLATFORM_SRCS))
+PLATFORM_LIB := $(BUILD_DIR)/runtime/libtick_platform.a
+
+# Runtime libraries
+runtime: $(STD_LIB) $(PLATFORM_LIB)
+
+# Standard library (freestanding)
+$(BUILD_DIR)/runtime/std/%.o: src/runtime/std/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(STD_CFLAGS) -c -o $@ $<
+
+$(STD_LIB): $(STD_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+# Platform library (platform-specific)
+$(BUILD_DIR)/runtime/platform/%.o: src/runtime/platform/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(RUNTIME_CFLAGS) -c -o $@ $<
+
+$(PLATFORM_LIB): $(PLATFORM_OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+
+compile-lib: $(COMPILER) $(STD_LIB) $(PLATFORM_LIB)
+	COMPILER=$(COMPILER) BUILD_DIR=$(BUILD_DIR) CC=$(CC) AR=$(AR) \
+		STD_LIB=$(STD_LIB) PLATFORM_LIB=$(PLATFORM_LIB) \
+		./script/compile-lib.sh $(SRC)
+
+compile-exe: $(COMPILER) $(STD_LIB) $(PLATFORM_LIB)
+	COMPILER=$(COMPILER) BUILD_DIR=$(BUILD_DIR) CC=$(CC) AR=$(AR) LD=$(LD) \
+		STD_LIB=$(STD_LIB) PLATFORM_LIB=$(PLATFORM_LIB) \
+		./script/compile-exe.sh $(SRC)
+
+# ==============================================================================
+# Tasks
+# ==============================================================================
 clean:
 	rm -rf $(BUILD_DIR)
 
@@ -98,16 +154,11 @@ format:
 tree:
 	@tree -I vibe -I vendor
 
-test: $(BINARY)
+test: $(COMPILER)
 	@mkdir -p $(BUILD_DIR)/gen
 	@echo "Testing hello.tick..."
-	./build/tick emitc examples/hello.tick -o build/gen/hello
+	./build/tick emitc test/hello.tick -o build/gen/hello
 	@echo "Testing grammar.tick..."
-	./build/tick emitc examples/grammar.tick -o build/gen/grammar
-
-compile: $(BINARY)
-	@mkdir -p $(BUILD_DIR)/compiled
-	@test -n "$(SRC)" || (echo "Error: SRC variable not set. Usage: make compile SRC=path/to/file.tick" && exit 1)
-	./build/tick emitc $(SRC) -o $(BUILD_DIR)/compiled/$(basename $(notdir $(SRC)))
+	./build/tick emitc test/grammar.tick -o build/gen/grammar
 
 .SUFFIXES:  # Disable built-in suffix rules (prevents yacc from running on .y files)

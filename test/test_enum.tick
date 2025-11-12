@@ -1,0 +1,10 @@
+# Test enum with auto-increment values
+pub let Color = enum(i32) {
+  Red,
+  Green = 5,
+  Blue,
+};
+
+pub let main = fn () i32 {
+  return 0;
+};

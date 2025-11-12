@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdalign.h>
 #include <stdarg.h>
+#include <limits.h>
 
 // Type aliases matching Tick primitive types
 typedef int8_t i8;
@@ -34,6 +35,9 @@ typedef struct {
 // Panic function - must be implemented by the platform/runtime
 // Terminates program execution with an error message
 void tick_panic(const char* msg, ...) __attribute__((noreturn, format(printf, 1, 2)));
+
+// Debug logging function - prints to stderr
+void tick_debug_log(const char* msg, ...) __attribute__((format(printf, 1, 2)));
 
 // ============================================================================
 // Saturating Arithmetic

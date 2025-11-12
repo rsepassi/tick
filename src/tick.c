@@ -224,10 +224,14 @@ static tick_err_t tick_allocator_seglist_realloc(void* ctx, tick_buf_t* buf, usz
   // Get current segment
   tick_alloc_seglist_segment_t* seg = (tick_alloc_seglist_segment_t*)seglist->segments;
 
-  // Handle alignment
-  usz alignment = 1;
+  // Handle alignment - default to max_align_t for proper platform alignment
+  usz alignment = _Alignof(max_align_t);
   if (config->alignment2 > 0) {
-    alignment = (usz)1 << config->alignment2;
+    usz requested_alignment = (usz)1 << config->alignment2;
+    // Use the larger of the two alignments
+    if (requested_alignment > alignment) {
+      alignment = requested_alignment;
+    }
   }
 
   // Try to allocate from current segment
@@ -295,7 +299,7 @@ tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t 
 
 // Forward declarations for Lemon-generated parser
 void *ParseAlloc(void *(*mallocProc)(size_t));
-void Parse(void *yyp, int yymajor, tick_tok_t* yyminor, tick_parse_t* parse);
+void Parse(void *yyp, int yymajor, tick_tok_t yyminor, tick_parse_t* parse);
 void ParseFree(void *p, void (*freeProc)(void*));
 void ParseTrace(FILE *stream, char *zPrefix);
 
@@ -326,13 +330,14 @@ tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok) {
 
   // If we hit EOF, finalize the parse
   if (tok->type == TICK_TOK_EOF) {
-    Parse(parse->lemon_parser, 0, 0, parse);
+    tick_tok_t eof_tok = *tok;  // Copy token
+    Parse(parse->lemon_parser, 0, eof_tok, parse);
     // Free the parser
     ParseFree(parse->lemon_parser, free);
     parse->lemon_parser = NULL;
   } else {
-    // Feed token to Lemon parser
-    Parse(parse->lemon_parser, tok->type, tok, parse);
+    // Feed token to Lemon parser (pass by value, not pointer)
+    Parse(parse->lemon_parser, tok->type, *tok, parse);
   }
   return TICK_OK;
 }

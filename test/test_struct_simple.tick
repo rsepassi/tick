@@ -1,0 +1,7 @@
+pub let Point = struct {
+  x: i32,
+  y: i32,
+};
+
+pub let p = Point { x: 10, y: 20 };
+pub let px = p.x;

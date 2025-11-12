@@ -1,0 +1,2 @@
+pub let x: i64 = 42;
+pub let y = x as i32;

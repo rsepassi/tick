@@ -1,0 +1,3 @@
+pub let arr: [i32; 5] = [1, 2, 3, 4, 5];
+pub let first = arr[0];
+pub let second = arr[1];

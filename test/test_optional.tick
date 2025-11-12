@@ -1,0 +1,17 @@
+pub let main = fn () i32 {
+    # Test optional type
+    let x: ?i32 = 42;
+    let y: ?i32 = null;
+
+    # Test orelse operator
+    let a: i32 = x orelse 0;
+    let b: i32 = y orelse 100;
+
+    # Test unwrap panic operator
+    let c: i32 = x.?;
+
+    # Chained usage
+    let result: i32 = (y orelse x).?;
+
+    return result;
+};

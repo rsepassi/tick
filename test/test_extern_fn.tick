@@ -1,0 +1,7 @@
+# Test extern function pointer declaration
+extern sayhi: *fn (name: *u8);
+
+pub main: *fn () = fn () {
+  # Call the extern function
+  sayhi("World");
+};

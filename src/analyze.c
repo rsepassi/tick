@@ -18,6 +18,53 @@
 // ============================================================================
 
 // ============================================================================
+// Type Symbol Table
+// ============================================================================
+
+// Type symbol entry for user-defined types
+typedef struct type_symbol_s {
+  tick_buf_t name;
+  tick_ast_node_t* decl;  // Pointer to STRUCT_DECL/ENUM_DECL/UNION_DECL node
+  struct type_symbol_s* next;
+} type_symbol_t;
+
+// Register a type symbol
+static tick_err_t register_type_symbol(type_symbol_t** head, tick_buf_t name,
+                                       tick_ast_node_t* decl, tick_alloc_t alloc) {
+  // Check for duplicates
+  for (type_symbol_t* sym = *head; sym; sym = sym->next) {
+    if (sym->name.sz == name.sz && memcmp(sym->name.buf, name.buf, name.sz) == 0) {
+      // Duplicate type name - for now, just skip
+      // TODO: Report error
+      return TICK_OK;
+    }
+  }
+
+  // Allocate new symbol
+  tick_allocator_config_t config = { .flags = TICK_ALLOCATOR_ZEROMEM, .alignment2 = 0 };
+  tick_buf_t buf = {0};
+  CHECK_OK(alloc.realloc(alloc.ctx, &buf, sizeof(type_symbol_t), &config));
+
+  type_symbol_t* sym = (type_symbol_t*)buf.buf;
+  sym->name = name;
+  sym->decl = decl;
+  sym->next = *head;
+  *head = sym;
+
+  return TICK_OK;
+}
+
+// Look up a type symbol by name
+static tick_ast_node_t* lookup_type_symbol(type_symbol_t* head, tick_buf_t name) {
+  for (type_symbol_t* sym = head; sym; sym = sym->next) {
+    if (sym->name.sz == name.sz && memcmp(sym->name.buf, name.buf, name.sz) == 0) {
+      return sym->decl;
+    }
+  }
+  return NULL;
+}
+
+// ============================================================================
 // Type Analysis Helper Functions
 // ============================================================================
 
@@ -39,6 +86,142 @@ static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc, tick_builtin_type_t 
   node->loc.line = 0;  // Synthesized node
   node->loc.col = 0;
   return node;
+}
+
+// Helper to allocate a literal node
+static tick_ast_node_t* alloc_literal_node(tick_alloc_t alloc, int64_t value) {
+  tick_allocator_config_t config = { .flags = TICK_ALLOCATOR_ZEROMEM, .alignment2 = 0 };
+  tick_buf_t buf = {0};
+  if (alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config) != TICK_OK) return NULL;
+
+  tick_ast_node_t* node = (tick_ast_node_t*)buf.buf;
+  node->kind = TICK_AST_LITERAL;
+  node->data.literal.kind = TICK_LIT_INT;
+  node->data.literal.data.int_value = value;
+  return node;
+}
+
+// ============================================================================
+// Constant Expression Evaluation
+// ============================================================================
+
+// Evaluate a constant expression to an integer value
+// Returns TICK_OK on success, TICK_ERR if the expression is not constant
+static tick_err_t eval_const_expr(tick_ast_node_t* expr, int64_t* out_value) {
+  if (!expr || !out_value) return TICK_ERR;
+
+  switch (expr->kind) {
+    case TICK_AST_LITERAL: {
+      if (expr->data.literal.kind == TICK_LIT_INT) {
+        *out_value = expr->data.literal.data.int_value;
+        return TICK_OK;
+      } else if (expr->data.literal.kind == TICK_LIT_UINT) {
+        *out_value = (int64_t)expr->data.literal.data.uint_value;
+        return TICK_OK;
+      }
+      return TICK_ERR;
+    }
+
+    case TICK_AST_BINARY_EXPR: {
+      int64_t left, right;
+      if (eval_const_expr(expr->data.binary_expr.left, &left) != TICK_OK) return TICK_ERR;
+      if (eval_const_expr(expr->data.binary_expr.right, &right) != TICK_OK) return TICK_ERR;
+
+      switch (expr->data.binary_expr.op) {
+        case BINOP_ADD:
+        case BINOP_SAT_ADD:
+        case BINOP_WRAP_ADD:
+          *out_value = left + right;
+          return TICK_OK;
+
+        case BINOP_SUB:
+        case BINOP_SAT_SUB:
+        case BINOP_WRAP_SUB:
+          *out_value = left - right;
+          return TICK_OK;
+
+        case BINOP_MUL:
+        case BINOP_SAT_MUL:
+        case BINOP_WRAP_MUL:
+          *out_value = left * right;
+          return TICK_OK;
+
+        case BINOP_DIV:
+        case BINOP_SAT_DIV:
+        case BINOP_WRAP_DIV:
+          if (right == 0) return TICK_ERR;
+          *out_value = left / right;
+          return TICK_OK;
+
+        case BINOP_MOD:
+          if (right == 0) return TICK_ERR;
+          *out_value = left % right;
+          return TICK_OK;
+
+        case BINOP_LSHIFT:
+          *out_value = left << right;
+          return TICK_OK;
+
+        case BINOP_RSHIFT:
+          *out_value = left >> right;
+          return TICK_OK;
+
+        case BINOP_AND:
+          *out_value = left & right;
+          return TICK_OK;
+
+        case BINOP_OR:
+          *out_value = left | right;
+          return TICK_OK;
+
+        case BINOP_XOR:
+          *out_value = left ^ right;
+          return TICK_OK;
+
+        default:
+          return TICK_ERR;
+      }
+    }
+
+    case TICK_AST_UNARY_EXPR: {
+      int64_t operand;
+      if (eval_const_expr(expr->data.unary_expr.operand, &operand) != TICK_OK) return TICK_ERR;
+
+      switch (expr->data.unary_expr.op) {
+        case UNOP_NEG:
+          *out_value = -operand;
+          return TICK_OK;
+
+        case UNOP_BIT_NOT:
+          *out_value = ~operand;
+          return TICK_OK;
+
+        default:
+          return TICK_ERR;
+      }
+    }
+
+    default:
+      return TICK_ERR;
+  }
+}
+
+// Reduce a constant expression to a literal node
+// Replaces *expr with a new LITERAL node containing the evaluated value
+static tick_err_t reduce_to_literal(tick_ast_node_t** expr, tick_alloc_t alloc) {
+  if (!expr || !*expr) return TICK_ERR;
+
+  int64_t value;
+  if (eval_const_expr(*expr, &value) != TICK_OK) return TICK_ERR;
+
+  tick_ast_node_t* literal = alloc_literal_node(alloc, value);
+  if (!literal) return TICK_ERR;
+
+  // Preserve location information from original expression
+  literal->loc = (*expr)->loc;
+
+  *expr = literal;
+  return TICK_OK;
 }
 
 // Map type name to builtin type enum
@@ -63,11 +246,12 @@ static tick_builtin_type_t resolve_type_name(tick_buf_t name) {
   return TICK_TYPE_USER_DEFINED;
 }
 
-// Forward declaration
-static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, tick_alloc_t alloc, tick_buf_t errbuf);
+// Forward declarations
+static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_symbols, tick_alloc_t alloc, tick_buf_t errbuf);
+static tick_err_t analyze_type(tick_ast_node_t* type_node, type_symbol_t* type_symbols, tick_alloc_t alloc);
 
-// Analyze type node - resolve builtin type names
-static tick_err_t analyze_type(tick_ast_node_t* type_node) {
+// Analyze type node - resolve builtin type names and user-defined types
+static tick_err_t analyze_type(tick_ast_node_t* type_node, type_symbol_t* type_symbols, tick_alloc_t alloc) {
   if (!type_node) return TICK_OK;
 
   switch (type_node->kind) {
@@ -76,13 +260,40 @@ static tick_err_t analyze_type(tick_ast_node_t* type_node) {
         type_node->data.type_named.builtin_type =
           resolve_type_name(type_node->data.type_named.name);
       }
+
+      // If it's a user-defined type, look it up in the symbol table
+      if (type_node->data.type_named.builtin_type == TICK_TYPE_USER_DEFINED) {
+        tick_ast_node_t* decl = lookup_type_symbol(type_symbols, type_node->data.type_named.name);
+        type_node->data.type_named.type_decl = decl;
+        // If not found, type_decl will be NULL (error will be caught later)
+      }
       return TICK_OK;
 
     case TICK_AST_TYPE_POINTER:
-      return analyze_type(type_node->data.type_pointer.pointee_type);
+      return analyze_type(type_node->data.type_pointer.pointee_type, type_symbols, alloc);
 
     case TICK_AST_TYPE_ARRAY:
-      return analyze_type(type_node->data.type_array.element_type);
+      // Reduce array size to literal if it's a constant expression
+      if (type_node->data.type_array.size) {
+        // Try to reduce to literal, but don't fail if it's already a literal
+        reduce_to_literal(&type_node->data.type_array.size, alloc);
+      }
+      return analyze_type(type_node->data.type_array.element_type, type_symbols, alloc);
+
+    case TICK_AST_TYPE_FUNCTION: {
+      // Analyze return type
+      tick_err_t err = analyze_type(type_node->data.type_function.return_type, type_symbols, alloc);
+      if (err != TICK_OK) return err;
+
+      // Analyze parameter types
+      tick_ast_node_t* param = type_node->data.type_function.params;
+      while (param) {
+        err = analyze_type(param->data.param.type, type_symbols, alloc);
+        if (err != TICK_OK) return err;
+        param = param->next;
+      }
+      return TICK_OK;
+    }
 
     default:
       return TICK_OK;
@@ -90,7 +301,7 @@ static tick_err_t analyze_type(tick_ast_node_t* type_node) {
 }
 
 // Get the type of an expression (returns resolved_type or infers it)
-static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_symbols, tick_alloc_t alloc, tick_buf_t errbuf) {
   UNUSED(errbuf);
 
   if (!expr) return NULL;
@@ -109,14 +320,27 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, tick_alloc_t alloc, 
       }
 
       // Analyze operands
-      tick_ast_node_t* left_type = analyze_expr(expr->data.binary_expr.left, alloc, errbuf);
-      UNUSED(analyze_expr(expr->data.binary_expr.right, alloc, errbuf));  // TODO: Type checking
+      tick_ast_node_t* left_type = analyze_expr(expr->data.binary_expr.left, type_symbols, alloc, errbuf);
+      tick_ast_node_t* right_type = analyze_expr(expr->data.binary_expr.right, type_symbols, alloc, errbuf);
 
-      // For simplicity, use left operand's type as result type
-      // TODO: Proper type checking and type promotion
       tick_ast_node_t* result_type = NULL;
-      if (left_type && left_type->kind == TICK_AST_TYPE_NAMED) {
-        result_type = alloc_type_node(alloc, left_type->data.type_named.builtin_type);
+
+      // Special handling for orelse operator
+      if (expr->data.binary_expr.op == BINOP_ORELSE) {
+        // For 'a orelse b': a is ?T, b is T, result is T
+        if (left_type && left_type->kind == TICK_AST_TYPE_OPTIONAL) {
+          // Result type is the inner type of the optional
+          result_type = left_type->data.type_optional.inner_type;
+        } else if (right_type) {
+          // Fallback: use right type
+          result_type = right_type;
+        }
+      } else {
+        // For simplicity, use left operand's type as result type
+        // TODO: Proper type checking and type promotion
+        if (left_type && left_type->kind == TICK_AST_TYPE_NAMED) {
+          result_type = alloc_type_node(alloc, left_type->data.type_named.builtin_type);
+        }
       }
 
       expr->data.binary_expr.resolved_type = result_type;
@@ -130,7 +354,7 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, tick_alloc_t alloc, 
       }
 
       // Result type is same as operand type for most unary ops
-      tick_ast_node_t* operand_type = analyze_expr(expr->data.unary_expr.operand, alloc, errbuf);
+      tick_ast_node_t* operand_type = analyze_expr(expr->data.unary_expr.operand, type_symbols, alloc, errbuf);
 
       expr->data.unary_expr.resolved_type = operand_type;
       return operand_type;
@@ -143,12 +367,26 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, tick_alloc_t alloc, 
       }
 
       // Analyze source expression (for validation)
-      analyze_expr(expr->data.cast_expr.expr, alloc, errbuf);
+      analyze_expr(expr->data.cast_expr.expr, type_symbols, alloc, errbuf);
 
       // Result type is the cast target type
-      analyze_type(expr->data.cast_expr.type);
+      analyze_type(expr->data.cast_expr.type, type_symbols, alloc);
       expr->data.cast_expr.resolved_type = expr->data.cast_expr.type;
       return expr->data.cast_expr.type;
+    }
+
+    case TICK_AST_STRUCT_INIT_EXPR: {
+      // Analyze the struct type
+      analyze_type(expr->data.struct_init_expr.type, type_symbols, alloc);
+
+      // Analyze field initializer expressions
+      for (tick_ast_node_t* field = expr->data.struct_init_expr.fields; field; field = field->next) {
+        if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
+          analyze_expr(field->data.struct_init_field.value, type_symbols, alloc, errbuf);
+        }
+      }
+
+      return expr->data.struct_init_expr.type;
     }
 
     case TICK_AST_IDENTIFIER_EXPR: {
@@ -163,50 +401,76 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, tick_alloc_t alloc, 
       return alloc_type_node(alloc, TICK_TYPE_I32);
     }
 
+    case TICK_AST_UNWRAP_PANIC_EXPR: {
+      // Check if already resolved
+      if (expr->data.unwrap_panic_expr.resolved_type) {
+        return expr->data.unwrap_panic_expr.resolved_type;
+      }
+
+      // Analyze operand
+      tick_ast_node_t* operand_type = analyze_expr(expr->data.unwrap_panic_expr.operand, type_symbols, alloc, errbuf);
+
+      // For 'a.?': a is ?T, result is T
+      tick_ast_node_t* result_type = NULL;
+      if (operand_type && operand_type->kind == TICK_AST_TYPE_OPTIONAL) {
+        // Result type is the inner type of the optional
+        result_type = operand_type->data.type_optional.inner_type;
+      }
+
+      expr->data.unwrap_panic_expr.resolved_type = result_type;
+      return result_type;
+    }
+
     default:
       return NULL;
   }
 }
 
 // Analyze a statement
-static tick_err_t analyze_stmt(tick_ast_node_t* stmt, tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_err_t analyze_stmt(tick_ast_node_t* stmt, type_symbol_t* type_symbols,
+                                tick_alloc_t alloc, tick_buf_t errbuf) {
   if (!stmt) return TICK_OK;
 
   switch (stmt->kind) {
     case TICK_AST_BLOCK_STMT: {
       for (tick_ast_node_t* s = stmt->data.block_stmt.stmts; s; s = s->next) {
-        CHECK_OK(analyze_stmt(s, alloc, errbuf));
+        CHECK_OK(analyze_stmt(s, type_symbols, alloc, errbuf));
       }
       return TICK_OK;
     }
 
     case TICK_AST_RETURN_STMT:
-      analyze_expr(stmt->data.return_stmt.value, alloc, errbuf);
+      analyze_expr(stmt->data.return_stmt.value, type_symbols, alloc, errbuf);
       return TICK_OK;
 
     case TICK_AST_LET_STMT:
     case TICK_AST_VAR_STMT:
     case TICK_AST_DECL: {
+      // If type is NULL, infer from initializer
+      if (stmt->data.decl.type == NULL && stmt->data.decl.init) {
+        tick_ast_node_t* inferred_type = analyze_expr(stmt->data.decl.init, type_symbols, alloc, errbuf);
+        stmt->data.decl.type = inferred_type;
+      }
       // Analyze declaration type
-      CHECK_OK(analyze_type(stmt->data.decl.type));
+      CHECK_OK(analyze_type(stmt->data.decl.type, type_symbols, alloc));
       // Analyze initializer if present
-      analyze_expr(stmt->data.decl.init, alloc, errbuf);
+      analyze_expr(stmt->data.decl.init, type_symbols, alloc, errbuf);
       return TICK_OK;
     }
 
     case TICK_AST_ASSIGN_STMT:
-      analyze_expr(stmt->data.assign_stmt.lhs, alloc, errbuf);
-      analyze_expr(stmt->data.assign_stmt.rhs, alloc, errbuf);
+      analyze_expr(stmt->data.assign_stmt.lhs, type_symbols, alloc, errbuf);
+      analyze_expr(stmt->data.assign_stmt.rhs, type_symbols, alloc, errbuf);
       return TICK_OK;
 
     case TICK_AST_EXPR_STMT:
-      analyze_expr(stmt->data.expr_stmt.expr, alloc, errbuf);
+      analyze_expr(stmt->data.expr_stmt.expr, type_symbols, alloc, errbuf);
       return TICK_OK;
 
     case TICK_AST_IF_STMT:
-      analyze_expr(stmt->data.if_stmt.condition, alloc, errbuf);
-      CHECK_OK(analyze_stmt(stmt->data.if_stmt.then_block, alloc, errbuf));
-      CHECK_OK(analyze_stmt(stmt->data.if_stmt.else_block, alloc, errbuf));
+      analyze_expr(stmt->data.if_stmt.condition, type_symbols, alloc, errbuf);
+      CHECK_OK(analyze_stmt(stmt->data.if_stmt.then_block, type_symbols, alloc, errbuf));
+      CHECK_OK(analyze_stmt(stmt->data.if_stmt.else_block, type_symbols, alloc, errbuf));
       return TICK_OK;
 
     default:
@@ -214,25 +478,150 @@ static tick_err_t analyze_stmt(tick_ast_node_t* stmt, tick_alloc_t alloc, tick_b
   }
 }
 
+// Analyze an enum declaration and populate auto-increment values
+static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_symbols,
+                                     tick_alloc_t alloc, tick_buf_t errbuf) {
+  UNUSED(errbuf);
+
+  if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
+
+  tick_ast_node_t* enum_node = decl->data.decl.init;
+  if (!enum_node || enum_node->kind != TICK_AST_ENUM_DECL) return TICK_OK;
+
+  // Analyze underlying type
+  CHECK_OK(analyze_type(enum_node->data.enum_decl.underlying_type, type_symbols, alloc));
+
+  // Walk the enum values and calculate auto-increment
+  // Note: The list is in reverse order at this point (parser builds it that way)
+  // The lowering pass will reverse it later to get source order
+  // We need to calculate values in REVERSE order to handle explicit values correctly
+
+  // First pass: collect all explicit values and find the maximum
+  int64_t max_explicit = -1;
+  bool has_explicit = false;
+  for (tick_ast_node_t* value_node = enum_node->data.enum_decl.values;
+       value_node;
+       value_node = value_node->next) {
+    if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
+
+    if (value_node->data.enum_value.value != NULL) {
+      has_explicit = true;
+      // Reduce to literal if needed
+      if (reduce_to_literal(&value_node->data.enum_value.value, alloc) == TICK_OK) {
+        int64_t val = value_node->data.enum_value.value->data.literal.data.int_value;
+        if (val > max_explicit) max_explicit = val;
+      }
+    }
+  }
+
+  // Second pass: assign auto-increment values working backwards
+  // This is tricky because the list is reversed, so we work from head to tail
+  // which is actually last-to-first in source order
+  int64_t current_value = has_explicit ? max_explicit + 1 : 0;
+
+  // We need to process in reverse order (source order), so reverse temporarily
+  tick_ast_node_t* reversed = NULL;
+  tick_ast_node_t* curr = enum_node->data.enum_decl.values;
+  while (curr) {
+    tick_ast_node_t* next = curr->next;
+    curr->next = reversed;
+    reversed = curr;
+    curr = next;
+  }
+
+  // Now process in source order
+  current_value = 0;
+  for (tick_ast_node_t* value_node = reversed; value_node; value_node = value_node->next) {
+    if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
+
+    if (value_node->data.enum_value.value == NULL) {
+      // Auto-increment: create a literal node with current_value
+      tick_ast_node_t* literal = alloc_literal_node(alloc, current_value);
+      if (!literal) return TICK_ERR;
+      value_node->data.enum_value.value = literal;
+    } else {
+      // Explicit value: already reduced in first pass
+      current_value = value_node->data.enum_value.value->data.literal.data.int_value;
+    }
+
+    // Increment for next value
+    current_value++;
+  }
+
+  // Reverse back to maintain parser's reversed order
+  // The lowering pass will reverse it again to get final source order
+  curr = reversed;
+  reversed = NULL;
+  while (curr) {
+    tick_ast_node_t* next = curr->next;
+    curr->next = reversed;
+    reversed = curr;
+    curr = next;
+  }
+  enum_node->data.enum_decl.values = reversed;
+
+  return TICK_OK;
+}
+
 // Analyze a function declaration
-static tick_err_t analyze_function(tick_ast_node_t* decl, tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_err_t analyze_function(tick_ast_node_t* decl, type_symbol_t* type_symbols,
+                                    tick_alloc_t alloc, tick_buf_t errbuf) {
   if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
 
   tick_ast_node_t* func = decl->data.decl.init;
   if (!func || func->kind != TICK_AST_FUNCTION) return TICK_OK;
 
   // Analyze return type
-  CHECK_OK(analyze_type(func->data.function.return_type));
+  CHECK_OK(analyze_type(func->data.function.return_type, type_symbols, alloc));
 
   // Analyze parameters
   for (tick_ast_node_t* param = func->data.function.params; param; param = param->next) {
     if (param->kind == TICK_AST_PARAM) {
-      CHECK_OK(analyze_type(param->data.param.type));
+      CHECK_OK(analyze_type(param->data.param.type, type_symbols, alloc));
     }
   }
 
   // Analyze function body
-  CHECK_OK(analyze_stmt(func->data.function.body, alloc, errbuf));
+  CHECK_OK(analyze_stmt(func->data.function.body, type_symbols, alloc, errbuf));
+
+  return TICK_OK;
+}
+
+// Analyze struct declaration - resolve field types
+static tick_err_t analyze_struct_decl(tick_ast_node_t* decl, type_symbol_t* type_symbols, tick_alloc_t alloc) {
+  if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
+
+  tick_ast_node_t* struct_node = decl->data.decl.init;
+  if (!struct_node || struct_node->kind != TICK_AST_STRUCT_DECL) return TICK_OK;
+
+  // Analyze field types
+  for (tick_ast_node_t* field = struct_node->data.struct_decl.fields; field; field = field->next) {
+    if (field->kind == TICK_AST_FIELD) {
+      CHECK_OK(analyze_type(field->data.field.type, type_symbols, alloc));
+    }
+  }
+
+  return TICK_OK;
+}
+
+// Analyze union declaration - resolve field types
+static tick_err_t analyze_union_decl(tick_ast_node_t* decl, type_symbol_t* type_symbols, tick_alloc_t alloc) {
+  if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
+
+  tick_ast_node_t* union_node = decl->data.decl.init;
+  if (!union_node || union_node->kind != TICK_AST_UNION_DECL) return TICK_OK;
+
+  // Analyze tag type if present
+  if (union_node->data.union_decl.tag_type) {
+    CHECK_OK(analyze_type(union_node->data.union_decl.tag_type, type_symbols, alloc));
+  }
+
+  // Analyze field types
+  for (tick_ast_node_t* field = union_node->data.union_decl.fields; field; field = field->next) {
+    if (field->kind == TICK_AST_FIELD) {
+      CHECK_OK(analyze_type(field->data.field.type, type_symbols, alloc));
+    }
+  }
 
   return TICK_OK;
 }
@@ -246,14 +635,65 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errb
 
   tick_ast_node_t* module = ast->root;
 
-  // Walk module declarations
+  // Create type symbol table
+  type_symbol_t* type_symbols = NULL;
+
+  // PASS 1: Register all type declarations
+  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+    if (decl->kind == TICK_AST_DECL && decl->data.decl.init) {
+      tick_ast_node_t* init = decl->data.decl.init;
+
+      // Register struct/enum/union types
+      if (init->kind == TICK_AST_STRUCT_DECL ||
+          init->kind == TICK_AST_ENUM_DECL ||
+          init->kind == TICK_AST_UNION_DECL) {
+        // The type name is in the parent DECL node
+        CHECK_OK(register_type_symbol(&type_symbols, decl->data.decl.name, init, alloc));
+      }
+    }
+  }
+
+  // PASS 2: Analyze all declarations with type resolution
   for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
     if (decl->kind == TICK_AST_DECL) {
-      // Check if it's a function
-      if (decl->data.decl.init && decl->data.decl.init->kind == TICK_AST_FUNCTION) {
-        CHECK_OK(analyze_function(decl, alloc, errbuf));
+      if (decl->data.decl.init) {
+        // Analyze functions
+        if (decl->data.decl.init->kind == TICK_AST_FUNCTION) {
+          CHECK_OK(analyze_function(decl, type_symbols, alloc, errbuf));
+        }
+        // Analyze enums
+        else if (decl->data.decl.init->kind == TICK_AST_ENUM_DECL) {
+          CHECK_OK(analyze_enum_decl(decl, type_symbols, alloc, errbuf));
+        }
+        // Analyze structs
+        else if (decl->data.decl.init->kind == TICK_AST_STRUCT_DECL) {
+          CHECK_OK(analyze_struct_decl(decl, type_symbols, alloc));
+        }
+        // Analyze unions
+        else if (decl->data.decl.init->kind == TICK_AST_UNION_DECL) {
+          CHECK_OK(analyze_union_decl(decl, type_symbols, alloc));
+        }
+        else {
+          // Regular variable declaration with initializer
+          // If type is NULL, infer from initializer
+          if (decl->data.decl.type == NULL) {
+            tick_ast_node_t* inferred_type = analyze_expr(decl->data.decl.init, type_symbols, alloc, errbuf);
+            decl->data.decl.type = inferred_type;
+          }
+          // Analyze the type
+          if (decl->data.decl.type) {
+            CHECK_OK(analyze_type(decl->data.decl.type, type_symbols, alloc));
+          }
+          // Analyze the initializer expression
+          analyze_expr(decl->data.decl.init, type_symbols, alloc, errbuf);
+        }
+      } else {
+        // Declarations without initializers (e.g., extern declarations)
+        // Still need to resolve their types
+        if (decl->data.decl.type) {
+          CHECK_OK(analyze_type(decl->data.decl.type, type_symbols, alloc));
+        }
       }
-      // TODO: Handle global variables, structs, etc.
     }
   }
 
@@ -285,12 +725,338 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errb
 //   - This keeps codegen simple (only handles literals and identifiers)
 //   - See tick.h line 388 for full specification
 //
+
+// Helper to allocate a new AST node (for forward declarations)
+static tick_ast_node_t* alloc_ast_node(tick_alloc_t alloc) {
+  tick_allocator_config_t config = { .flags = TICK_ALLOCATOR_ZEROMEM, .alignment2 = 0 };
+  tick_buf_t buf = {0};
+  if (alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config) != TICK_OK) {
+    return NULL;
+  }
+  return (tick_ast_node_t*)buf.buf;
+}
+
+// Collect all user-defined types that need forward declarations for a struct/union
+static void collect_forward_decl_types(tick_ast_node_t* decl, type_symbol_t** needed_types, tick_alloc_t alloc) {
+  if (!decl || decl->kind != TICK_AST_DECL) return;
+
+  tick_ast_node_t* init = decl->data.decl.init;
+  if (!init) return;
+
+  // Only process struct and union declarations
+  if (init->kind != TICK_AST_STRUCT_DECL && init->kind != TICK_AST_UNION_DECL) {
+    return;
+  }
+
+  // Walk fields
+  tick_ast_node_t* fields = (init->kind == TICK_AST_STRUCT_DECL) ?
+    init->data.struct_decl.fields : init->data.union_decl.fields;
+
+  for (tick_ast_node_t* field = fields; field; field = field->next) {
+    if (field->kind != TICK_AST_FIELD) continue;
+
+    tick_ast_node_t* field_type = field->data.field.type;
+
+    // Check if field type contains a pointer to a user-defined type
+    if (field_type && field_type->kind == TICK_AST_TYPE_POINTER) {
+      tick_ast_node_t* pointee = field_type->data.type_pointer.pointee_type;
+      if (pointee && pointee->kind == TICK_AST_TYPE_NAMED &&
+          pointee->data.type_named.builtin_type == TICK_TYPE_USER_DEFINED) {
+        // Add to needed types list if not already present
+        tick_buf_t type_name = pointee->data.type_named.name;
+
+        // Check if already in list
+        bool found = false;
+        for (type_symbol_t* sym = *needed_types; sym; sym = sym->next) {
+          if (sym->name.sz == type_name.sz &&
+              memcmp(sym->name.buf, type_name.buf, type_name.sz) == 0) {
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          // Add to list
+          register_type_symbol(needed_types, type_name, pointee->data.type_named.type_decl, alloc);
+        }
+      }
+    }
+  }
+}
+
+// Helper to reverse a linked list of AST nodes
+static tick_ast_node_t* reverse_list(tick_ast_node_t* head) {
+  tick_ast_node_t* reversed = NULL;
+  tick_ast_node_t* curr = head;
+  while (curr) {
+    tick_ast_node_t* next = curr->next;
+    curr->next = reversed;
+    reversed = curr;
+    curr = next;
+  }
+  return reversed;
+}
+
+// Forward declaration for mutual recursion
+static void reverse_expr_lists(tick_ast_node_t* expr);
+static void reverse_stmt_lists(tick_ast_node_t* stmt);
+
+// Reverse all lists within an expression (for struct init, array init, call args, etc.)
+static void reverse_expr_lists(tick_ast_node_t* expr) {
+  if (!expr) return;
+
+  switch (expr->kind) {
+    case TICK_AST_STRUCT_INIT_EXPR:
+      // Reverse field initializer list
+      expr->data.struct_init_expr.fields = reverse_list(expr->data.struct_init_expr.fields);
+      // Recursively reverse expressions in field values
+      for (tick_ast_node_t* field = expr->data.struct_init_expr.fields; field; field = field->next) {
+        if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
+          reverse_expr_lists(field->data.struct_init_field.value);
+        }
+      }
+      break;
+
+    case TICK_AST_ARRAY_INIT_EXPR:
+      // Reverse element list
+      expr->data.array_init_expr.elements = reverse_list(expr->data.array_init_expr.elements);
+      // Recursively reverse expressions in elements
+      for (tick_ast_node_t* elem = expr->data.array_init_expr.elements; elem; elem = elem->next) {
+        reverse_expr_lists(elem);
+      }
+      break;
+
+    case TICK_AST_CALL_EXPR:
+      // Reverse argument list
+      expr->data.call_expr.args = reverse_list(expr->data.call_expr.args);
+      // Recursively reverse callee and arguments
+      reverse_expr_lists(expr->data.call_expr.callee);
+      for (tick_ast_node_t* arg = expr->data.call_expr.args; arg; arg = arg->next) {
+        reverse_expr_lists(arg);
+      }
+      break;
+
+    case TICK_AST_BINARY_EXPR:
+      reverse_expr_lists(expr->data.binary_expr.left);
+      reverse_expr_lists(expr->data.binary_expr.right);
+      break;
+
+    case TICK_AST_UNARY_EXPR:
+      reverse_expr_lists(expr->data.unary_expr.operand);
+      break;
+
+    case TICK_AST_CAST_EXPR:
+      reverse_expr_lists(expr->data.cast_expr.expr);
+      break;
+
+    case TICK_AST_FIELD_ACCESS_EXPR:
+      reverse_expr_lists(expr->data.field_access_expr.object);
+      break;
+
+    case TICK_AST_INDEX_EXPR:
+      reverse_expr_lists(expr->data.index_expr.array);
+      reverse_expr_lists(expr->data.index_expr.index);
+      break;
+
+    case TICK_AST_UNWRAP_PANIC_EXPR:
+      reverse_expr_lists(expr->data.unwrap_panic_expr.operand);
+      break;
+
+    default:
+      // Other expression types don't contain lists
+      break;
+  }
+}
+
+// Reverse all lists within a statement
+static void reverse_stmt_lists(tick_ast_node_t* stmt) {
+  if (!stmt) return;
+
+  switch (stmt->kind) {
+    case TICK_AST_BLOCK_STMT:
+      // Reverse statement list in block
+      stmt->data.block_stmt.stmts = reverse_list(stmt->data.block_stmt.stmts);
+      // Recursively reverse nested statements
+      for (tick_ast_node_t* s = stmt->data.block_stmt.stmts; s; s = s->next) {
+        reverse_stmt_lists(s);
+      }
+      break;
+
+    case TICK_AST_IF_STMT:
+      reverse_expr_lists(stmt->data.if_stmt.condition);
+      reverse_stmt_lists(stmt->data.if_stmt.then_block);
+      reverse_stmt_lists(stmt->data.if_stmt.else_block);
+      break;
+
+    case TICK_AST_FOR_STMT:
+      reverse_stmt_lists(stmt->data.for_stmt.init_stmt);
+      reverse_expr_lists(stmt->data.for_stmt.condition);
+      reverse_stmt_lists(stmt->data.for_stmt.step_stmt);
+      reverse_stmt_lists(stmt->data.for_stmt.body);
+      break;
+
+    case TICK_AST_SWITCH_STMT:
+      reverse_expr_lists(stmt->data.switch_stmt.value);
+      // Reverse case list
+      stmt->data.switch_stmt.cases = reverse_list(stmt->data.switch_stmt.cases);
+      // Recursively reverse each case
+      for (tick_ast_node_t* c = stmt->data.switch_stmt.cases; c; c = c->next) {
+        if (c->kind == TICK_AST_SWITCH_CASE) {
+          // Reverse case value list
+          c->data.switch_case.values = reverse_list(c->data.switch_case.values);
+          // Reverse statement list in case body
+          c->data.switch_case.stmts = reverse_list(c->data.switch_case.stmts);
+          // Recursively reverse case statements
+          for (tick_ast_node_t* s = c->data.switch_case.stmts; s; s = s->next) {
+            reverse_stmt_lists(s);
+          }
+        }
+      }
+      break;
+
+    case TICK_AST_RETURN_STMT:
+      reverse_expr_lists(stmt->data.return_stmt.value);
+      break;
+
+    case TICK_AST_EXPR_STMT:
+      reverse_expr_lists(stmt->data.expr_stmt.expr);
+      break;
+
+    case TICK_AST_ASSIGN_STMT:
+      reverse_expr_lists(stmt->data.assign_stmt.lhs);
+      reverse_expr_lists(stmt->data.assign_stmt.rhs);
+      break;
+
+    case TICK_AST_DECL:
+      reverse_expr_lists(stmt->data.decl.init);
+      break;
+
+    default:
+      // Other statement types
+      break;
+  }
+}
+
 tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf) {
-  UNUSED(ast);
-  UNUSED(alloc);
   UNUSED(errbuf);
-  // Accept all ASTs for now (stub implementation)
-  // When this is implemented, it should walk the AST and perform the
-  // transformations described above.
+
+  if (!ast || !ast->root || ast->root->kind != TICK_AST_MODULE) {
+    return TICK_OK;
+  }
+
+  tick_ast_node_t* module = ast->root;
+
+  // PASS 0: Reverse the declaration list to get source order
+  // The parser builds lists in reverse order (prepending), so we need to reverse them
+  module->data.module.decls = reverse_list(module->data.module.decls);
+
+  // Also reverse all nested lists within each declaration
+  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+    if (decl->kind != TICK_AST_DECL) continue;
+
+    // Reverse lists in the initializer expression
+    if (decl->data.decl.init) {
+      tick_ast_node_t* init = decl->data.decl.init;
+
+      // Handle function declarations
+      if (init->kind == TICK_AST_FUNCTION) {
+        // Reverse parameter list
+        init->data.function.params = reverse_list(init->data.function.params);
+        // Reverse statements in function body
+        reverse_stmt_lists(init->data.function.body);
+      }
+      // Handle struct declarations
+      else if (init->kind == TICK_AST_STRUCT_DECL) {
+        // Reverse field list
+        init->data.struct_decl.fields = reverse_list(init->data.struct_decl.fields);
+      }
+      // Handle union declarations
+      else if (init->kind == TICK_AST_UNION_DECL) {
+        // Reverse field list
+        init->data.union_decl.fields = reverse_list(init->data.union_decl.fields);
+      }
+      // Handle enum declarations
+      else if (init->kind == TICK_AST_ENUM_DECL) {
+        // Reverse enum value list to get source order
+        init->data.enum_decl.values = reverse_list(init->data.enum_decl.values);
+      }
+      // Handle regular variable initializers
+      else {
+        reverse_expr_lists(init);
+      }
+    }
+  }
+
+  // PASS 1: Collect all types that need forward declarations
+  type_symbol_t* needed_forward_decls = NULL;
+
+  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+    if (decl->kind == TICK_AST_DECL && decl->data.decl.init) {
+      tick_ast_node_t* init = decl->data.decl.init;
+      if (init->kind == TICK_AST_STRUCT_DECL || init->kind == TICK_AST_UNION_DECL) {
+        collect_forward_decl_types(decl, &needed_forward_decls, alloc);
+      }
+    }
+  }
+
+  // PASS 2: Build new declaration list with forward declarations at the beginning
+  tick_ast_node_t* new_decls = NULL;
+  tick_ast_node_t* new_decls_tail = NULL;
+
+  // Insert all forward declarations first
+  for (type_symbol_t* sym = needed_forward_decls; sym; sym = sym->next) {
+    if (!sym->decl) continue;
+
+    // Find the parent DECL node of this type
+    tick_ast_node_t* type_parent_decl = NULL;
+    for (tick_ast_node_t* d = module->data.module.decls; d; d = d->next) {
+      if (d->kind == TICK_AST_DECL && d->data.decl.init == sym->decl) {
+        type_parent_decl = d;
+        break;
+      }
+    }
+
+    if (type_parent_decl) {
+      // Create forward declaration node
+      tick_ast_node_t* fwd_decl = alloc_ast_node(alloc);
+      if (fwd_decl) {
+        // Copy the declaration but mark as forward
+        *fwd_decl = *type_parent_decl;
+        fwd_decl->data.decl.quals.is_forward_decl = true;
+        fwd_decl->next = NULL;
+
+        // Append forward declaration
+        if (!new_decls) {
+          new_decls = fwd_decl;
+          new_decls_tail = fwd_decl;
+        } else {
+          new_decls_tail->next = fwd_decl;
+          new_decls_tail = fwd_decl;
+        }
+      }
+    }
+  }
+
+  // Now append all original declarations
+  tick_ast_node_t* curr = module->data.module.decls;
+  while (curr) {
+    tick_ast_node_t* next = curr->next;  // Save next before we modify anything
+
+    // Append the original declaration
+    curr->next = NULL;
+    if (!new_decls) {
+      new_decls = curr;
+      new_decls_tail = curr;
+    } else {
+      new_decls_tail->next = curr;
+      new_decls_tail = curr;
+    }
+
+    curr = next;
+  }
+
+  // Replace module declarations with new list
+  module->data.module.decls = new_decls;
+
   return TICK_OK;
 }
