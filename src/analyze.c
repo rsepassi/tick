@@ -390,12 +390,38 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
     }
 
     case TICK_AST_IDENTIFIER_EXPR: {
+      // Check if this is an AT builtin (@identifier)
+      if (expr->data.identifier_expr.name.sz > 0 &&
+          expr->data.identifier_expr.name.buf[0] == '@') {
+        // Resolve @builtin string to enum
+        if (expr->data.identifier_expr.name.sz == 4 &&
+            memcmp(expr->data.identifier_expr.name.buf, "@dbg", 4) == 0) {
+          expr->data.identifier_expr.at_builtin = TICK_AT_BUILTIN_DBG;
+        } else {
+          // Unknown builtin
+          snprintf((char*)errbuf.buf, errbuf.sz,
+                   "%zu:%zu: unknown builtin '%.*s'\n",
+                   expr->loc.line, expr->loc.col,
+                   (int)expr->data.identifier_expr.name.sz,
+                   expr->data.identifier_expr.name.buf);
+          return NULL;
+        }
+      }
+
       // TODO: Look up identifier in symbol table to get its type
       // For now, assume i32
       return alloc_type_node(alloc, TICK_TYPE_I32);
     }
 
     case TICK_AST_CALL_EXPR: {
+      // Analyze callee (this will resolve @builtin identifiers)
+      analyze_expr(expr->data.call_expr.callee, type_symbols, alloc, errbuf);
+
+      // Analyze arguments
+      for (tick_ast_node_t* arg = expr->data.call_expr.args; arg; arg = arg->next) {
+        analyze_expr(arg, type_symbols, alloc, errbuf);
+      }
+
       // TODO: Get return type from function signature
       // For now, assume i32
       return alloc_type_node(alloc, TICK_TYPE_I32);

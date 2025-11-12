@@ -308,9 +308,9 @@ static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
       return write_str(ctx->writer, node->data.literal.data.bool_value ? "true" : "false");
 
     case TICK_LIT_STRING: {
-      // Emit as u8 array: (uint8_t[]){byte1, byte2, ..., 0}
+      // Emit as const char* cast of u8 array: (const char*)(uint8_t[]){byte1, byte2, ..., 0}
       tick_buf_t str = node->data.literal.data.string_value;
-      CHECK_OK(write_str(ctx->writer, "(uint8_t[]){"));
+      CHECK_OK(write_str(ctx->writer, "(const char*)(uint8_t[]){"));
 
       for (usz i = 0; i < str.sz; i++) {
         if (i > 0) {
@@ -339,6 +339,17 @@ static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 }
 
 static tick_err_t codegen_identifier(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+  // Check if this is an AT builtin
+  if (node->data.identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
+    // Emit runtime function name based on builtin enum
+    switch (node->data.identifier_expr.at_builtin) {
+      case TICK_AT_BUILTIN_DBG:
+        return write_str(ctx->writer, "tick_debug_log");
+      default:
+        CHECK(0, "unknown AT builtin enum value");
+    }
+  }
+
   // User-written identifiers get __u_ prefix
   // TODO: This should check if the identifier refers to an extern/pub declaration
   // For now, we'll prefix all identifiers except when they're known to be extern/pub
@@ -413,9 +424,8 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   CHECK_OK(codegen_expr(node->data.call_expr.callee, ctx));
   CHECK_OK(write_str(ctx->writer, "("));
 
-  // Reverse the argument list since parser builds it in reverse order
-  tick_ast_node_t* args_reversed = reverse_list(node->data.call_expr.args);
-  tick_ast_node_t* arg = args_reversed;
+  // Arguments are already in correct order (reversed by analysis pass)
+  tick_ast_node_t* arg = node->data.call_expr.args;
   bool first = true;
   while (arg) {
     if (!first) {
@@ -425,8 +435,6 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     CHECK_OK(codegen_expr(arg, ctx));
     arg = arg->next;
   }
-  // Restore original order in AST
-  node->data.call_expr.args = reverse_list(args_reversed);
 
   CHECK_OK(write_str(ctx->writer, ")"));
   return TICK_OK;

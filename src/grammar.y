@@ -113,7 +113,7 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 // Declare tokens in the same order as tick_tok_type_t enum
 // This ensures Lemon's generated IDs match our enum values
 %token EOF ERR.
-%token IDENT.
+%token IDENT AT_BUILTIN.
 %token UINT_LITERAL INT_LITERAL STRING_LITERAL BOOL_LITERAL NULL.
 %token BOOL I8 I16 I32 I64 ISZ U8 U16 U32 U64 USZ VOID.
 %token AND AS ASYNC BREAK CASE CATCH CONTINUE DEFAULT DEFER ELSE.
@@ -783,6 +783,14 @@ expr(E) ::= name(N). {
     PLOG("Parsing identifier");
     E = ast_alloc(parse, TICK_AST_IDENTIFIER_EXPR, N.line, N.col);
     E->data.identifier_expr.name = N.text;
+    E->data.identifier_expr.at_builtin = TICK_AT_BUILTIN_UNKNOWN;
+}
+
+expr(E) ::= AT_BUILTIN(T). {
+    PLOG("Parsing AT builtin");
+    E = ast_alloc(parse, TICK_AST_IDENTIFIER_EXPR, T.line, T.col);
+    E->data.identifier_expr.name = T.text;
+    E->data.identifier_expr.at_builtin = TICK_AT_BUILTIN_UNKNOWN;  // Will be resolved by analysis
 }
 
 expr(E) ::= IMPORT(T) string_literal(Path). {

@@ -3,5 +3,6 @@ pub let add = fn (a: i32, b: i32) i32 {
 };
 
 pub let main = fn i32 {
+  @dbg("|hello world %d|\n", 7);
   return 0;
 };

@@ -465,6 +465,7 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_EOF: return "EOF";
     case TICK_TOK_ERR: return "ERR";
     case TICK_TOK_IDENT: return "IDENT";
+    case TICK_TOK_AT_BUILTIN: return "AT_BUILTIN";
     case TICK_TOK_UINT_LITERAL: return "UINT_LITERAL";
     case TICK_TOK_INT_LITERAL: return "INT_LITERAL";
     case TICK_TOK_STRING_LITERAL: return "STRING_LITERAL";
@@ -565,6 +566,7 @@ const char* tick_tok_format(tick_tok_t* tok, char* buf, usz buf_sz) {
 
   switch (tok->type) {
     case TICK_TOK_IDENT:
+    case TICK_TOK_AT_BUILTIN:
       snprintf(buf, buf_sz, "%zu:%zu %s '%.*s'",
                tok->line, tok->col, type_name,
                (int)tok->text.sz, tok->text.buf);
@@ -643,7 +645,35 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
     case ':': make_token(lex, tok, TICK_TOK_COLON, start); return;
     case '~': make_token(lex, tok, TICK_TOK_TILDE, start); return;
     case '?': make_token(lex, tok, TICK_TOK_QUESTION, start); return;
-    case '@': make_token(lex, tok, TICK_TOK_AT, start); return;
+    case '@':
+      // Check if this is @identifier (AT_BUILTIN) or just @ (for struct init)
+      if (IS_ALPHA(peek(lex))) {
+        // Scan @identifier as AT_BUILTIN token
+        while (IS_ALNUM(peek(lex))) {
+          advance(lex);
+        }
+        usz length = lex->pos - start;
+
+        // Allocate a copy of the @identifier text
+        tick_buf_t builtin_buf = {0};
+        tick_allocator_config_t config = {0};
+
+        if (lex->alloc.realloc(lex->alloc.ctx, &builtin_buf, length + 1, &config) == TICK_OK) {
+          memcpy(builtin_buf.buf, lex->input.buf + start, length);
+          builtin_buf.buf[length] = '\0';
+          tok->type = TICK_TOK_AT_BUILTIN;
+          tok->text.buf = builtin_buf.buf;
+          tok->text.sz = length;
+          tok->line = token_line;
+          tok->col = token_col;
+        } else {
+          error_token(lex, tok, "Failed to allocate memory for builtin", token_line, token_col);
+        }
+      } else {
+        // Just @ for struct initialization
+        make_token(lex, tok, TICK_TOK_AT, start);
+      }
+      return;
     case '^':
       make_token(lex, tok, TICK_TOK_CARET, start);
       return;

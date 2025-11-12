@@ -110,6 +110,7 @@ typedef enum {
 
   // Identifier
   TICK_TOK_IDENT,
+  TICK_TOK_AT_BUILTIN,
 
   // Literals
   TICK_TOK_UINT_LITERAL,
@@ -675,6 +676,12 @@ typedef enum {
   TICK_TYPE_USER_DEFINED,  // Struct, enum, union, or other user-defined type
 } tick_builtin_type_t;
 
+// AT builtins (@ prefix functions)
+typedef enum {
+  TICK_AT_BUILTIN_UNKNOWN,  // Not yet resolved or invalid
+  TICK_AT_BUILTIN_DBG,      // @dbg - debug log
+} tick_at_builtin_t;
+
 // AST node structure
 struct tick_ast_node_s {
   tick_ast_node_kind_t kind;
@@ -804,6 +811,7 @@ struct tick_ast_node_s {
     } unwrap_panic_expr;
     struct {
       tick_buf_t name;
+      tick_at_builtin_t at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
     } identifier_expr;
     struct {
       tick_ast_node_t* call;  // Function call expression
