@@ -63,7 +63,7 @@ typedef struct {
   void* ctx;
 } tick_alloc_t;
 
-typedef struct tick_alloc_seglist_t {
+typedef struct tick_alloc_seglist_s {
   tick_alloc_t backing;
   void* segments;
   usz total_allocated;
@@ -102,6 +102,7 @@ typedef enum {
   TICK_TOK_INT_LITERAL,
   TICK_TOK_STRING_LITERAL,
   TICK_TOK_BOOL_LITERAL,
+  TICK_TOK_NULL,
 
   // Type keywords
   TICK_TOK_BOOL,
@@ -130,13 +131,12 @@ typedef enum {
   TICK_TOK_EMBED_FILE,
   TICK_TOK_ENUM,
   TICK_TOK_ERRDEFER,
-  TICK_TOK_EXPORT,
   TICK_TOK_FN,
   TICK_TOK_FOR,
   TICK_TOK_IF,
   TICK_TOK_IMPORT,
-  TICK_TOK_IN,
   TICK_TOK_LET,
+  TICK_TOK_ALIGN,
   TICK_TOK_OR,
   TICK_TOK_PACKED,
   TICK_TOK_PUB,
@@ -146,10 +146,10 @@ typedef enum {
   TICK_TOK_SUSPEND,
   TICK_TOK_SWITCH,
   TICK_TOK_TRY,
+  TICK_TOK_UNDEFINED,
   TICK_TOK_UNION,
   TICK_TOK_VAR,
   TICK_TOK_VOLATILE,
-  TICK_TOK_WHILE,
 
   // Punctuation
   TICK_TOK_LPAREN,      // (
@@ -162,8 +162,9 @@ typedef enum {
   TICK_TOK_SEMICOLON,   // ;
   TICK_TOK_COLON,       // :
   TICK_TOK_DOT,         // .
-  TICK_TOK_DOT_DOT,     // ..
   TICK_TOK_QUESTION,    // ?
+  TICK_TOK_UNDERSCORE,  // _
+  TICK_TOK_AT,          // @
 
   // Operators
   TICK_TOK_PLUS,        // +
@@ -179,18 +180,10 @@ typedef enum {
   TICK_TOK_EQ,          // =
   TICK_TOK_LT,          // <
   TICK_TOK_GT,          // >
-  TICK_TOK_PLUS_EQ,     // +=
-  TICK_TOK_MINUS_EQ,    // -=
-  TICK_TOK_STAR_EQ,     // *=
-  TICK_TOK_SLASH_EQ,    // /=
   TICK_TOK_PLUS_PIPE,   // +| (saturating add)
   TICK_TOK_MINUS_PIPE,  // -| (saturating sub)
   TICK_TOK_STAR_PIPE,   // *| (saturating mul)
   TICK_TOK_SLASH_PIPE,  // /| (saturating div)
-  TICK_TOK_PLUS_PERCENT,   // +% (modulo add)
-  TICK_TOK_MINUS_PERCENT,  // -% (modulo sub)
-  TICK_TOK_STAR_PERCENT,   // *% (modulo mul)
-  TICK_TOK_SLASH_PERCENT,  // /% (modulo div)
   TICK_TOK_BANG_EQ,     // !=
   TICK_TOK_EQ_EQ,       // ==
   TICK_TOK_LT_EQ,       // <=
@@ -229,15 +222,54 @@ typedef enum {
   TICK_AST_LITERAL,
   TICK_AST_ERROR,
   TICK_AST_MODULE,
+  TICK_AST_IMPORT,
   TICK_AST_IMPORT_DECL,
-  TICK_AST_LET_DECL,
+  TICK_AST_DECL,
   TICK_AST_FUNCTION_DECL,
+  TICK_AST_FUNCTION,
+  TICK_AST_PARAM,
+  TICK_AST_STRUCT_DECL,
+  TICK_AST_ENUM_DECL,
+  TICK_AST_UNION_DECL,
   TICK_AST_RETURN_STMT,
   TICK_AST_BLOCK_STMT,
   TICK_AST_EXPR_STMT,
+  TICK_AST_LET_STMT,
+  TICK_AST_VAR_STMT,
+  TICK_AST_ASSIGN_STMT,
+  TICK_AST_IF_STMT,
+  TICK_AST_FOR_STMT,
+  TICK_AST_SWITCH_STMT,
+  TICK_AST_BREAK_STMT,
+  TICK_AST_CONTINUE_STMT,
+  TICK_AST_DEFER_STMT,
+  TICK_AST_ERRDEFER_STMT,
+  TICK_AST_SUSPEND_STMT,
+  TICK_AST_RESUME_STMT,
+  TICK_AST_TRY_CATCH_STMT,
+  TICK_AST_FOR_SWITCH_STMT,
+  TICK_AST_CONTINUE_SWITCH_STMT,
   TICK_AST_BINARY_EXPR,
+  TICK_AST_UNARY_EXPR,
+  TICK_AST_CALL_EXPR,
+  TICK_AST_FIELD_ACCESS_EXPR,
+  TICK_AST_INDEX_EXPR,
+  TICK_AST_STRUCT_INIT_EXPR,
+  TICK_AST_ARRAY_INIT_EXPR,
+  TICK_AST_CAST_EXPR,
   TICK_AST_IDENTIFIER_EXPR,
+  TICK_AST_ASYNC_EXPR,
+  TICK_AST_EMBED_FILE_EXPR,
   TICK_AST_TYPE_NAMED,
+  TICK_AST_TYPE_ARRAY,
+  TICK_AST_TYPE_SLICE,
+  TICK_AST_TYPE_POINTER,
+  TICK_AST_TYPE_OPTIONAL,
+  TICK_AST_TYPE_ERROR_UNION,
+  TICK_AST_FIELD,
+  TICK_AST_ENUM_VALUE,
+  TICK_AST_SWITCH_CASE,
+  TICK_AST_STRUCT_INIT_FIELD,
   TICK_AST_EXPORT_STMT,
 } tick_ast_node_kind_t;
 
@@ -248,7 +280,20 @@ typedef struct {
 } tick_ast_loc_t;
 
 // Forward declare for recursive types
-typedef struct tick_ast_node_t tick_ast_node_t;
+typedef struct tick_ast_node_s tick_ast_node_t;
+
+// Qualifiers for declarations
+typedef struct {
+  bool is_var;  // false = let, true = var
+  bool is_pub;
+  bool is_volatile;
+} tick_qualifier_flags_t;
+
+// Struct qualifiers
+typedef struct {
+  bool is_packed;
+  tick_ast_node_t* alignment;  // NULL = default, expr = explicit alignment
+} tick_struct_quals_t;
 
 // Binary operators
 typedef enum {
@@ -256,17 +301,42 @@ typedef enum {
   BINOP_SUB,
   BINOP_MUL,
   BINOP_DIV,
+  BINOP_MOD,
+  BINOP_EQ,
+  BINOP_NE,
+  BINOP_LT,
+  BINOP_GT,
+  BINOP_LE,
+  BINOP_GE,
+  BINOP_AND,
+  BINOP_OR,
+  BINOP_XOR,
+  BINOP_LSHIFT,
+  BINOP_RSHIFT,
+  BINOP_LOGICAL_AND,
+  BINOP_LOGICAL_OR,
+  BINOP_SAT_ADD,
+  BINOP_SAT_SUB,
+  BINOP_SAT_MUL,
+  BINOP_SAT_DIV,
 } tick_binop_t;
 
-// Function parameter
-typedef struct {
-  tick_buf_t name;
-  tick_ast_node_t* type;
-  tick_ast_loc_t loc;
-} tick_ast_param_t;
+// Unary operators
+typedef enum {
+  UNOP_NEG,
+  UNOP_NOT,
+  UNOP_BIT_NOT,
+  UNOP_ADDR,
+  UNOP_DEREF,
+} tick_unop_t;
+
+// Assignment operators
+typedef enum {
+  ASSIGN_EQ,
+} tick_assign_op_t;
 
 // AST node structure
-struct tick_ast_node_t {
+struct tick_ast_node_s {
   tick_ast_node_kind_t kind;
   tick_ast_loc_t loc;
   tick_ast_node_t* next;  // For building linked lists during parsing
@@ -276,9 +346,13 @@ struct tick_ast_node_t {
     } literal;
     struct {
       tick_buf_t name;
-      tick_ast_node_t** decls;
-      usz decl_count;
+      tick_ast_node_t* decls;
     } module;
+    struct {
+      tick_buf_t path;
+      bool is_pub;
+      bool is_volatile;
+    } import;
     struct {
       tick_buf_t name;
       tick_buf_t path;
@@ -288,37 +362,166 @@ struct tick_ast_node_t {
       tick_buf_t name;
       tick_ast_node_t* type;
       tick_ast_node_t* init;
-      bool is_pub;
-    } let_decl;
+      tick_qualifier_flags_t quals;
+    } decl;
     struct {
       tick_buf_t name;
-      tick_ast_param_t* params;
-      usz param_count;
+      tick_ast_node_t* params;
       tick_ast_node_t* return_type;
       tick_ast_node_t* body;
       bool is_pub;
     } function_decl;
     struct {
+      tick_ast_node_t* params;
+      tick_ast_node_t* return_type;
+      tick_ast_node_t* body;
+      tick_qualifier_flags_t quals;
+    } function;
+    struct {
+      tick_buf_t name;
+      tick_ast_node_t* type;
+    } param;
+    struct {
+      tick_ast_node_t* fields;  // Linked list of TICK_AST_FIELD nodes
+      bool is_packed;
+      tick_ast_node_t* alignment;  // NULL = default, expr = explicit alignment
+    } struct_decl;
+    struct {
+      tick_ast_node_t* underlying_type;
+      tick_ast_node_t* values;  // Linked list of TICK_AST_ENUM_VALUE nodes
+    } enum_decl;
+    struct {
+      tick_ast_node_t* tag_type;  // NULL for automatic tag
+      tick_ast_node_t* fields;  // Linked list of TICK_AST_FIELD nodes
+      tick_ast_node_t* alignment;  // NULL = default, expr = explicit alignment
+    } union_decl;
+    struct {
       tick_ast_node_t* value;
     } return_stmt;
     struct {
-      tick_ast_node_t** stmts;
-      usz stmt_count;
+      tick_ast_node_t* stmts;
     } block_stmt;
     struct {
       tick_ast_node_t* expr;
     } expr_stmt;
+    struct {
+      tick_ast_node_t* lhs;
+      tick_assign_op_t op;
+      tick_ast_node_t* rhs;
+    } assign_stmt;
+    struct {
+      tick_ast_node_t* condition;
+      tick_ast_node_t* then_block;
+      tick_ast_node_t* else_block;  // Can be another if_stmt for else-if
+    } if_stmt;
+    struct {
+      tick_ast_node_t* init_stmt;  // Can be NULL
+      tick_ast_node_t* condition;  // Can be NULL (infinite loop)
+      tick_ast_node_t* step_stmt;  // Can be NULL
+      tick_ast_node_t* body;
+    } for_stmt;
+    struct {
+      tick_ast_node_t* value;
+      tick_ast_node_t* cases;  // Linked list of TICK_AST_SWITCH_CASE nodes
+    } switch_stmt;
     struct {
       tick_binop_t op;
       tick_ast_node_t* left;
       tick_ast_node_t* right;
     } binary_expr;
     struct {
+      tick_unop_t op;
+      tick_ast_node_t* operand;
+    } unary_expr;
+    struct {
+      tick_ast_node_t* callee;
+      tick_ast_node_t* args;
+    } call_expr;
+    struct {
+      tick_ast_node_t* object;
+      tick_buf_t field_name;
+      bool is_arrow;
+    } field_access_expr;
+    struct {
+      tick_ast_node_t* array;
+      tick_ast_node_t* index;
+    } index_expr;
+    struct {
+      tick_ast_node_t* type;
+      tick_ast_node_t* fields;  // Linked list of TICK_AST_STRUCT_INIT_FIELD nodes
+    } struct_init_expr;
+    struct {
+      tick_ast_node_t* elements;
+    } array_init_expr;
+    struct {
+      tick_ast_node_t* type;
+      tick_ast_node_t* expr;
+    } cast_expr;
+    struct {
       tick_buf_t name;
     } identifier_expr;
     struct {
+      tick_ast_node_t* call;  // Function call expression
+      tick_ast_node_t* frame;  // Frame expression
+    } async_expr;
+    struct {
+      tick_buf_t path;
+    } embed_file_expr;
+    struct {
+      tick_ast_node_t* stmt;
+    } defer_stmt;
+    struct {
+      tick_ast_node_t* stmt;
+    } errdefer_stmt;
+    struct {
+      tick_ast_node_t* handle;
+    } resume_stmt;
+    struct {
+      tick_ast_node_t* call;  // Function call to try
+      tick_buf_t capture_name;  // |name| capture
+      tick_ast_node_t* catch_stmt;  // Statement to execute on error
+    } try_catch_stmt;
+    struct {
+      tick_ast_node_t* value;
+      tick_ast_node_t* body;
+    } for_switch_stmt;
+    struct {
+      tick_ast_node_t* value;
+    } continue_switch_stmt;
+    struct {
       tick_buf_t name;
     } type_named;
+    struct {
+      tick_ast_node_t* element_type;
+      tick_ast_node_t* size;  // NULL for slice type
+    } type_array;
+    struct {
+      tick_ast_node_t* pointee_type;
+    } type_pointer;
+    struct {
+      tick_ast_node_t* inner_type;
+    } type_optional;
+    struct {
+      tick_ast_node_t* error_type;  // NULL for !T shorthand
+      tick_ast_node_t* value_type;
+    } type_error_union;
+    struct {
+      tick_buf_t name;
+      tick_ast_node_t* type;
+      tick_ast_node_t* alignment;  // NULL = default, expr = explicit alignment
+    } field;
+    struct {
+      tick_buf_t name;
+      tick_ast_node_t* value;  // NULL for auto-increment
+    } enum_value;
+    struct {
+      tick_ast_node_t* values;  // NULL for default case
+      tick_ast_node_t* stmts;
+    } switch_case;
+    struct {
+      tick_buf_t field_name;
+      tick_ast_node_t* value;
+    } struct_init_field;
     struct {
       tick_buf_t name;
     } export_stmt;

@@ -1,0 +1,497 @@
+# Comprehensive grammar test for Tick language
+# Tests all syntax features
+
+# =============================================================================
+# Imports and embeds
+# =============================================================================
+let std = import "std";
+let data = embed_file "data.bin";
+
+# =============================================================================
+# Type declarations
+# =============================================================================
+
+# Struct with qualifiers
+let Point = struct {
+  x: i32,
+  y: i32,
+};
+
+let PackedPoint = struct packed {
+  x: i16,
+  y: i16,
+};
+
+let AlignedStruct = struct align(16) {
+  value: u64,
+};
+
+let FieldAlignStruct = struct {
+  a: u8,
+  b: u32 align(4),
+};
+
+# Enum
+let Color = enum(u8) {
+  Red,
+  Green = 5,
+  Blue,
+};
+
+# Union
+let Value = union(Color) {
+  Red: i64,
+  Green: u64,
+  Blue: bool,
+};
+
+let AutoTagUnion = union {
+  x: i32,
+  y: u32,
+};
+
+let AlignedUnion = union align(8) {
+  int_val: i64,
+  float_val: u64,
+};
+
+let PackedAligned = struct packed align(16) {
+  value: u64,
+};
+
+# =============================================================================
+# Type expressions
+# =============================================================================
+# Basic types
+let ptr_type = fn () *i32 { return null; };
+let slice_type = fn () []u8 { return null; };
+let array_type = fn () [10]i32 { return null; };
+let inferred_array = fn () [_]i32 { return null; };
+let optional_type = fn () ?i32 { return null; };
+let error_union = fn () !i32 { return null; };
+let custom_error_union = fn () i32!u64 { return null; };
+
+# Complex nested types
+let ptr_to_array = fn () *[10]i32 { return null; };
+let array_of_ptrs = fn () [5]*i32 { return null; };
+let optional_ptr = fn () ?*i32 { return null; };
+let ptr_to_slice = fn () *[]u8 { return null; };
+let slice_of_ptrs = fn () []*i64 { return null; };
+let optional_error_union = fn () ?!i32 { return null; };
+let ptr_to_optional = fn () *?i32 { return null; };
+
+# All primitive types
+let test_i8 = fn () i8 { return 0; };
+let test_i16 = fn () i16 { return 0; };
+let test_i32 = fn () i32 { return 0; };
+let test_i64 = fn () i64 { return 0; };
+let test_isz = fn () isz { return 0; };
+let test_u8 = fn () u8 { return 0; };
+let test_u16 = fn () u16 { return 0; };
+let test_u32 = fn () u32 { return 0; };
+let test_u64 = fn () u64 { return 0; };
+let test_usz = fn () usz { return 0; };
+let test_bool = fn () bool { return true; };
+let test_void = fn () void { return; };
+
+# =============================================================================
+# Functions
+# =============================================================================
+let simple_fn = fn () {
+  return;
+};
+
+let simple_fn2 = fn {
+  return;
+};
+
+let fn_with_params = fn (a: i32, b: i32, c: i32) i32 {
+  return a + b + c;
+};
+
+pub let public_fn = fn () i32 {
+  return 42;
+};
+
+var mutable_fn = fn () {};
+
+# =============================================================================
+# Multiple qualifier combinations
+# =============================================================================
+pub var public_mutable = 100;
+pub let public_immutable = 200;
+volatile var volatile_mutable = 0;
+volatile let volatile_immutable = 1;
+pub volatile var public_volatile_mutable = 2;
+
+# =============================================================================
+# Statements
+# =============================================================================
+let test_statements = fn () {
+  # Variable declarations
+  let x = 10;
+  let y: i32 = 20;
+  var z = 30;
+  var w: i32 = 40;
+
+  # Assignment
+  z = 50;
+
+  # If statements
+  if x < 3 {
+    z = 1;
+  }
+
+  if x > 7 {
+    z = 2;
+  } else {
+    z = 3;
+  }
+
+  if x == 10 {
+    z = 4;
+  } else if x == 20 {
+    z = 5;
+  } else {
+    z = 6;
+  }
+
+  # For loops
+  for {
+    break;
+  }
+
+  for x < 100 {
+    continue;
+  }
+
+  for let i = 0; i < 10; i = i + 1 {
+    z = i;
+  }
+
+  # Switch
+  switch x {
+    case 1, 2, 3:
+      z = 100;
+    case 10:
+      z = 200;
+    default:
+      z = 300;
+  }
+
+  # Block
+  {
+    let local = 5;
+  }
+
+  # Defer and errdefer
+  defer z = 0;
+  errdefer z = -1;
+
+  # Suspend and resume
+  suspend;
+
+  return;
+};
+
+# =============================================================================
+# Expressions
+# =============================================================================
+let test_expressions = fn () i32 {
+  # Literals
+  let uint_lit = 42;
+  let int_lit = -10;
+  let str_lit = "hello";
+  let bool_lit = true;
+  let null_lit = null;
+  let undef_lit = undefined;
+
+  # Arithmetic operators
+  let add = 1 + 2;
+  let sub = 5 - 3;
+  let mul = 4 * 5;
+  let div = 10 / 2;
+  let mod = 10 % 3;
+
+  # Saturating arithmetic
+  let sat_add = 1 +| 2;
+  let sat_sub = 5 -| 3;
+  let sat_mul = 4 *| 5;
+  let sat_div = 10 /| 2;
+
+  # Comparison operators
+  let eq = 1 == 1;
+  let ne = 1 != 2;
+  let lt = 1 < 2;
+  let gt = 2 > 1;
+  let le = 1 <= 2;
+  let ge = 2 >= 1;
+
+  # Logical operators
+  let and_op = true and false;
+  let or_op = true or false;
+
+  # Bitwise operators
+  let bit_and = 5 & 3;
+  let bit_or = 5 | 3;
+  let bit_xor = 5 ^ 3;
+  let lshift = 1 << 3;
+  let rshift = 8 >> 2;
+
+  # Unary operators
+  let neg = -42;
+  let not = !true;
+  let bit_not = ~0;
+
+  # Parenthesized
+  let paren = (1 + 2) * 3;
+
+  # Array literal
+  let arr = [1, 2, 3, 4];
+
+  # Struct literal
+  let p = Point@{ x: 10, y: 20 };
+  let q = @{ x: 5, y: 15 };
+
+  # Array indexing
+  let elem = arr[0];
+
+  # Field access
+  let px = p.x;
+
+  # Type cast
+  let casted = uint_lit.(i64);
+
+  # Function call
+  let result = simple_fn();
+
+  # Trailing commas
+  let arr_trailing = [1, 2, 3,];
+  let struct_trailing = Point@{ x: 1, y: 2, };
+  let fn_call_trailing = fn_with_params(1, 2, 3,);
+
+  return 0;
+};
+
+# =============================================================================
+# Async and coroutines
+# =============================================================================
+let async_test = fn () {
+  let frame = null;
+  let handle = async simple_fn(), frame;
+  resume handle;
+  return;
+};
+
+# =============================================================================
+# Try-catch
+# =============================================================================
+let error_handling = fn () {
+  let x = 0;
+  try simple_fn() catch |err| {
+    x = 1;
+  }
+  return;
+};
+
+# =============================================================================
+# Continue-switch (computed goto)
+# =============================================================================
+let computed_goto = fn () {
+  let state = 0;
+  for switch state {
+    case 0, 1:
+      continue switch state;
+  }
+  return;
+};
+
+# =============================================================================
+# Pointers and address-of
+# =============================================================================
+let pointer_test = fn {
+  var x = 42;
+  let ptr = &x;
+  let deref = *ptr;
+  return;
+};
+
+# =============================================================================
+# Operator Precedence Tests
+# =============================================================================
+# The Tick language has MINIMAL precedence to force clarity with explicit parens.
+# This avoids subtle bugs from precedence assumptions that vary across languages.
+#
+# Precedence levels (lowest to highest):
+#   1. COMMA (,)
+#   2. EQ (=) - assignment, right-associative
+#   3. Comparison, logical, bitwise - ALL SAME LEVEL, non-associative:
+#      < > <= >= == != and or | ^ &
+#      (mixing these requires explicit parentheses!)
+#   4. Add/sub - left-associative:
+#      + - +| -|
+#   5. Multiply/divide/shifts - left-associative:
+#      * / % *| /| << >>
+#   6. QUESTION (?)
+#   7. Unary operators - right-associative:
+#      ! ~ - (unary) & (address-of) * (deref)
+#   8. Member access - left-associative (highest):
+#      . [ (
+#
+let test_precedence = fn () {
+  # 1. Arithmetic: * / % before + -
+  # Expected parse: 1 + (2 * 3) = 7
+  let mul_before_add = 1 + 2 * 3;
+  # Expected parse: (10 / 2) + 3 = 8
+  let div_before_add = 10 / 2 + 3;
+  # Expected parse: 10 - (4 % 3) = 9
+  let mod_before_sub = 10 - 4 % 3;
+  # Expected parse: (2 * 3) + (4 * 5) = 26
+  let multiple_mul = 2 * 3 + 4 * 5;
+
+  # 2. Shifts: same precedence as */ (higher than +/-, left-associative)
+  # Expected parse: (1 << 2) + 1 = 5 (<< binds tighter than +)
+  let shift_with_add = 1 << 2 + 1;
+  # Expected parse: (8 >> 1) + 1 = 5 (>> binds tighter than +)
+  let shift_before_add = 8 >> 1 + 1;
+  # Expected parse: (2 * 1) << 3 = 16 (left-to-right, same precedence)
+  let mul_with_shift = 2 * 1 << 3;
+
+  # 3. Saturating arithmetic: same precedence as regular arithmetic
+  # Expected parse: 1 +| (2 *| 3)
+  let sat_mul_before_add = 1 +| 2 *| 3;
+  # Expected parse: (10 /| 2) +| 3
+  let sat_div_before_add = 10 /| 2 +| 3;
+
+  # 4. Comparison operators: lower than arithmetic, non-associative
+  # Arithmetic binds tighter than comparison
+  # Expected parse: (1 + 2) < (3 + 4)
+  let cmp_with_arith = 1 + 2 < 3 + 4;
+  # Expected parse: (2 * 3) == (1 + 5)
+  let eq_with_arith = 2 * 3 == 1 + 5;
+  # Expected parse: ((1 << 2) > (8 >> 1))
+  let cmp_with_shift = 1 << 2 > 8 >> 1;
+
+  # 5. Bitwise operators: same level as comparison (non-associative)
+  # Bitwise lower than arithmetic, requires parens when mixed with comparison
+  # Expected parse: (1 & 2) == 0 - parens required
+  let bitwise_and_cmp = (1 & 2) == 0;
+  # Expected parse: 1 & (2 + 3) - arithmetic binds tighter
+  let bitwise_with_arith = 1 & 2 + 3;
+  # Expected parse: (1 << 2) & (3 << 4) - shifts higher than bitwise
+  let bitwise_with_shift = 1 << 2 & 3 << 4;
+
+  # 6. Logical operators: require explicit parens when mixed with comparison
+  # Comparison and logical are at same non-associative level - need parens
+  let logical_and_cmp = (1 < 2) and (3 < 4);
+  let logical_or_cmp = (1 == 2) or (3 != 4);
+  # AND and OR are also same level - need parens when mixing
+  let and_before_or = (true and false) or true;
+
+  # 7. Unary operators: high precedence (right-associative)
+  # Expected parse: (-2) * 3 = -6
+  let neg_before_mul = -2 * 3;
+  # Expected parse: -(2 + 3) = -5
+  let neg_after_add = -(2 + 3);
+  # Expected parse: (!true) == false
+  let not_before_cmp = !true == false;
+  # Expected parse: ~(0xFF) & 0x0F
+  let bitnot_with_bitwise = (~0) & 15;
+
+  # 8. Address-of and dereference: unary operators
+  var y = 42;
+  # Expected parse: (&y) (address of y, not y + something)
+  let addr = &y;
+  # Expected parse: *ptr (dereference ptr, not ptr * something)
+  let deref_expr = *addr;
+  # Expected parse: (*addr) + 1
+  let deref_then_add = *addr + 1;
+
+  # 9. Member access: highest precedence (left-associative)
+  let arr = [1, 2, 3];
+  # Expected parse: (arr[0]) + 1
+  let index_before_add = arr[0] + 1;
+  # Expected parse: (arr[1]) * 2
+  let index_before_mul = arr[1] * 2;
+
+  let p = Point@{ x: 10, y: 20 };
+  # Expected parse: (p.x) + (p.y)
+  let field_before_add = p.x + p.y;
+  # Expected parse: (p.x) * 2
+  let field_before_mul = p.x * 2;
+
+  # 10. Function calls: highest precedence
+  # Expected parse: (simple_fn()) (call happens first)
+  let call_expr = simple_fn();
+
+  # 11. Type cast: member access level
+  # Expected parse: (42.(i64)) + 1
+  let cast_before_add = 42.(i64) + 1;
+  # Expected parse: ((1 + 2).(u64))
+  let cast_after_add = (1 + 2).(u64);
+
+  # 12. Assignment: lowest precedence (right-associative)
+  var a = 0;
+  var b = 0;
+  var c = 0;
+  # Expected parse: x = (y + 1)
+  a = b + 1;
+  # Expected parse: x = (y * 2)
+  b = c * 2;
+
+  # 13. Complex mixed expressions
+  # Expected parse: ((2 * 3) + (4 * 5)) < ((1 << 3) + 2)
+  # Note: 2*3=6, 4*5=20, 6+20=26, 1<<3=8, 8+2=10, 26<10=false
+  let complex1 = 2 * 3 + 4 * 5 < 1 << 3 + 2;
+  # Expected parse: ((-x) * 2) + (y / 3)
+  let complex2 = -a * 2 + b / 3;
+  # Expected parse: ((arr[0]) * 2) + ((p.x) / 4)
+  let complex3 = arr[0] * 2 + p.x / 4;
+
+  # 14. Parentheses override precedence
+  # Expected parse: (1 + 2) * 3 = 9 (without parens: 1 + (2 * 3) = 7)
+  let paren_override1 = (1 + 2) * 3;
+  # Expected parse: 1 << (2 * 3) = 64 (without parens: (1 << 2) * 3 = 12)
+  let paren_override2 = 1 << (2 * 3);
+  # Expected parse: (a + b) * (c - y)
+  let paren_override3 = (a + b) * (c - y);
+
+  return 0;
+};
+
+# =============================================================================
+# Edge cases and additional coverage
+# =============================================================================
+
+# Function with trailing comma in params
+let trailing_param_fn = fn (a: i32, b: i32,) i32 {
+  return a + b;
+};
+
+# Empty struct and empty calls
+let empty_struct = struct {};
+let empty_anon_struct = @{};
+
+# Enum and union with trailing commas
+let TrailingEnum = enum(u8) {
+  A,
+  B,
+  C,
+};
+
+let TrailingUnion = union {
+  a: i32,
+  b: u64,
+};
+
+# Switch with trailing comma in case values
+let trailing_switch_test = fn () {
+  let x = 5;
+  switch x {
+    case 1, 2, 3,:
+      x = 10;
+    default:
+      x = 20;
+  }
+  return;
+};

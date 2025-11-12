@@ -1,6 +1,9 @@
 // Lemon grammar for Tick language
 // LALR(1) parser specification
 
+// =============================================================================
+// C code
+// =============================================================================
 %include {
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +16,7 @@ static void parse_error(tick_parse_t* parse, const char* msg);
 
 // Parser-specific logging macro
 #define PLOG(fmt, ...) DLOG("[parse] " fmt, ##__VA_ARGS__)
+
 
 // Helper function to allocate AST node
 static tick_ast_node_t* ast_alloc(tick_parse_t* parse, tick_ast_node_kind_t kind, usz line, usz col) {
@@ -67,8 +71,41 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
     E->data.binary_expr.left = L; \
     E->data.binary_expr.right = R; \
 } while (0)
+
+#define UNOP_RULE(E, T, Operand, op_name, unop_enum) do { \
+    PLOG("Parsing " op_name); \
+    E = ast_alloc(parse, TICK_AST_UNARY_EXPR, T->line, T->col); \
+    E->data.unary_expr.op = unop_enum; \
+    E->data.unary_expr.operand = Operand; \
+} while (0)
+
+#define ASSIGN_RULE(S, L, T, R, assign_enum) do { \
+    S = ast_alloc(parse, TICK_AST_ASSIGN_STMT, T->line, T->col); \
+    S->data.assign_stmt.lhs = L; \
+    S->data.assign_stmt.op = assign_enum; \
+    S->data.assign_stmt.rhs = R; \
+} while (0)
 }
 
+// Syntax error handler
+%syntax_error {
+    // TOKEN is the current lookahead token that caused the error
+    char tok_buf[256];
+    const char* tok_str = tick_tok_format(TOKEN, tok_buf, sizeof(tok_buf));
+
+    char err_msg[512];
+    snprintf(err_msg, sizeof(err_msg), "Syntax error at %s", tok_str);
+    parse_error(parse, err_msg);
+}
+
+// Parse failure handler
+%parse_failure {
+    parse_error(parse, "Parse failed - too many syntax errors");
+}
+
+// =============================================================================
+// Lemon directives
+// =============================================================================
 %token_prefix TICK_TOK_
 %token_type { tick_tok_t* }
 %extra_argument { tick_parse_t* parse }
@@ -77,159 +114,180 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
 // This ensures Lemon's generated IDs match our enum values
 %token EOF ERR.
 %token IDENT.
-%token UINT_LITERAL INT_LITERAL STRING_LITERAL BOOL_LITERAL.
+%token UINT_LITERAL INT_LITERAL STRING_LITERAL BOOL_LITERAL NULL.
 %token BOOL I8 I16 I32 I64 ISZ U8 U16 U32 U64 USZ VOID.
 %token AND ASYNC BREAK CASE CATCH CONTINUE DEFAULT DEFER ELSE.
-%token EMBED_FILE ENUM ERRDEFER EXPORT FN FOR IF IMPORT IN LET.
-%token OR PACKED PUB RESUME RETURN STRUCT SUSPEND SWITCH TRY.
-%token UNION VAR VOLATILE WHILE.
+%token EMBED_FILE ENUM ERRDEFER FN FOR IF IMPORT LET ALIGN.
+%token OR PACKED PUB RESUME RETURN STRUCT SUSPEND SWITCH TRY UNDEFINED.
+%token UNION VAR VOLATILE.
 %token LPAREN RPAREN LBRACE RBRACE LBRACKET RBRACKET.
-%token COMMA SEMICOLON COLON DOT DOT_DOT QUESTION.
+%token COMMA SEMICOLON COLON DOT QUESTION UNDERSCORE AT.
 %token PLUS MINUS STAR SLASH PERCENT AMPERSAND PIPE CARET TILDE BANG.
-%token EQ LT GT PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ.
+%token EQ LT GT.
 %token PLUS_PIPE MINUS_PIPE STAR_PIPE SLASH_PIPE.
-%token PLUS_PERCENT MINUS_PERCENT STAR_PERCENT SLASH_PERCENT.
 %token BANG_EQ EQ_EQ LT_EQ GT_EQ LSHIFT RSHIFT.
 %token COMMENT.
+
+// Precedence-only tokens (not real tokens, just for precedence declarations)
+%token PREC_UNARY_MINUS PREC_UNARY_AMPERSAND PREC_UNARY_STAR.
 
 // Default type for non-terminals
 %default_type { tick_ast_node_t* }
 
-// Start symbol
-%start_symbol module
-
-// Precedence (lowest to highest)
-%left COMMA.
-%left PLUS MINUS.
-%left STAR SLASH.
-
-// Syntax error handler
-%syntax_error {
-    parse_error(parse, "Syntax error");
-}
-
-// Parse failure handler
-%parse_failure {
-    parse_error(parse, "Parse failed");
-}
-
 // =============================================================================
 // RULES
 // =============================================================================
+%start_symbol module
 
 // Module: list of declarations
 module(M) ::= decl_list(D). {
-    PLOG("Parsing module with declarations");
+    PLOG("Parsing module");
     M = ast_alloc(parse, TICK_AST_MODULE, 1, 1);
     M->data.module.name = (tick_buf_t){.buf = (u8*)"main", .sz = 4};
-    M->data.module.decls = NULL;  // Will be converted from linked list later
-    M->data.module.decl_count = 0;
-    M->next = D;  // Store linked list in next pointer temporarily
-    parse->root.root = M;
-}
-
-module(M) ::= . {
-    PLOG("Parsing empty module");
-    M = ast_alloc(parse, TICK_AST_MODULE, 1, 1);
-    M->data.module.name = (tick_buf_t){.buf = (u8*)"main", .sz = 4};
-    M->data.module.decls = NULL;
-    M->data.module.decl_count = 0;
+    M->data.module.decls = D;
     parse->root.root = M;
 }
 
 // Declaration list - builds linked list
-decl_list(L) ::= decl(D). {
-    PLOG("Starting decl list");
-    L = D;
-    L->next = NULL;
+decl_list(L) ::= . { L = NULL; }
+decl_list(L) ::= decl_list(Prev) decl(D). { PLOG("Adding to decl list"); L = D; L->next = Prev; }
+
+// Declaration qualifiers (can appear in any order)
+%type decl_qualifiers { tick_qualifier_flags_t }
+decl_qualifiers(Q) ::= . { Q = (tick_qualifier_flags_t){0}; }
+decl_qualifiers(Q) ::= decl_qualifiers(Prev) LET. { Q = Prev; Q.is_var = false; }
+decl_qualifiers(Q) ::= decl_qualifiers(Prev) VAR. { Q = Prev; Q.is_var = true; }
+decl_qualifiers(Q) ::= decl_qualifiers(Prev) PUB. { Q = Prev; Q.is_pub = true; }
+decl_qualifiers(Q) ::= decl_qualifiers(Prev) VOLATILE. { Q = Prev; Q.is_volatile = true; }
+
+decl(D) ::= decl_qualifiers(Q) IDENT(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
+    PLOG("Parsing declaration with type and initializer");
+    D = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    D->data.decl.name = Name->text;
+    D->data.decl.type = Ty;
+    D->data.decl.init = E;
+    D->data.decl.quals = Q;
 }
 
-decl_list(L) ::= decl_list(Prev) decl(D). {
-    PLOG("Adding to decl list");
-    L = D;
-    L->next = Prev;
+decl(D) ::= decl_qualifiers(Q) IDENT(Name) EQ expr(E) SEMICOLON. {
+    PLOG("Parsing declaration with type inference");
+    D = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    D->data.decl.name = Name->text;
+    D->data.decl.type = NULL;
+    D->data.decl.init = E;
+    D->data.decl.quals = Q;
 }
 
-// Declarations
-decl(D) ::= import_decl(I). { D = I; }
-decl(D) ::= let_decl(L). { D = L; }
-decl(D) ::= export_stmt(E). { D = E; }
-
-// Import declaration: let std = import "std";
-import_decl(I) ::= LET(T) IDENT(Name) EQ IMPORT STRING_LITERAL(Path) SEMICOLON. {
-    PLOG("Parsing import declaration");
-    I = ast_alloc(parse, TICK_AST_IMPORT_DECL, T->line, T->col);
-    I->data.import_decl.name = Name->text;
-    I->data.import_decl.path = Path->text;
-    I->data.import_decl.is_pub = false;
-}
-
-// Let declaration: let name = value;
-let_decl(D) ::= LET(T) IDENT(Name) EQ expr(E) SEMICOLON. {
-    PLOG("Parsing let declaration");
-    D = ast_alloc(parse, TICK_AST_LET_DECL, T->line, T->col);
-    D->data.let_decl.name = Name->text;
-    D->data.let_decl.type = NULL;
-    D->data.let_decl.init = E;
-    D->data.let_decl.is_pub = false;
-}
-
-// Let declaration with type: let name: type = value;
-let_decl(D) ::= LET(T) IDENT(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
-    PLOG("Parsing let declaration with type");
-    D = ast_alloc(parse, TICK_AST_LET_DECL, T->line, T->col);
-    D->data.let_decl.name = Name->text;
-    D->data.let_decl.type = Ty;
-    D->data.let_decl.init = E;
-    D->data.let_decl.is_pub = false;
-}
+// Optional return type
+return_type(R) ::= . { R = NULL; }  // NULL means void
+return_type(R) ::= type(T). { R = T; }
 
 // Function expression: fn (params) return_type { body }
-expr(E) ::= FN(T) LPAREN param_list(P) RPAREN type(Ret) block(B). {
-    PLOG("Parsing function with params");
-    E = ast_alloc(parse, TICK_AST_FUNCTION_DECL, T->line, T->col);
-    E->data.function_decl.name = (tick_buf_t){0};
-    E->data.function_decl.params = NULL;  // Will convert from linked list later
-    E->data.function_decl.param_count = 0;
-    E->data.function_decl.return_type = Ret;
-    E->data.function_decl.body = B;
-    E->data.function_decl.is_pub = false;
-    // Store param list temporarily in the function's next pointer
-    E->next = P;
+expr(E) ::= FN(T) fn_params(P) return_type(Ret) block(B). {
+    PLOG("Parsing function");
+    E = ast_alloc(parse, TICK_AST_FUNCTION, T->line, T->col);
+    E->data.function.params = P;
+    E->data.function.return_type = Ret;
+    E->data.function.body = B;
+    E->data.function.quals.is_var = false;
+    E->data.function.quals.is_pub = false;
+    E->data.function.quals.is_volatile = false;
 }
 
-expr(E) ::= FN(T) LPAREN RPAREN type(Ret) block(B). {
-    PLOG("Parsing function with no params");
-    E = ast_alloc(parse, TICK_AST_FUNCTION_DECL, T->line, T->col);
-    E->data.function_decl.name = (tick_buf_t){0};
-    E->data.function_decl.params = NULL;
-    E->data.function_decl.param_count = 0;
-    E->data.function_decl.return_type = Ret;
-    E->data.function_decl.body = B;
-    E->data.function_decl.is_pub = false;
+fn_params(L) ::= . { L = NULL; }
+fn_params(L) ::= LPAREN RPAREN. { L = NULL; }
+fn_params(L) ::= LPAREN param_list(R) RPAREN. { L = R; }
+
+// Struct qualifiers
+%type struct_quals { tick_struct_quals_t }
+struct_quals(Q) ::= . { Q.is_packed = false; Q.alignment = NULL; }
+struct_quals(Q) ::= PACKED. { Q.is_packed = true; Q.alignment = NULL; }
+struct_quals(Q) ::= ALIGN LPAREN expr(E) RPAREN. { Q.is_packed = false; Q.alignment = E; }
+struct_quals(Q) ::= PACKED ALIGN LPAREN expr(E) RPAREN. { Q.is_packed = true; Q.alignment = E; }
+struct_quals(Q) ::= ALIGN LPAREN expr(E) RPAREN PACKED. { Q.is_packed = true; Q.alignment = E; }
+
+// Struct definition
+expr(E) ::= STRUCT(T) struct_quals(Q) LBRACE field_list(F) RBRACE. {
+    PLOG("Parsing struct");
+    E = ast_alloc(parse, TICK_AST_STRUCT_DECL, T->line, T->col);
+    E->data.struct_decl.fields = F;
+    E->data.struct_decl.is_packed = Q.is_packed;
+    E->data.struct_decl.alignment = Q.alignment;
+}
+
+// Field list - builds linked list
+field_list(L) ::= . { L = NULL; }
+field_list(L) ::= field(F). { L = F; L->next = NULL; }
+field_list(L) ::= field_list(Prev) COMMA field(F). { L = F; L->next = Prev; }
+field_list(L) ::= field_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+
+// Field
+field(F) ::= IDENT(Name) COLON type(T) align_spec(Align). {
+    PLOG("Parsing field");
+    F = ast_alloc(parse, TICK_AST_FIELD, Name->line, Name->col);
+    F->data.field.name = Name->text;
+    F->data.field.type = T;
+    F->data.field.alignment = Align;
+}
+
+// Enum definition
+expr(E) ::= ENUM(T) LPAREN type(Ty) RPAREN LBRACE enum_value_list(V) RBRACE. {
+    PLOG("Parsing enum");
+    E = ast_alloc(parse, TICK_AST_ENUM_DECL, T->line, T->col);
+    E->data.enum_decl.underlying_type = Ty; E->data.enum_decl.values = V;
+}
+
+// Enum value list - builds linked list
+enum_value_list(L) ::= . { L = NULL; }
+enum_value_list(L) ::= enum_value(V). { L = V; L->next = NULL; }
+enum_value_list(L) ::= enum_value_list(Prev) COMMA enum_value(V). { L = V; L->next = Prev; }
+enum_value_list(L) ::= enum_value_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+
+// Enum value
+enum_value(V) ::= IDENT(Name). {
+    PLOG("Parsing enum value without explicit value");
+    V = ast_alloc(parse, TICK_AST_ENUM_VALUE, Name->line, Name->col);
+    V->data.enum_value.name = Name->text;
+    V->data.enum_value.value = NULL;  // Auto-increment
+}
+
+enum_value(V) ::= IDENT(Name) EQ expr(E). {
+    PLOG("Parsing enum value with explicit value");
+    V = ast_alloc(parse, TICK_AST_ENUM_VALUE, Name->line, Name->col);
+    V->data.enum_value.name = Name->text;
+    V->data.enum_value.value = E;
+}
+
+// Optional tag type for union
+tag_type(T) ::= . { T = NULL; }  // Automatic tag
+tag_type(T) ::= LPAREN type(Ty) RPAREN. { T = Ty; }
+
+// Optional alignment specifier
+align_spec(A) ::= . { A = NULL; }
+align_spec(A) ::= ALIGN LPAREN expr(E) RPAREN. { A = E; }
+
+// Union definition
+expr(E) ::= UNION(T) tag_type(Tag) align_spec(Align) LBRACE field_list(F) RBRACE. {
+    PLOG("Parsing union");
+    E = ast_alloc(parse, TICK_AST_UNION_DECL, T->line, T->col);
+    E->data.union_decl.tag_type = Tag;
+    E->data.union_decl.fields = F;
+    E->data.union_decl.alignment = Align;
 }
 
 // Parameter list - builds linked list using next pointer
-%type param_list { tick_ast_node_t* }
-param_list(L) ::= param(P). {
-    L = P;
-    L->next = NULL;
-}
+param_list(L) ::= param(P). { L = P; L->next = NULL; }
+param_list(L) ::= param_list(Prev) COMMA param(P). { L = P; L->next = Prev; }
+param_list(L) ::= param_list(Prev) COMMA. { L = Prev; }  // Trailing comma
 
-param_list(L) ::= param_list(Prev) COMMA param(P). {
-    L = P;
-    L->next = Prev;
-}
-
-// Parameter - store as a special AST node type for now
+// Parameter
 param(P) ::= IDENT(Name) COLON type(T). {
-    P = ast_alloc(parse, TICK_AST_LET_DECL, Name->line, Name->col);  // Temporary type
-    P->data.let_decl.name = Name->text;
-    P->data.let_decl.type = T;
-    P->data.let_decl.init = NULL;
+    P = ast_alloc(parse, TICK_AST_PARAM, Name->line, Name->col);
+    P->data.param.name = Name->text; P->data.param.type = T;
 }
 
 // Types
+// Named types (identifiers and primitives)
 type(T) ::= IDENT(Name). { TYPE_RULE(T, Name); }
 type(T) ::= USZ(Name).   { TYPE_RULE(T, Name); }
 type(T) ::= U64(Name).   { TYPE_RULE(T, Name); }
@@ -241,22 +299,114 @@ type(T) ::= I64(Name).   { TYPE_RULE(T, Name); }
 type(T) ::= I32(Name).   { TYPE_RULE(T, Name); }
 type(T) ::= I16(Name).   { TYPE_RULE(T, Name); }
 type(T) ::= I8(Name).    { TYPE_RULE(T, Name); }
+type(T) ::= VOID(Name).  { TYPE_RULE(T, Name); }
+type(T) ::= BOOL(Name).  { TYPE_RULE(T, Name); }
 
-// Statements
-stmt(S) ::= return_stmt(R). { S = R; }
-stmt(S) ::= expr_stmt(E). { S = E; }
-
-// Return statement
-return_stmt(S) ::= RETURN(T) expr(E) SEMICOLON. {
-    PLOG("Parsing return statement");
-    S = ast_alloc(parse, TICK_AST_RETURN_STMT, T->line, T->col);
-    S->data.return_stmt.value = E;
+// Array length (explicit size or inferred with _)
+array_len(L) ::= expr(E). { L = E; }
+array_len(L) ::= UNDERSCORE(T). {
+    PLOG("Parsing inferred array length");
+    L = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
+    L->data.literal.value = 0;  // Special marker for inferred
 }
 
-return_stmt(S) ::= RETURN(T) SEMICOLON. {
-    PLOG("Parsing empty return statement");
+// Array type: [10]i32 or [_]i32
+type(T) ::= LBRACKET(Tok) array_len(Size) RBRACKET type(Elem). {
+    PLOG("Parsing array type");
+    T = ast_alloc(parse, TICK_AST_TYPE_ARRAY, Tok->line, Tok->col);
+    T->data.type_array.element_type = Elem; T->data.type_array.size = Size;
+}
+
+// Slice type: []i32
+type(T) ::= LBRACKET(Tok) RBRACKET type(Elem). {
+    PLOG("Parsing slice type");
+    T = ast_alloc(parse, TICK_AST_TYPE_SLICE, Tok->line, Tok->col);
+    T->data.type_array.element_type = Elem; T->data.type_array.size = NULL;
+}
+
+// Pointer type: *i32
+type(T) ::= STAR(Tok) type(Pointee). {
+    PLOG("Parsing pointer type");
+    T = ast_alloc(parse, TICK_AST_TYPE_POINTER, Tok->line, Tok->col);
+    T->data.type_pointer.pointee_type = Pointee;
+}
+
+// Optional type: ?i32
+type(T) ::= QUESTION(Tok) type(Inner). {
+    PLOG("Parsing optional type");
+    T = ast_alloc(parse, TICK_AST_TYPE_OPTIONAL, Tok->line, Tok->col);
+    T->data.type_optional.inner_type = Inner;
+}
+
+// Error union type: A!B (error type A OR value type B)
+type(T) ::= type(ErrorType) BANG(Tok) type(ValueType). {
+    PLOG("Parsing error union type");
+    T = ast_alloc(parse, TICK_AST_TYPE_ERROR_UNION, Tok->line, Tok->col);
+    T->data.type_error_union.error_type = ErrorType;
+    T->data.type_error_union.value_type = ValueType;
+}
+
+// Error union type shorthand: !T (default error type)
+type(T) ::= BANG(Tok) type(ValueType). {
+    PLOG("Parsing error union type with default error");
+    T = ast_alloc(parse, TICK_AST_TYPE_ERROR_UNION, Tok->line, Tok->col);
+    T->data.type_error_union.error_type = NULL;  // NULL indicates default/generic error
+    T->data.type_error_union.value_type = ValueType;
+}
+
+// Statements
+// Note: For local declarations, we require LET or VAR at the start to avoid ambiguity with assignments
+stmt(S) ::= LET IDENT(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
+    PLOG("Parsing local let declaration with type");
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = Ty;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = false};
+}
+stmt(S) ::= LET IDENT(Name) EQ expr(E) SEMICOLON. {
+    PLOG("Parsing local let declaration with type inference");
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = NULL;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = false};
+}
+stmt(S) ::= VAR IDENT(Name) COLON type(Ty) EQ expr(E) SEMICOLON. {
+    PLOG("Parsing local var declaration with type");
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = Ty;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = true};
+}
+stmt(S) ::= VAR IDENT(Name) EQ expr(E) SEMICOLON. {
+    PLOG("Parsing local var declaration with type inference");
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = NULL;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = true};
+}
+stmt(S) ::= assign_stmt(A). { S = A; }
+stmt(S) ::= return_stmt(R). { S = R; }
+stmt(S) ::= if_stmt(I). { S = I; }
+stmt(S) ::= for_stmt(F). { S = F; }
+stmt(S) ::= switch_stmt(Sw). { S = Sw; }
+stmt(S) ::= break_stmt(B). { S = B; }
+stmt(S) ::= continue_stmt(C). { S = C; }
+stmt(S) ::= block(Bl). { S = Bl; }
+stmt(S) ::= expr_stmt(E). { S = E; }
+
+// Optional return value
+return_value(V) ::= . { V = NULL; }
+return_value(V) ::= expr(E). { V = E; }
+
+// Return statement
+return_stmt(S) ::= RETURN(T) return_value(V) SEMICOLON. {
+    PLOG("Parsing return statement");
     S = ast_alloc(parse, TICK_AST_RETURN_STMT, T->line, T->col);
-    S->data.return_stmt.value = NULL;
+    S->data.return_stmt.value = V;
 }
 
 // Expression statement
@@ -265,43 +415,285 @@ expr_stmt(S) ::= expr(E) SEMICOLON. {
     S->data.expr_stmt.expr = E;
 }
 
-// Block
-block(B) ::= LBRACE(T) stmt_list(S) RBRACE. {
-    PLOG("Parsing block with statements");
-    B = ast_alloc(parse, TICK_AST_BLOCK_STMT, T->line, T->col);
-    B->data.block_stmt.stmts = NULL;  // Will convert from linked list later
-    B->data.block_stmt.stmt_count = 0;
-    B->next = S;  // Store linked list temporarily
+// Assignment statements
+assign_stmt(S) ::= expr(L) EQ(T) expr(R) SEMICOLON. { ASSIGN_RULE(S, L, T, R, ASSIGN_EQ); }
+
+// If statements
+if_stmt(S) ::= IF(T) expr(Cond) block(Then). {
+    PLOG("Parsing if statement");
+    S = ast_alloc(parse, TICK_AST_IF_STMT, T->line, T->col);
+    S->data.if_stmt.condition = Cond;
+    S->data.if_stmt.then_block = Then;
+    S->data.if_stmt.else_block = NULL;
 }
 
-block(B) ::= LBRACE(T) RBRACE. {
-    PLOG("Parsing empty block");
+if_stmt(S) ::= IF(T) expr(Cond) block(Then) ELSE block(Else). {
+    PLOG("Parsing if-else statement");
+    S = ast_alloc(parse, TICK_AST_IF_STMT, T->line, T->col);
+    S->data.if_stmt.condition = Cond;
+    S->data.if_stmt.then_block = Then;
+    S->data.if_stmt.else_block = Else;
+}
+
+if_stmt(S) ::= IF(T) expr(Cond) block(Then) ELSE if_stmt(Elif). {
+    PLOG("Parsing if-else if statement");
+    S = ast_alloc(parse, TICK_AST_IF_STMT, T->line, T->col);
+    S->data.if_stmt.condition = Cond;
+    S->data.if_stmt.then_block = Then;
+    S->data.if_stmt.else_block = Elif;
+}
+
+// For loops (Go-style)
+// Simple statements (without trailing semicolon, for use in for loop headers)
+simple_stmt(S) ::= . { S = NULL; }
+
+simple_stmt(S) ::= expr(L) EQ(T) expr(R). {
+    ASSIGN_RULE(S, L, T, R, ASSIGN_EQ);
+}
+
+simple_stmt(S) ::= LET IDENT(Name) COLON type(Ty) EQ expr(E). {
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = Ty;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = false};
+}
+
+simple_stmt(S) ::= LET IDENT(Name) EQ expr(E). {
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = NULL;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = false};
+}
+
+simple_stmt(S) ::= VAR IDENT(Name) COLON type(Ty) EQ expr(E). {
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = Ty;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = true};
+}
+
+simple_stmt(S) ::= VAR IDENT(Name) EQ expr(E). {
+    S = ast_alloc(parse, TICK_AST_DECL, Name->line, Name->col);
+    S->data.decl.name = Name->text;
+    S->data.decl.type = NULL;
+    S->data.decl.init = E;
+    S->data.decl.quals = (tick_qualifier_flags_t){.is_var = true};
+}
+
+simple_stmt(S) ::= expr(E). {
+    S = ast_alloc(parse, TICK_AST_EXPR_STMT, E->loc.line, E->loc.col);
+    S->data.expr_stmt.expr = E;
+}
+
+// For loop: infinite, while, or C-style
+for_stmt(S) ::= FOR(T) block(Body). {
+    PLOG("Parsing infinite for loop");
+    S = ast_alloc(parse, TICK_AST_FOR_STMT, T->line, T->col);
+    S->data.for_stmt.init_stmt = NULL;
+    S->data.for_stmt.condition = NULL;
+    S->data.for_stmt.step_stmt = NULL;
+    S->data.for_stmt.body = Body;
+}
+
+for_stmt(S) ::= FOR(T) expr(Cond) block(Body). {
+    PLOG("Parsing while-style for loop");
+    S = ast_alloc(parse, TICK_AST_FOR_STMT, T->line, T->col);
+    S->data.for_stmt.init_stmt = NULL;
+    S->data.for_stmt.condition = Cond;
+    S->data.for_stmt.step_stmt = NULL;
+    S->data.for_stmt.body = Body;
+}
+
+for_stmt(S) ::= FOR(T) simple_stmt(Init) SEMICOLON expr(Cond) SEMICOLON simple_stmt(Step) block(Body). {
+    PLOG("Parsing C-style for loop");
+    S = ast_alloc(parse, TICK_AST_FOR_STMT, T->line, T->col);
+    S->data.for_stmt.init_stmt = Init;
+    S->data.for_stmt.condition = Cond;
+    S->data.for_stmt.step_stmt = Step;
+    S->data.for_stmt.body = Body;
+}
+
+// For-switch statement (computed goto pattern)
+stmt(S) ::= FOR(T) SWITCH expr(Val) LBRACE case_list(Cases) RBRACE. {
+    PLOG("Parsing for-switch statement");
+    S = ast_alloc(parse, TICK_AST_FOR_SWITCH_STMT, T->line, T->col);
+    S->data.for_switch_stmt.value = Val;
+    S->data.for_switch_stmt.body = Cases;
+}
+
+// Switch statement
+switch_stmt(S) ::= SWITCH(T) expr(Val) LBRACE case_list(Cases) RBRACE. {
+    PLOG("Parsing switch statement");
+    S = ast_alloc(parse, TICK_AST_SWITCH_STMT, T->line, T->col);
+    S->data.switch_stmt.value = Val; S->data.switch_stmt.cases = Cases;
+}
+
+// Case list - builds linked list
+case_list(L) ::= . { L = NULL; }
+case_list(L) ::= case_list(Prev) case_clause(C). { L = C; L->next = Prev; }
+
+// Case clause
+case_clause(C) ::= CASE(T) case_value_list(V) COLON stmt_list(S). {
+    PLOG("Parsing case clause");
+    C = ast_alloc(parse, TICK_AST_SWITCH_CASE, T->line, T->col);
+    C->data.switch_case.values = V;
+    C->data.switch_case.stmts = S;
+}
+
+case_clause(C) ::= DEFAULT(T) COLON stmt_list(S). {
+    PLOG("Parsing default clause");
+    C = ast_alloc(parse, TICK_AST_SWITCH_CASE, T->line, T->col);
+    C->data.switch_case.values = NULL;  // NULL for default case
+    C->data.switch_case.stmts = S;
+}
+
+// Case value list - builds linked list
+case_value_list(L) ::= . { L = NULL; }
+case_value_list(L) ::= expr(E). { L = E; L->next = NULL; }
+case_value_list(L) ::= case_value_list(Prev) COMMA expr(E). { L = E; L->next = Prev; }
+case_value_list(L) ::= case_value_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+
+// Break and continue statements
+break_stmt(S) ::= BREAK(T) SEMICOLON. {
+    PLOG("Parsing break statement");
+    S = ast_alloc(parse, TICK_AST_BREAK_STMT, T->line, T->col);
+}
+continue_stmt(S) ::= CONTINUE(T) SEMICOLON. {
+    PLOG("Parsing continue statement");
+    S = ast_alloc(parse, TICK_AST_CONTINUE_STMT, T->line, T->col);
+}
+
+// Continue-switch statement (computed goto pattern)
+stmt(S) ::= CONTINUE(T) SWITCH expr(Val) SEMICOLON. {
+    PLOG("Parsing continue-switch statement");
+    S = ast_alloc(parse, TICK_AST_CONTINUE_SWITCH_STMT, T->line, T->col);
+    S->data.continue_switch_stmt.value = Val;
+}
+
+// Coroutine statements
+stmt(S) ::= SUSPEND(T) SEMICOLON. {
+    PLOG("Parsing suspend statement");
+    S = ast_alloc(parse, TICK_AST_SUSPEND_STMT, T->line, T->col);
+}
+
+stmt(S) ::= RESUME(T) expr(Handle) SEMICOLON. {
+    PLOG("Parsing resume statement");
+    S = ast_alloc(parse, TICK_AST_RESUME_STMT, T->line, T->col);
+    S->data.resume_stmt.handle = Handle;
+}
+
+// Capture rule for |identifier| syntax
+%type capture { tick_buf_t }
+capture(C) ::= PIPE IDENT(Name) PIPE. {
+    PLOG("Parsing capture");
+    C = Name->text;
+}
+
+// Try-catch statement
+stmt(S) ::= TRY(T) expr(Call) CATCH capture(Cap) stmt(CatchStmt). {
+    PLOG("Parsing try-catch statement");
+    S = ast_alloc(parse, TICK_AST_TRY_CATCH_STMT, T->line, T->col);
+    S->data.try_catch_stmt.call = Call;
+    S->data.try_catch_stmt.capture_name = Cap;
+    S->data.try_catch_stmt.catch_stmt = CatchStmt;
+}
+
+// Defer and errdefer statements
+stmt(S) ::= DEFER(T) stmt(Deferred). {
+    PLOG("Parsing defer statement");
+    S = ast_alloc(parse, TICK_AST_DEFER_STMT, T->line, T->col);
+    S->data.defer_stmt.stmt = Deferred;
+}
+
+stmt(S) ::= ERRDEFER(T) stmt(Deferred). {
+    PLOG("Parsing errdefer statement");
+    S = ast_alloc(parse, TICK_AST_ERRDEFER_STMT, T->line, T->col);
+    S->data.errdefer_stmt.stmt = Deferred;
+}
+
+// Block
+block(B) ::= LBRACE(T) stmt_list(S) RBRACE. {
+    PLOG("Parsing block");
     B = ast_alloc(parse, TICK_AST_BLOCK_STMT, T->line, T->col);
-    B->data.block_stmt.stmts = NULL;
-    B->data.block_stmt.stmt_count = 0;
+    B->data.block_stmt.stmts = S;
 }
 
 // Statement list - builds linked list
-stmt_list(L) ::= stmt(S). {
-    L = S;
-    L->next = NULL;
-}
+stmt_list(L) ::= . { L = NULL; }
+stmt_list(L) ::= stmt_list(Prev) stmt(S). { L = S; L->next = Prev; }
 
-stmt_list(L) ::= stmt_list(Prev) stmt(S). {
-    L = S;
-    L->next = Prev;
-}
+// Expressions - Binary operators
+// Arithmetic
+expr(E) ::= expr(L) PLUS(T) expr(R).    { BINOP_RULE(E, L, T, R, "addition", BINOP_ADD); }
+expr(E) ::= expr(L) MINUS(T) expr(R).   { BINOP_RULE(E, L, T, R, "subtraction", BINOP_SUB); }
+expr(E) ::= expr(L) STAR(T) expr(R).    { BINOP_RULE(E, L, T, R, "multiplication", BINOP_MUL); }
+expr(E) ::= expr(L) SLASH(T) expr(R).   { BINOP_RULE(E, L, T, R, "division", BINOP_DIV); }
+expr(E) ::= expr(L) PERCENT(T) expr(R). { BINOP_RULE(E, L, T, R, "modulo", BINOP_MOD); }
 
-// Expressions
-expr(E) ::= expr(L) PLUS(T) expr(R).  { BINOP_RULE(E, L, T, R, "addition", BINOP_ADD); }
-expr(E) ::= expr(L) MINUS(T) expr(R). { BINOP_RULE(E, L, T, R, "subtraction", BINOP_SUB); }
-expr(E) ::= expr(L) STAR(T) expr(R).  { BINOP_RULE(E, L, T, R, "multiplication", BINOP_MUL); }
-expr(E) ::= expr(L) SLASH(T) expr(R). { BINOP_RULE(E, L, T, R, "division", BINOP_DIV); }
+// Saturating arithmetic
+expr(E) ::= expr(L) PLUS_PIPE(T) expr(R).   { BINOP_RULE(E, L, T, R, "saturating addition", BINOP_SAT_ADD); }
+expr(E) ::= expr(L) MINUS_PIPE(T) expr(R).  { BINOP_RULE(E, L, T, R, "saturating subtraction", BINOP_SAT_SUB); }
+expr(E) ::= expr(L) STAR_PIPE(T) expr(R).   { BINOP_RULE(E, L, T, R, "saturating multiplication", BINOP_SAT_MUL); }
+expr(E) ::= expr(L) SLASH_PIPE(T) expr(R).  { BINOP_RULE(E, L, T, R, "saturating division", BINOP_SAT_DIV); }
 
+// Comparison
+expr(E) ::= expr(L) EQ_EQ(T) expr(R).   { BINOP_RULE(E, L, T, R, "equality", BINOP_EQ); }
+expr(E) ::= expr(L) BANG_EQ(T) expr(R). { BINOP_RULE(E, L, T, R, "inequality", BINOP_NE); }
+expr(E) ::= expr(L) LT(T) expr(R).      { BINOP_RULE(E, L, T, R, "less than", BINOP_LT); }
+expr(E) ::= expr(L) GT(T) expr(R).      { BINOP_RULE(E, L, T, R, "greater than", BINOP_GT); }
+expr(E) ::= expr(L) LT_EQ(T) expr(R).   { BINOP_RULE(E, L, T, R, "less or equal", BINOP_LE); }
+expr(E) ::= expr(L) GT_EQ(T) expr(R).   { BINOP_RULE(E, L, T, R, "greater or equal", BINOP_GE); }
+
+// Bitwise (not in precedence table - must use parens when mixing)
+expr(E) ::= expr(L) AMPERSAND(T) expr(R). { BINOP_RULE(E, L, T, R, "bitwise and", BINOP_AND); }
+expr(E) ::= expr(L) PIPE(T) expr(R).      { BINOP_RULE(E, L, T, R, "bitwise or", BINOP_OR); }
+expr(E) ::= expr(L) CARET(T) expr(R).     { BINOP_RULE(E, L, T, R, "bitwise xor", BINOP_XOR); }
+expr(E) ::= expr(L) LSHIFT(T) expr(R).    { BINOP_RULE(E, L, T, R, "left shift", BINOP_LSHIFT); }
+expr(E) ::= expr(L) RSHIFT(T) expr(R).    { BINOP_RULE(E, L, T, R, "right shift", BINOP_RSHIFT); }
+
+// Logical
+expr(E) ::= expr(L) AND(T) expr(R). { BINOP_RULE(E, L, T, R, "logical and", BINOP_LOGICAL_AND); }
+expr(E) ::= expr(L) OR(T) expr(R).  { BINOP_RULE(E, L, T, R, "logical or", BINOP_LOGICAL_OR); }
+
+// Unary operators
+expr(E) ::= MINUS(T) expr(Operand). [PREC_UNARY_MINUS] { UNOP_RULE(E, T, Operand, "negation", UNOP_NEG); }
+expr(E) ::= BANG(T) expr(Operand). { UNOP_RULE(E, T, Operand, "logical not", UNOP_NOT); }
+expr(E) ::= TILDE(T) expr(Operand). { UNOP_RULE(E, T, Operand, "bitwise not", UNOP_BIT_NOT); }
+expr(E) ::= AMPERSAND(T) expr(Operand). [PREC_UNARY_AMPERSAND] { UNOP_RULE(E, T, Operand, "address-of", UNOP_ADDR); }
+expr(E) ::= STAR(T) expr(Operand). [PREC_UNARY_STAR] { UNOP_RULE(E, T, Operand, "dereference", UNOP_DEREF); }
+
+// Parenthesized expressions
+expr(E) ::= LPAREN expr(Ex) RPAREN. { PLOG("Parsing parenthesized expression"); E = Ex; }
+
+// Primary expressions
 expr(E) ::= IDENT(T). {
     PLOG("Parsing identifier");
     E = ast_alloc(parse, TICK_AST_IDENTIFIER_EXPR, T->line, T->col);
     E->data.identifier_expr.name = T->text;
+}
+
+expr(E) ::= IMPORT(T) STRING_LITERAL(Path). {
+    PLOG("Parsing import expression");
+    E = ast_alloc(parse, TICK_AST_IMPORT, T->line, T->col);
+    E->data.import.path = Path->text;
+    E->data.import.is_pub = false;
+    E->data.import.is_volatile = false;
+}
+
+expr(E) ::= EMBED_FILE(T) STRING_LITERAL(Path). {
+    PLOG("Parsing embed_file expression");
+    E = ast_alloc(parse, TICK_AST_EMBED_FILE_EXPR, T->line, T->col);
+    E->data.embed_file_expr.path = Path->text;
+}
+
+expr(E) ::= ASYNC(T) expr(Call) COMMA expr(Frame). {
+    PLOG("Parsing async expression");
+    E = ast_alloc(parse, TICK_AST_ASYNC_EXPR, T->line, T->col);
+    E->data.async_expr.call = Call;
+    E->data.async_expr.frame = Frame;
 }
 
 expr(E) ::= UINT_LITERAL(T). {
@@ -309,16 +701,111 @@ expr(E) ::= UINT_LITERAL(T). {
     E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
     E->data.literal.value = T->literal.u64;
 }
-
 expr(E) ::= INT_LITERAL(T). {
     PLOG("Parsing int literal");
     E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
     E->data.literal.value = (uint64_t)T->literal.i64;
 }
-
-// Export statement
-export_stmt(E) ::= EXPORT(T) IDENT(Name) SEMICOLON. {
-    PLOG("Parsing export statement");
-    E = ast_alloc(parse, TICK_AST_EXPORT_STMT, T->line, T->col);
-    E->data.export_stmt.name = Name->text;
+expr(E) ::= STRING_LITERAL(T). {
+    PLOG("Parsing string literal");
+    E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
 }
+expr(E) ::= BOOL_LITERAL(T). {
+    PLOG("Parsing bool literal");
+    E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
+}
+expr(E) ::= UNDEFINED(T). {
+    PLOG("Parsing undefined");
+    E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
+}
+expr(E) ::= NULL(T). {
+    PLOG("Parsing null");
+    E = ast_alloc(parse, TICK_AST_LITERAL, T->line, T->col);
+}
+
+// Function calls
+expr(E) ::= expr(Callee) LPAREN(T) expr_list(Args) RPAREN. {
+    PLOG("Parsing function call");
+    E = ast_alloc(parse, TICK_AST_CALL_EXPR, T->line, T->col);
+    E->data.call_expr.callee = Callee; E->data.call_expr.args = Args;
+}
+
+// Field access (dot implies dereference for pointers)
+expr(E) ::= expr(Obj) DOT(T) IDENT(Field). {
+    PLOG("Parsing field access");
+    E = ast_alloc(parse, TICK_AST_FIELD_ACCESS_EXPR, T->line, T->col);
+    E->data.field_access_expr.object = Obj;
+    E->data.field_access_expr.field_name = Field->text;
+    E->data.field_access_expr.is_arrow = false;
+}
+
+// Array indexing
+expr(E) ::= expr(Arr) LBRACKET(T) expr(Idx) RBRACKET. {
+    PLOG("Parsing array index");
+    E = ast_alloc(parse, TICK_AST_INDEX_EXPR, T->line, T->col);
+    E->data.index_expr.array = Arr; E->data.index_expr.index = Idx;
+}
+
+// Struct literal: Point@{ field: value, ... }
+expr(E) ::= IDENT(TypeName) AT LBRACE(T) struct_init_list(Fields) RBRACE. {
+    PLOG("Parsing named struct literal");
+    E = ast_alloc(parse, TICK_AST_STRUCT_INIT_EXPR, T->line, T->col);
+    tick_ast_node_t* type_node = ast_alloc(parse, TICK_AST_TYPE_NAMED, TypeName->line, TypeName->col);
+    type_node->data.type_named.name = TypeName->text;
+    E->data.struct_init_expr.type = type_node;
+    E->data.struct_init_expr.fields = Fields;
+}
+
+// Anonymous struct literal: @{ field: value, ... }
+expr(E) ::= AT LBRACE(T) struct_init_list(Fields) RBRACE. {
+    PLOG("Parsing anonymous struct literal");
+    E = ast_alloc(parse, TICK_AST_STRUCT_INIT_EXPR, T->line, T->col);
+    E->data.struct_init_expr.type = NULL;
+    E->data.struct_init_expr.fields = Fields;
+}
+
+// Struct initializer field list - builds linked list
+struct_init_list(L) ::= . { L = NULL; }
+struct_init_list(L) ::= struct_init_field(F). { L = F; L->next = NULL; }
+struct_init_list(L) ::= struct_init_list(Prev) COMMA struct_init_field(F). { L = F; L->next = Prev; }
+struct_init_list(L) ::= struct_init_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+
+// Struct initializer field
+struct_init_field(F) ::= IDENT(Name) COLON expr(Val). {
+    PLOG("Parsing struct init field");
+    F = ast_alloc(parse, TICK_AST_STRUCT_INIT_FIELD, Name->line, Name->col);
+    F->data.struct_init_field.field_name = Name->text;
+    F->data.struct_init_field.value = Val;
+}
+
+// Array literal: [1, 2, 3, 4]
+expr(E) ::= LBRACKET(T) expr_list(Elements) RBRACKET. {
+    PLOG("Parsing array literal");
+    E = ast_alloc(parse, TICK_AST_ARRAY_INIT_EXPR, T->line, T->col);
+    E->data.array_init_expr.elements = Elements;
+}
+
+// Type cast: val.(i64)
+expr(E) ::= expr(Operand) DOT(T) LPAREN type(Ty) RPAREN. {
+    PLOG("Parsing type cast");
+    E = ast_alloc(parse, TICK_AST_CAST_EXPR, T->line, T->col);
+    E->data.cast_expr.type = Ty; E->data.cast_expr.expr = Operand;
+}
+
+// Expression list - builds linked list
+expr_list(L) ::= . { L = NULL; }
+expr_list(L) ::= expr(E). { L = E; L->next = NULL; }
+expr_list(L) ::= expr_list(Prev) COMMA expr(E). { L = E; L->next = Prev; }
+expr_list(L) ::= expr_list(Prev) COMMA. { L = Prev; }  // Trailing comma
+
+// =============================================================================
+// Precedence (lowest to highest)
+// =============================================================================
+%left COMMA.
+%right EQ.
+%nonassoc LT GT LT_EQ GT_EQ EQ_EQ BANG_EQ OR AND PIPE CARET AMPERSAND.
+%left PLUS MINUS PLUS_PIPE MINUS_PIPE.
+%left STAR SLASH PERCENT STAR_PIPE SLASH_PIPE LSHIFT RSHIFT.
+%right QUESTION.
+%right BANG TILDE PREC_UNARY_MINUS PREC_UNARY_AMPERSAND PREC_UNARY_STAR.
+%left DOT LBRACKET LPAREN.

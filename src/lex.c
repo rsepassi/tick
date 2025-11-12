@@ -15,6 +15,7 @@ typedef struct {
 } keyword_entry_t;
 
 static const keyword_entry_t keywords[] = {
+  {"align", TICK_TOK_ALIGN},
   {"and", TICK_TOK_AND},
   {"async", TICK_TOK_ASYNC},
   {"bool", TICK_TOK_BOOL},
@@ -28,7 +29,6 @@ static const keyword_entry_t keywords[] = {
   {"embed_file", TICK_TOK_EMBED_FILE},
   {"enum", TICK_TOK_ENUM},
   {"errdefer", TICK_TOK_ERRDEFER},
-  {"export", TICK_TOK_EXPORT},
   {"false", TICK_TOK_BOOL_LITERAL},
   {"fn", TICK_TOK_FN},
   {"for", TICK_TOK_FOR},
@@ -39,8 +39,8 @@ static const keyword_entry_t keywords[] = {
   {"i8", TICK_TOK_I8},
   {"import", TICK_TOK_IMPORT},
   {"isz", TICK_TOK_ISZ},
-  {"in", TICK_TOK_IN},
   {"let", TICK_TOK_LET},
+  {"null", TICK_TOK_NULL},
   {"or", TICK_TOK_OR},
   {"packed", TICK_TOK_PACKED},
   {"pub", TICK_TOK_PUB},
@@ -55,12 +55,12 @@ static const keyword_entry_t keywords[] = {
   {"u32", TICK_TOK_U32},
   {"u64", TICK_TOK_U64},
   {"u8", TICK_TOK_U8},
+  {"undefined", TICK_TOK_UNDEFINED},
   {"union", TICK_TOK_UNION},
   {"usz", TICK_TOK_USZ},
   {"var", TICK_TOK_VAR},
   {"void", TICK_TOK_VOID},
   {"volatile", TICK_TOK_VOLATILE},
-  {"while", TICK_TOK_WHILE},
 };
 
 static const usz keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -246,6 +246,13 @@ static void scan_identifier(tick_lex_t* lex, tick_tok_t* tok, usz start) {
   }
 
   usz length = lex->pos - start;
+
+  // Check for standalone underscore
+  if (length == 1 && lex->input.buf[start] == '_') {
+    make_token(lex, tok, TICK_TOK_UNDERSCORE, start);
+    return;
+  }
+
   tick_tok_type_t type = check_keyword(lex->input.buf + start, length);
 
   make_token(lex, tok, type, start);
@@ -460,6 +467,7 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_INT_LITERAL: return "INT_LITERAL";
     case TICK_TOK_STRING_LITERAL: return "STRING_LITERAL";
     case TICK_TOK_BOOL_LITERAL: return "BOOL_LITERAL";
+    case TICK_TOK_NULL: return "null";
     case TICK_TOK_BOOL: return "bool";
     case TICK_TOK_I8: return "i8";
     case TICK_TOK_I16: return "i16";
@@ -472,6 +480,7 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_U64: return "u64";
     case TICK_TOK_USZ: return "usz";
     case TICK_TOK_VOID: return "void";
+    case TICK_TOK_ALIGN: return "align";
     case TICK_TOK_AND: return "and";
     case TICK_TOK_ASYNC: return "async";
     case TICK_TOK_BREAK: return "break";
@@ -484,12 +493,10 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_EMBED_FILE: return "embed_file";
     case TICK_TOK_ENUM: return "enum";
     case TICK_TOK_ERRDEFER: return "errdefer";
-    case TICK_TOK_EXPORT: return "export";
     case TICK_TOK_FN: return "fn";
     case TICK_TOK_FOR: return "for";
     case TICK_TOK_IF: return "if";
     case TICK_TOK_IMPORT: return "import";
-    case TICK_TOK_IN: return "in";
     case TICK_TOK_LET: return "let";
     case TICK_TOK_OR: return "or";
     case TICK_TOK_PACKED: return "packed";
@@ -503,7 +510,6 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_UNION: return "union";
     case TICK_TOK_VAR: return "var";
     case TICK_TOK_VOLATILE: return "volatile";
-    case TICK_TOK_WHILE: return "while";
     case TICK_TOK_LPAREN: return "(";
     case TICK_TOK_RPAREN: return ")";
     case TICK_TOK_LBRACE: return "{";
@@ -514,8 +520,9 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_SEMICOLON: return ";";
     case TICK_TOK_COLON: return ":";
     case TICK_TOK_DOT: return ".";
-    case TICK_TOK_DOT_DOT: return "..";
     case TICK_TOK_QUESTION: return "?";
+    case TICK_TOK_UNDERSCORE: return "_";
+    case TICK_TOK_AT: return "@";
     case TICK_TOK_PLUS: return "+";
     case TICK_TOK_MINUS: return "-";
     case TICK_TOK_STAR: return "*";
@@ -529,18 +536,10 @@ static const char* tok_type_name(tick_tok_type_t type) {
     case TICK_TOK_EQ: return "=";
     case TICK_TOK_LT: return "<";
     case TICK_TOK_GT: return ">";
-    case TICK_TOK_PLUS_EQ: return "+=";
-    case TICK_TOK_MINUS_EQ: return "-=";
-    case TICK_TOK_STAR_EQ: return "*=";
-    case TICK_TOK_SLASH_EQ: return "/=";
     case TICK_TOK_PLUS_PIPE: return "+|";
     case TICK_TOK_MINUS_PIPE: return "-|";
     case TICK_TOK_STAR_PIPE: return "*|";
     case TICK_TOK_SLASH_PIPE: return "/|";
-    case TICK_TOK_PLUS_PERCENT: return "+%";
-    case TICK_TOK_MINUS_PERCENT: return "-%";
-    case TICK_TOK_STAR_PERCENT: return "*%";
-    case TICK_TOK_SLASH_PERCENT: return "/%";
     case TICK_TOK_BANG_EQ: return "!=";
     case TICK_TOK_EQ_EQ: return "==";
     case TICK_TOK_LT_EQ: return "<=";
@@ -635,16 +634,15 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
     case ':': make_token(lex, tok, TICK_TOK_COLON, start); return;
     case '~': make_token(lex, tok, TICK_TOK_TILDE, start); return;
     case '?': make_token(lex, tok, TICK_TOK_QUESTION, start); return;
-    case '^': make_token(lex, tok, TICK_TOK_CARET, start); return;
+    case '@': make_token(lex, tok, TICK_TOK_AT, start); return;
+    case '^':
+      make_token(lex, tok, TICK_TOK_CARET, start);
+      return;
 
     // Operators that can be compound
     case '+':
-      if (match(lex, '=')) {
-        make_token(lex, tok, TICK_TOK_PLUS_EQ, start);
-      } else if (match(lex, '|')) {
+      if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_PLUS_PIPE, start);
-      } else if (match(lex, '%')) {
-        make_token(lex, tok, TICK_TOK_PLUS_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_PLUS, start);
       }
@@ -653,34 +651,22 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
       // Check if this is a negative number literal
       if (IS_DIGIT(peek(lex))) {
         scan_number(lex, tok, start, true);
-      } else if (match(lex, '=')) {
-        make_token(lex, tok, TICK_TOK_MINUS_EQ, start);
       } else if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_MINUS_PIPE, start);
-      } else if (match(lex, '%')) {
-        make_token(lex, tok, TICK_TOK_MINUS_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_MINUS, start);
       }
       return;
     case '*':
-      if (match(lex, '=')) {
-        make_token(lex, tok, TICK_TOK_STAR_EQ, start);
-      } else if (match(lex, '|')) {
+      if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_STAR_PIPE, start);
-      } else if (match(lex, '%')) {
-        make_token(lex, tok, TICK_TOK_STAR_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_STAR, start);
       }
       return;
     case '/':
-      if (match(lex, '=')) {
-        make_token(lex, tok, TICK_TOK_SLASH_EQ, start);
-      } else if (match(lex, '|')) {
+      if (match(lex, '|')) {
         make_token(lex, tok, TICK_TOK_SLASH_PIPE, start);
-      } else if (match(lex, '%')) {
-        make_token(lex, tok, TICK_TOK_SLASH_PERCENT, start);
       } else {
         make_token(lex, tok, TICK_TOK_SLASH, start);
       }
@@ -715,7 +701,7 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
       }
       return;
     case '.':
-      make_token(lex, tok, match(lex, '.') ? TICK_TOK_DOT_DOT : TICK_TOK_DOT, start);
+      make_token(lex, tok, TICK_TOK_DOT, start);
       return;
 
     // String literal

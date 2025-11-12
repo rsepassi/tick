@@ -297,6 +297,7 @@ tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t 
 void *ParseAlloc(void *(*mallocProc)(size_t));
 void Parse(void *yyp, int yymajor, tick_tok_t* yyminor, tick_parse_t* parse);
 void ParseFree(void *p, void (*freeProc)(void*));
+void ParseTrace(FILE *stream, char *zPrefix);
 
 void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf) {
   parse->alloc = alloc;
@@ -307,6 +308,11 @@ void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf)
   // Allocate Lemon parser
   parse->lemon_parser = ParseAlloc(malloc);
 
+#ifdef TICK_DEBUG
+  // Enable parser tracing in debug mode
+  ParseTrace(stderr, "[parser] ");
+#endif
+
   // Null-terminate error buffer
   if (errbuf.sz > 0) {
     errbuf.buf[0] = '\0';
@@ -314,6 +320,10 @@ void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf)
 }
 
 tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok) {
+  if (tok->type == TICK_TOK_COMMENT) {
+    return TICK_OK;
+  }
+
   // If we hit EOF, finalize the parse
   if (tok->type == TICK_TOK_EOF) {
     Parse(parse->lemon_parser, 0, 0, parse);
@@ -337,7 +347,7 @@ const char* tick_ast_kind_str(tick_ast_node_kind_t kind) {
     case TICK_AST_ERROR:           return "ERROR";
     case TICK_AST_MODULE:          return "MODULE";
     case TICK_AST_IMPORT_DECL:     return "IMPORT_DECL";
-    case TICK_AST_LET_DECL:        return "LET_DECL";
+    case TICK_AST_DECL:            return "DECL";
     case TICK_AST_FUNCTION_DECL:   return "FUNCTION_DECL";
     case TICK_AST_RETURN_STMT:     return "RETURN_STMT";
     case TICK_AST_BLOCK_STMT:      return "BLOCK_STMT";

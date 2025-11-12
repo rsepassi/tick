@@ -70,6 +70,7 @@ int main(int argc, char** argv) {
 
     if (tok.type == TICK_TOK_ERR)
       COMPILE_ERR();
+
     if (tick_parse_tok(&parse, &tok) != TICK_OK)
       COMPILE_ERR();
     if (parse.has_error)
@@ -78,6 +79,15 @@ int main(int argc, char** argv) {
 
   // analyze, typecheck, lower
   tick_ast_t root = parse.root;
+  if (root.root) {
+    DLOG("[main] Root kind: %s", tick_ast_kind_str(root.root->kind));
+    if (root.root->kind == TICK_AST_MODULE) {
+      DLOG("[main] Module");
+    }
+  } else {
+    DLOG("[main] Root is NULL!");
+  }
+
   if (tick_ast_analyze(&root, errbuf) != TICK_OK)
     COMPILE_ERR();
   if (tick_ast_lower(&root, errbuf) != TICK_OK)

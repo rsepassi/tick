@@ -58,7 +58,7 @@ packed volatile embed_file
 - Logical: `&&` `||` `!`
 - Comparison: `<` `>` `<=` `>=` `==` `!=`
 - Assignment: `=` `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=` `>>=`
-- Other: `.` `->` `[` `]` `(` `)` `{` `}` `:` `;` `,` `..` `&` `*`
+- Other: `.` `[` `]` `(` `)` `{` `}` `:` `;` `,` `..` `&` `*` `?`
 
 ## Parser Specification
 
@@ -91,7 +91,7 @@ packed volatile embed_file
 #### Functions
 
 ```
-let add = fn(x: i32, y: i32) -> i32 {
+let add = fn(x: i32, y: i32) i32 {
     return x + y;
 };
 
@@ -220,7 +220,7 @@ while switch state {
 
 - Result: `ErrorEnum!ValueType`
 - Option: `Option(T)` equivalent to `union { some: T, none: void }`
-- Function pointers: `fn(i32, i32) -> i32`
+- Function pointers: `fn(i32, i32) i32`
 
 ### Type Qualifiers
 
@@ -313,7 +313,7 @@ Platform processes submissions/cancellations via ring buffers or linked lists.
 ### Result Types
 
 ```
-let divide = fn(a: i32, b: i32) -> MathError!i32 {
+let divide = fn(a: i32, b: i32) MathError!i32 {
     if b == 0 {
         return MathError.DivideByZero;
     }
@@ -338,7 +338,7 @@ let result = try riskyOperation();
 ### Cleanup
 
 ```
-let processFile = fn(path: []u8) -> Error!void {
+let processFile = fn(path: []u8) Error!void {
     let file = openFile(path);
     defer closeFile(file);      # Always runs at scope exit
     
