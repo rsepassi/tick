@@ -10,31 +10,39 @@
 #define UNUSED(x) (void)(x)
 
 // Alignment macros
-#define ALIGNF(x, align) (((x) + (align) - 1) & ~((align) - 1))  // Align forward
-#define ALIGNB(x, align) ((x) & ~((align) - 1))                   // Align back
-#define ALIGNED(x, align) (((x) & ((align) - 1)) == 0)            // Test alignment
+#define ALIGNF(x, align) \
+  (((x) + (align) - 1) & ~((align) - 1))                // Align forward
+#define ALIGNB(x, align) ((x) & ~((align) - 1))         // Align back
+#define ALIGNED(x, align) (((x) & ((align) - 1)) == 0)  // Test alignment
 
-#define CHECK_OK(expr) do { \
-  if ((expr) != TICK_OK) { \
-    fprintf(stderr, "CHECK_OK failed: %s:%d: %s\n", __FILE__, __LINE__, #expr); \
-    abort(); \
-  } \
-} while (0)
+#define CHECK_OK(expr)                                                    \
+  do {                                                                    \
+    if ((expr) != TICK_OK) {                                              \
+      fprintf(stderr, "CHECK_OK failed: %s:%d: %s\n", __FILE__, __LINE__, \
+              #expr);                                                     \
+      abort();                                                            \
+    }                                                                     \
+  } while (0)
 
-#define CHECK(cond, fmt, ...) do { \
-  if (!(cond)) { \
-    fprintf(stderr, "CHECK failed: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__); \
-    abort(); \
-  } \
-} while (0)
+#define CHECK(cond, fmt, ...)                                               \
+  do {                                                                      \
+    if (!(cond)) {                                                          \
+      fprintf(stderr, "CHECK failed: %s:%d: " fmt "\n", __FILE__, __LINE__, \
+              ##__VA_ARGS__);                                               \
+      abort();                                                              \
+    }                                                                       \
+  } while (0)
 
 #define TICK_USER_LOG(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
-#define TICK_USER_LOGE(fmt, ...) fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
+#define TICK_USER_LOGE(fmt, ...) \
+  fprintf(stderr, "ERROR: " fmt "\n", ##__VA_ARGS__)
 
 #ifdef TICK_DEBUG
 #define DLOG(fmt, ...) fprintf(stderr, "[DEBUG] " fmt "\n", ##__VA_ARGS__)
 #else
-#define DLOG(fmt, ...) do {} while (0)
+#define DLOG(fmt, ...) \
+  do {                 \
+  } while (0)
 #endif
 
 #define TICK_HELP "Usage: tick emitc <input.tick> -o <output>\n"
@@ -64,7 +72,7 @@ typedef struct {
 #define TICK_ALLOCATOR_ZEROMEM (1 << 0)
 
 typedef struct {
-  u8 flags;  // TICK_ALLOCATOR_*
+  u8 flags;       // TICK_ALLOCATOR_*
   u8 alignment2;  // 0=regular alignment, >0 power of 2 alignment
 } tick_allocator_config_t;
 
@@ -73,7 +81,8 @@ typedef struct {
   // buf->sz>0 -> realloc
   // newsz=0 -> free
   // config=NULL -> defaults
-  tick_err_t (*realloc)(void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config);
+  tick_err_t (*realloc)(void* ctx, tick_buf_t* buf, usz newsz,
+                        tick_allocator_config_t* config);
   void* ctx;
 } tick_alloc_t;
 
@@ -169,52 +178,52 @@ typedef enum {
   TICK_TOK_VOLATILE,
 
   // Punctuation
-  TICK_TOK_LPAREN,      // (
-  TICK_TOK_RPAREN,      // )
-  TICK_TOK_LBRACE,      // {
-  TICK_TOK_RBRACE,      // }
-  TICK_TOK_LBRACKET,    // [
-  TICK_TOK_RBRACKET,    // ]
-  TICK_TOK_COMMA,       // ,
-  TICK_TOK_SEMICOLON,   // ;
-  TICK_TOK_COLON,       // :
-  TICK_TOK_DOT,         // .
-  TICK_TOK_QUESTION,    // ?
+  TICK_TOK_LPAREN,        // (
+  TICK_TOK_RPAREN,        // )
+  TICK_TOK_LBRACE,        // {
+  TICK_TOK_RBRACE,        // }
+  TICK_TOK_LBRACKET,      // [
+  TICK_TOK_RBRACKET,      // ]
+  TICK_TOK_COMMA,         // ,
+  TICK_TOK_SEMICOLON,     // ;
+  TICK_TOK_COLON,         // :
+  TICK_TOK_DOT,           // .
+  TICK_TOK_QUESTION,      // ?
   TICK_TOK_DOT_QUESTION,  // .?
-  TICK_TOK_UNDERSCORE,  // _
-  TICK_TOK_AT,          // @
+  TICK_TOK_UNDERSCORE,    // _
+  TICK_TOK_AT,            // @
 
   // Operators
-  TICK_TOK_PLUS,        // +
-  TICK_TOK_MINUS,       // -
-  TICK_TOK_STAR,        // *
-  TICK_TOK_SLASH,       // /
-  TICK_TOK_PERCENT,     // %
-  TICK_TOK_AMPERSAND,   // &
-  TICK_TOK_PIPE,        // |
-  TICK_TOK_CARET,       // ^
-  TICK_TOK_TILDE,       // ~
-  TICK_TOK_BANG,        // !
-  TICK_TOK_EQ,          // =
-  TICK_TOK_LT,          // <
-  TICK_TOK_GT,          // >
-  TICK_TOK_PLUS_PIPE,     // +| (saturating add)
-  TICK_TOK_MINUS_PIPE,    // -| (saturating sub)
-  TICK_TOK_STAR_PIPE,     // *| (saturating mul)
-  TICK_TOK_SLASH_PIPE,    // /| (saturating div)
-  TICK_TOK_PLUS_PERCENT,  // +% (wrapping add)
-  TICK_TOK_MINUS_PERCENT, // -% (wrapping sub)
-  TICK_TOK_STAR_PERCENT,  // *% (wrapping mul)
-  TICK_TOK_SLASH_PERCENT, // /% (wrapping div)
-  TICK_TOK_BANG_EQ,       // !=
-  TICK_TOK_EQ_EQ,       // ==
-  TICK_TOK_LT_EQ,       // <=
-  TICK_TOK_GT_EQ,       // >=
-  TICK_TOK_LSHIFT,      // <<
-  TICK_TOK_RSHIFT,      // >>
+  TICK_TOK_PLUS,           // +
+  TICK_TOK_MINUS,          // -
+  TICK_TOK_STAR,           // *
+  TICK_TOK_SLASH,          // /
+  TICK_TOK_PERCENT,        // %
+  TICK_TOK_AMPERSAND,      // &
+  TICK_TOK_PIPE,           // |
+  TICK_TOK_CARET,          // ^
+  TICK_TOK_TILDE,          // ~
+  TICK_TOK_BANG,           // !
+  TICK_TOK_EQ,             // =
+  TICK_TOK_LT,             // <
+  TICK_TOK_GT,             // >
+  TICK_TOK_PLUS_PIPE,      // +| (saturating add)
+  TICK_TOK_MINUS_PIPE,     // -| (saturating sub)
+  TICK_TOK_STAR_PIPE,      // *| (saturating mul)
+  TICK_TOK_SLASH_PIPE,     // /| (saturating div)
+  TICK_TOK_PLUS_PERCENT,   // +% (wrapping add)
+  TICK_TOK_MINUS_PERCENT,  // -% (wrapping sub)
+  TICK_TOK_STAR_PERCENT,   // *% (wrapping mul)
+  TICK_TOK_SLASH_PERCENT,  // /% (wrapping div)
+  TICK_TOK_BANG_EQ,        // !=
+  TICK_TOK_EQ_EQ,          // ==
+  TICK_TOK_LT_EQ,          // <=
+  TICK_TOK_GT_EQ,          // >=
+  TICK_TOK_LSHIFT,         // <<
+  TICK_TOK_RSHIFT,         // >>
 
   // Comments
-  TICK_TOK_COMMENT,     // #
+  TICK_TOK_COMMENT,  // #
 } tick_tok_type_t;
 
 typedef union {
@@ -230,14 +239,16 @@ typedef struct {
   usz col;
 } tick_tok_t;
 
-// Literal data (for parser non-terminal to immediately copy from ephemeral token)
+// Literal data (for parser non-terminal to immediately copy from ephemeral
+// token)
 typedef struct {
   tick_tok_literal_t value;
   usz line;
   usz col;
 } tick_literal_t;
 
-// Identifier data (for parser non-terminal to immediately copy from ephemeral token)
+// Identifier data (for parser non-terminal to immediately copy from ephemeral
+// token)
 typedef struct {
   tick_buf_t text;
   usz line;
@@ -330,7 +341,8 @@ typedef struct {
 //    - All for loop variants → while (true) with explicit breaks:
 //      * for {}               → while (1) { body }
 //      * for cond {}          → while (1) { if (!cond) break; body }
-//      * for init; cond; step → init; while (1) { if (!cond) break; body; step }
+//      * for init; cond; step → init; while (1) { if (!cond) break; body; step
+//      }
 //    - Complex expressions decomposed into temporary variables:
 //      * tmpid field in TICK_AST_DECL nodes tracks temporaries
 //      * tmpid == 0: user-named variable
@@ -360,7 +372,8 @@ typedef struct {
 //
 // PERFORMANCE: Codegen MUST be a single-pass walk over module.decls. It emits
 // each declaration in order without lookahead, backtracking, or reordering.
-// Lowering is responsible for inserting forward declarations and ordering decls.
+// Lowering is responsible for inserting forward declarations and ordering
+// decls.
 //
 // REQUIRES:
 // 1. All TYPE_NAMED.builtin_type fields are resolved (not TICK_TYPE_UNKNOWN)
@@ -392,13 +405,16 @@ typedef struct {
 // 6. Struct/Array initialization expressions MUST be decomposed:
 //    - All field values in STRUCT_INIT_EXPR must be LITERAL or IDENTIFIER_EXPR
 //    - All elements in ARRAY_INIT_EXPR must be LITERAL or IDENTIFIER_EXPR
-//    - Complex expressions (calls, binops, casts, etc.) must be extracted to temporaries by lowering
+//    - Complex expressions (calls, binops, casts, etc.) must be extracted to
+//    temporaries by lowering
 //    - Example transformation by lowering:
 //      * Input:  Point { x: foo() + 1, y: 2 }
 //      * Lowering creates: let __tmp1: i32 = foo() + 1;
 //                          Point { x: __tmp1, y: 2 }
-//      * Codegen receives: DECL(__tmp1) followed by STRUCT_INIT with IDENTIFIER_EXPR(__tmp1)
-//    - Rationale: Keeps codegen simple and avoids re-evaluating complex expressions
+//      * Codegen receives: DECL(__tmp1) followed by STRUCT_INIT with
+//      IDENTIFIER_EXPR(__tmp1)
+//    - Rationale: Keeps codegen simple and avoids re-evaluating complex
+//    expressions
 //
 // ALLOWED LOWERING-ONLY NODES:
 // Codegen DOES accept TICK_AST_GOTO_STMT and TICK_AST_LABEL_STMT nodes,
@@ -411,7 +427,8 @@ typedef struct {
 //   * BINOP_SAT_ADD with u64 → tick_sat_add_u64
 //   * etc.
 //
-// - Comparisons/logical/bitwise: Emits C operator directly (&&, ||, ==, &, |, ^)
+// - Comparisons/logical/bitwise: Emits C operator directly (&&, ||, ==, &, |,
+// ^)
 //
 // - Casts: Maps (source_type, dest_type) → runtime function or C cast
 //   * Widening casts (i8→i32, u16→u64): Direct C cast (always safe)
@@ -422,7 +439,8 @@ typedef struct {
 //   * Signed ↔ Unsigned conversions: tick_checked_cast_{src}_{dst}
 //     - i32→u32 → tick_checked_cast_i32_u32 (panics if negative)
 //     - u32→i32 → tick_checked_cast_u32_i32 (panics if > i32 max)
-//   * Non-numeric types (pointers, bool, user-defined): Direct C cast (no runtime)
+//   * Non-numeric types (pointers, bool, user-defined): Direct C cast (no
+//   runtime)
 //
 // - Negation: Maps to tick_checked_neg_{type} for signed types
 //
@@ -432,13 +450,17 @@ typedef struct {
 //
 // - For loops: All variants emit as while (1) with explicit breaks
 //
-// - Switch: Emits as C switch with fall-through semantics, default when values=NULL
+// - Switch: Emits as C switch with fall-through semantics, default when
+// values=NULL
 //
 // - Type Declarations:
-//   * Structs: Emit typedef struct with fields, handle packed/alignment attributes
-//   * Enums: Emit typedef enum with underlying type, emit all values as literals
+//   * Structs: Emit typedef struct with fields, handle packed/alignment
+//   attributes
+//   * Enums: Emit typedef enum with underlying type, emit all values as
+//   literals
 //   * Unions: Emit tagged union (tag enum + data union wrapper struct)
-//   * Forward declarations emitted for all struct/union types before definitions
+//   * Forward declarations emitted for all struct/union types before
+//   definitions
 //   * Emission to header if pub, always to C file
 //
 // If codegen encounters:
@@ -583,7 +605,7 @@ typedef struct {
   bool is_var;  // false = let, true = var
   bool is_pub;
   bool is_volatile;
-  bool is_extern;  // true = extern declaration (no definition)
+  bool is_extern;        // true = extern declaration (no definition)
   bool is_forward_decl;  // true = forward decl only (set by lowering)
 } tick_qualifier_flags_t;
 
@@ -661,7 +683,7 @@ typedef enum {
 
 // Builtin types (resolved during analysis)
 typedef enum {
-  TICK_TYPE_UNKNOWN,       // Not yet resolved
+  TICK_TYPE_UNKNOWN,  // Not yet resolved
   TICK_TYPE_I8,
   TICK_TYPE_I16,
   TICK_TYPE_I32,
@@ -689,7 +711,8 @@ struct tick_ast_node_s {
   tick_ast_loc_t loc;
   tick_ast_node_t* next;  // Next node in list
   tick_ast_node_t* prev;  // Previous node in list
-  tick_ast_node_t* tail;  // For list heads: pointer to last node (used during parsing)
+  tick_ast_node_t*
+      tail;  // For list heads: pointer to last node (used during parsing)
   union {
     struct {
       tick_literal_kind_t kind;
@@ -734,8 +757,8 @@ struct tick_ast_node_s {
       tick_ast_node_t* values;  // Linked list of TICK_AST_ENUM_VALUE nodes
     } enum_decl;
     struct {
-      tick_ast_node_t* tag_type;  // NULL for automatic tag
-      tick_ast_node_t* fields;  // Linked list of TICK_AST_FIELD nodes
+      tick_ast_node_t* tag_type;   // NULL for automatic tag
+      tick_ast_node_t* fields;     // Linked list of TICK_AST_FIELD nodes
       tick_ast_node_t* alignment;  // NULL = default, expr = explicit alignment
     } union_decl;
     struct {
@@ -787,7 +810,8 @@ struct tick_ast_node_s {
     } call_expr;
     struct {
       tick_builtin_t builtin;
-      tick_ast_node_t* type;  // Type for type-specific builtins (e.g., i32, u64)
+      tick_ast_node_t*
+          type;  // Type for type-specific builtins (e.g., i32, u64)
       tick_ast_node_t* args;  // Linked list of argument expressions
     } builtin_call;
     struct {
@@ -801,7 +825,8 @@ struct tick_ast_node_s {
     } index_expr;
     struct {
       tick_ast_node_t* type;
-      tick_ast_node_t* fields;  // Linked list of TICK_AST_STRUCT_INIT_FIELD nodes
+      tick_ast_node_t*
+          fields;  // Linked list of TICK_AST_STRUCT_INIT_FIELD nodes
     } struct_init_expr;
     struct {
       tick_ast_node_t* elements;
@@ -817,10 +842,11 @@ struct tick_ast_node_s {
     } unwrap_panic_expr;
     struct {
       tick_buf_t name;
-      tick_at_builtin_t at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
+      tick_at_builtin_t
+          at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
     } identifier_expr;
     struct {
-      tick_ast_node_t* call;  // Function call expression
+      tick_ast_node_t* call;   // Function call expression
       tick_ast_node_t* frame;  // Frame expression
     } async_expr;
     struct {
@@ -839,8 +865,8 @@ struct tick_ast_node_s {
       tick_ast_node_t* handle;
     } resume_stmt;
     struct {
-      tick_ast_node_t* call;  // Function call to try
-      tick_buf_t capture;  // |name| capture
+      tick_ast_node_t* call;        // Function call to try
+      tick_buf_t capture;           // |name| capture
       tick_ast_node_t* catch_stmt;  // Statement to execute on error
     } try_catch_stmt;
     struct {
@@ -853,7 +879,8 @@ struct tick_ast_node_s {
     struct {
       tick_buf_t name;
       tick_builtin_type_t builtin_type;  // Resolved during analysis
-      tick_ast_node_t* type_decl;        // For user-defined types, pointer to declaration
+      tick_ast_node_t*
+          type_decl;  // For user-defined types, pointer to declaration
     } type_named;
     struct {
       tick_ast_node_t* element_type;
@@ -870,7 +897,7 @@ struct tick_ast_node_s {
       tick_ast_node_t* value_type;
     } type_error_union;
     struct {
-      tick_ast_node_t* params;       // Linked list of params (may have NULL names)
+      tick_ast_node_t* params;  // Linked list of params (may have NULL names)
       tick_ast_node_t* return_type;  // NULL = void
     } type_function;
     struct {
@@ -919,34 +946,46 @@ typedef struct {
 } tick_driver_args_t;
 
 // Driver functions
-tick_cli_result_t tick_driver_parse_args(tick_driver_args_t* args, int argc, char** argv);
-tick_err_t tick_driver_read_file(tick_alloc_t* alloc, tick_buf_t* output, tick_buf_t path);
+tick_cli_result_t tick_driver_parse_args(tick_driver_args_t* args, int argc,
+                                         char** argv);
+tick_err_t tick_driver_read_file(tick_alloc_t* alloc, tick_buf_t* output,
+                                 tick_buf_t path);
 
 // Allocator functions
 tick_alloc_t tick_allocator_libc(void);
-tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t backing);
+tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist,
+                                    tick_alloc_t backing);
 
 // Lexer functions
-void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc, tick_buf_t errbuf);
+void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc,
+                   tick_buf_t errbuf);
 void tick_lex_next(tick_lex_t* lex, tick_tok_t* tok);
 const char* tick_tok_format(tick_tok_t* tok, char* buf, usz buf_sz);
 
 // Parser functions
-void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf);
+void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc,
+                     tick_buf_t errbuf);
 tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok);
 
 // AST functions
 const char* tick_ast_kind_str(tick_ast_node_kind_t kind);
-tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf);
-tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf);
+tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
+                            tick_buf_t errbuf);
+tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
+                          tick_buf_t errbuf);
 
 // AST list helpers
 void tick_ast_list_init(tick_ast_node_t* node);
-tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head, tick_ast_node_t* node);
+tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head,
+                                      tick_ast_node_t* node);
 
 // Output functions
-tick_err_t tick_output_format_name(tick_buf_t output_path, tick_path_t* output_h, tick_path_t* output_c);
+tick_err_t tick_output_format_name(tick_buf_t output_path,
+                                   tick_path_t* output_h,
+                                   tick_path_t* output_c);
 tick_writer_t tick_file_writer(FILE* f);
 
 // Codegen functions
-tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename, const char* header_filename, tick_writer_t writer_h, tick_writer_t writer_c);
+tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
+                        const char* header_filename, tick_writer_t writer_h,
+                        tick_writer_t writer_c);

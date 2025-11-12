@@ -149,7 +149,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 format:
-	clang-format -i $(SRCS) $(HDRS)
+	clang-format -i -style=google $(SRCS) $(HDRS)
 
 tree:
 	@tree -I vibe -I vendor

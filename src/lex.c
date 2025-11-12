@@ -2,10 +2,12 @@
 
 // Helper macros
 #define IS_DIGIT(c) ((c) >= '0' && (c) <= '9')
-#define IS_HEX_DIGIT(c) (IS_DIGIT(c) || ((c) >= 'a' && (c) <= 'f') || ((c) >= 'A' && (c) <= 'F'))
+#define IS_HEX_DIGIT(c) \
+  (IS_DIGIT(c) || ((c) >= 'a' && (c) <= 'f') || ((c) >= 'A' && (c) <= 'F'))
 #define IS_OCTAL_DIGIT(c) ((c) >= '0' && (c) <= '7')
 #define IS_BINARY_DIGIT(c) ((c) == '0' || (c) == '1')
-#define IS_ALPHA(c) (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_')
+#define IS_ALPHA(c) \
+  (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_')
 #define IS_ALNUM(c) (IS_ALPHA(c) || IS_DIGIT(c))
 
 // Keyword lookup table
@@ -15,54 +17,54 @@ typedef struct {
 } keyword_entry_t;
 
 static const keyword_entry_t keywords[] = {
-  {"align", TICK_TOK_ALIGN},
-  {"and", TICK_TOK_AND},
-  {"as", TICK_TOK_AS},
-  {"async", TICK_TOK_ASYNC},
-  {"bool", TICK_TOK_BOOL},
-  {"break", TICK_TOK_BREAK},
-  {"case", TICK_TOK_CASE},
-  {"catch", TICK_TOK_CATCH},
-  {"continue", TICK_TOK_CONTINUE},
-  {"default", TICK_TOK_DEFAULT},
-  {"defer", TICK_TOK_DEFER},
-  {"else", TICK_TOK_ELSE},
-  {"enum", TICK_TOK_ENUM},
-  {"errdefer", TICK_TOK_ERRDEFER},
-  {"extern", TICK_TOK_EXTERN},
-  {"false", TICK_TOK_BOOL_LITERAL},
-  {"fn", TICK_TOK_FN},
-  {"for", TICK_TOK_FOR},
-  {"if", TICK_TOK_IF},
-  {"i16", TICK_TOK_I16},
-  {"i32", TICK_TOK_I32},
-  {"i64", TICK_TOK_I64},
-  {"i8", TICK_TOK_I8},
-  {"import", TICK_TOK_IMPORT},
-  {"isz", TICK_TOK_ISZ},
-  {"let", TICK_TOK_LET},
-  {"null", TICK_TOK_NULL},
-  {"or", TICK_TOK_OR},
-  {"orelse", TICK_TOK_ORELSE},
-  {"packed", TICK_TOK_PACKED},
-  {"pub", TICK_TOK_PUB},
-  {"resume", TICK_TOK_RESUME},
-  {"return", TICK_TOK_RETURN},
-  {"struct", TICK_TOK_STRUCT},
-  {"suspend", TICK_TOK_SUSPEND},
-  {"switch", TICK_TOK_SWITCH},
-  {"true", TICK_TOK_BOOL_LITERAL},
-  {"try", TICK_TOK_TRY},
-  {"u16", TICK_TOK_U16},
-  {"u32", TICK_TOK_U32},
-  {"u64", TICK_TOK_U64},
-  {"u8", TICK_TOK_U8},
-  {"undefined", TICK_TOK_UNDEFINED},
-  {"union", TICK_TOK_UNION},
-  {"usz", TICK_TOK_USZ},
-  {"var", TICK_TOK_VAR},
-  {"void", TICK_TOK_VOID},
-  {"volatile", TICK_TOK_VOLATILE},
+    {"align", TICK_TOK_ALIGN},
+    {"and", TICK_TOK_AND},
+    {"as", TICK_TOK_AS},
+    {"async", TICK_TOK_ASYNC},
+    {"bool", TICK_TOK_BOOL},
+    {"break", TICK_TOK_BREAK},
+    {"case", TICK_TOK_CASE},
+    {"catch", TICK_TOK_CATCH},
+    {"continue", TICK_TOK_CONTINUE},
+    {"default", TICK_TOK_DEFAULT},
+    {"defer", TICK_TOK_DEFER},
+    {"else", TICK_TOK_ELSE},
+    {"enum", TICK_TOK_ENUM},
+    {"errdefer", TICK_TOK_ERRDEFER},
+    {"extern", TICK_TOK_EXTERN},
+    {"false", TICK_TOK_BOOL_LITERAL},
+    {"fn", TICK_TOK_FN},
+    {"for", TICK_TOK_FOR},
+    {"if", TICK_TOK_IF},
+    {"i16", TICK_TOK_I16},
+    {"i32", TICK_TOK_I32},
+    {"i64", TICK_TOK_I64},
+    {"i8", TICK_TOK_I8},
+    {"import", TICK_TOK_IMPORT},
+    {"isz", TICK_TOK_ISZ},
+    {"let", TICK_TOK_LET},
+    {"null", TICK_TOK_NULL},
+    {"or", TICK_TOK_OR},
+    {"orelse", TICK_TOK_ORELSE},
+    {"packed", TICK_TOK_PACKED},
+    {"pub", TICK_TOK_PUB},
+    {"resume", TICK_TOK_RESUME},
+    {"return", TICK_TOK_RETURN},
+    {"struct", TICK_TOK_STRUCT},
+    {"suspend", TICK_TOK_SUSPEND},
+    {"switch", TICK_TOK_SWITCH},
+    {"true", TICK_TOK_BOOL_LITERAL},
+    {"try", TICK_TOK_TRY},
+    {"u16", TICK_TOK_U16},
+    {"u32", TICK_TOK_U32},
+    {"u64", TICK_TOK_U64},
+    {"u8", TICK_TOK_U8},
+    {"undefined", TICK_TOK_UNDEFINED},
+    {"union", TICK_TOK_UNION},
+    {"usz", TICK_TOK_USZ},
+    {"var", TICK_TOK_VAR},
+    {"void", TICK_TOK_VOID},
+    {"volatile", TICK_TOK_VOLATILE},
 };
 
 static const usz keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -73,16 +75,22 @@ static char advance(tick_lex_t* lex);
 static char peek(tick_lex_t* lex);
 static bool match(tick_lex_t* lex, char expected);
 static void skip_whitespace(tick_lex_t* lex);
-static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz token_line, usz token_col);
-static void make_token(tick_lex_t* lex, tick_tok_t* tok, tick_tok_type_t type, usz start);
-static void error_token(tick_lex_t* lex, tick_tok_t* tok, const char* message, usz token_line, usz token_col);
+static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start,
+                       usz token_line, usz token_col);
+static void make_token(tick_lex_t* lex, tick_tok_t* tok, tick_tok_type_t type,
+                       usz start);
+static void error_token(tick_lex_t* lex, tick_tok_t* tok, const char* message,
+                        usz token_line, usz token_col);
 static void scan_identifier(tick_lex_t* lex, tick_tok_t* tok, usz start);
-static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start, bool is_negative);
-static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start, usz token_line, usz token_col);
+static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start,
+                        bool is_negative);
+static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start,
+                        usz token_line, usz token_col);
 static void scan_comment(tick_lex_t* lex, tick_tok_t* tok, usz start);
 static tick_tok_type_t check_keyword(const u8* start, usz length);
 
-void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc, tick_buf_t errbuf) {
+void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc,
+                   tick_buf_t errbuf) {
   lex->input = input;
   lex->alloc = alloc;
   lex->errbuf = errbuf;
@@ -111,9 +119,7 @@ void tick_lex_next(tick_lex_t* lex, tick_tok_t* tok) {
   scan_token(lex, tok, token_start, token_line, token_col);
 }
 
-static bool is_at_end(tick_lex_t* lex) {
-  return lex->pos >= lex->input.sz;
-}
+static bool is_at_end(tick_lex_t* lex) { return lex->pos >= lex->input.sz; }
 
 static char advance(tick_lex_t* lex) {
   if (is_at_end(lex)) return '\0';
@@ -156,14 +162,16 @@ static void skip_whitespace(tick_lex_t* lex) {
   }
 }
 
-static void make_token(tick_lex_t* lex, tick_tok_t* tok, tick_tok_type_t type, usz start) {
+static void make_token(tick_lex_t* lex, tick_tok_t* tok, tick_tok_type_t type,
+                       usz start) {
   tok->type = type;
   tok->text.buf = lex->input.buf + start;
   tok->text.sz = lex->pos - start;
   tok->literal.u64 = 0;  // Initialize to zero
 }
 
-static void error_token(tick_lex_t* lex, tick_tok_t* tok, const char* message, usz token_line, usz token_col) {
+static void error_token(tick_lex_t* lex, tick_tok_t* tok, const char* message,
+                        usz token_line, usz token_col) {
   tok->type = TICK_TOK_ERR;
   tok->text.buf = NULL;
   tok->text.sz = 0;
@@ -173,12 +181,13 @@ static void error_token(tick_lex_t* lex, tick_tok_t* tok, const char* message, u
   // Write error message to errbuf if there's space
   if (lex->errbuf.buf && lex->errbuf.sz > 0) {
     // Format: "line:col: error message\n"
-    snprintf((char*)lex->errbuf.buf, lex->errbuf.sz,
-             "%zu:%zu: %s\n", token_line, token_col, message);
+    snprintf((char*)lex->errbuf.buf, lex->errbuf.sz, "%zu:%zu: %s\n",
+             token_line, token_col, message);
   }
 }
 
-static uint64_t parse_hex_number(const u8* start, usz length, bool is_negative) {
+static uint64_t parse_hex_number(const u8* start, usz length,
+                                 bool is_negative) {
   uint64_t value = 0;
   usz offset = is_negative ? 3 : 2;  // Skip '-0x' or '0x'
   for (usz i = offset; i < length; i++) {
@@ -197,7 +206,8 @@ static uint64_t parse_hex_number(const u8* start, usz length, bool is_negative) 
   return value;
 }
 
-static uint64_t parse_octal_number(const u8* start, usz length, bool is_negative) {
+static uint64_t parse_octal_number(const u8* start, usz length,
+                                   bool is_negative) {
   uint64_t value = 0;
   usz offset = is_negative ? 3 : 2;  // Skip '-0o' or '0o'
   for (usz i = offset; i < length; i++) {
@@ -208,7 +218,8 @@ static uint64_t parse_octal_number(const u8* start, usz length, bool is_negative
   return value;
 }
 
-static uint64_t parse_binary_number(const u8* start, usz length, bool is_negative) {
+static uint64_t parse_binary_number(const u8* start, usz length,
+                                    bool is_negative) {
   uint64_t value = 0;
   usz offset = is_negative ? 3 : 2;  // Skip '-0b' or '0b'
   for (usz i = offset; i < length; i++) {
@@ -219,7 +230,8 @@ static uint64_t parse_binary_number(const u8* start, usz length, bool is_negativ
   return value;
 }
 
-static uint64_t parse_decimal_number(const u8* start, usz length, bool is_negative) {
+static uint64_t parse_decimal_number(const u8* start, usz length,
+                                     bool is_negative) {
   uint64_t value = 0;
   usz offset = is_negative ? 1 : 0;  // Skip '-' if negative
   for (usz i = offset; i < length; i++) {
@@ -264,7 +276,8 @@ static void scan_identifier(tick_lex_t* lex, tick_tok_t* tok, usz start) {
     tick_buf_t ident_buf = {0};
     tick_allocator_config_t config = {0};
 
-    if (lex->alloc.realloc(lex->alloc.ctx, &ident_buf, length + 1, &config) == TICK_OK) {
+    if (lex->alloc.realloc(lex->alloc.ctx, &ident_buf, length + 1, &config) ==
+        TICK_OK) {
       memcpy(ident_buf.buf, lex->input.buf + start, length);
       ident_buf.buf[length] = '\0';
       tok->text.buf = ident_buf.buf;
@@ -276,10 +289,12 @@ static void scan_identifier(tick_lex_t* lex, tick_tok_t* tok, usz start) {
   }
 }
 
-static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start, bool is_negative) {
+static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start,
+                        bool is_negative) {
   // Check for hex, octal, or binary prefix
-  // Note: when is_negative, lex->pos points to the first digit (not yet consumed)
-  // when !is_negative, lex->pos points past the first digit (already consumed)
+  // Note: when is_negative, lex->pos points to the first digit (not yet
+  // consumed) when !is_negative, lex->pos points past the first digit (already
+  // consumed)
   char first_char = is_negative ? peek(lex) : lex->input.buf[start];
 
   if (first_char == '0') {
@@ -290,69 +305,81 @@ static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start, bool is_neg
       char next = peek(lex);
 
       if (next == 'x' || next == 'X') {
-      // Hexadecimal
-      advance(lex);  // 'x'
+        // Hexadecimal
+        advance(lex);  // 'x'
 
-      if (!IS_HEX_DIGIT(peek(lex))) {
-        error_token(lex, tok, "Expected hex digit after '0x'", tok->line, tok->col);
+        if (!IS_HEX_DIGIT(peek(lex))) {
+          error_token(lex, tok, "Expected hex digit after '0x'", tok->line,
+                      tok->col);
+          return;
+        }
+
+        while (IS_HEX_DIGIT(peek(lex)) || peek(lex) == '_') {
+          advance(lex);
+        }
+
+        uint64_t value = parse_hex_number(lex->input.buf + start,
+                                          lex->pos - start, is_negative);
+        make_token(lex, tok,
+                   is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL,
+                   start);
+        if (is_negative) {
+          tok->literal.i64 = -(int64_t)value;
+        } else {
+          tok->literal.u64 = value;
+        }
+        return;
+      } else if (next == 'o' || next == 'O') {
+        // Octal
+        advance(lex);  // 'o'
+
+        if (!IS_OCTAL_DIGIT(peek(lex))) {
+          error_token(lex, tok, "Expected octal digit after '0o'", tok->line,
+                      tok->col);
+          return;
+        }
+
+        while (IS_OCTAL_DIGIT(peek(lex)) || peek(lex) == '_') {
+          advance(lex);
+        }
+
+        uint64_t value = parse_octal_number(lex->input.buf + start,
+                                            lex->pos - start, is_negative);
+        make_token(lex, tok,
+                   is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL,
+                   start);
+        if (is_negative) {
+          tok->literal.i64 = -(int64_t)value;
+        } else {
+          tok->literal.u64 = value;
+        }
+        return;
+      } else if (next == 'b' || next == 'B') {
+        // Binary
+        advance(lex);  // 'b'
+
+        if (!IS_BINARY_DIGIT(peek(lex))) {
+          error_token(lex, tok, "Expected binary digit after '0b'", tok->line,
+                      tok->col);
+          return;
+        }
+
+        while (IS_BINARY_DIGIT(peek(lex)) || peek(lex) == '_') {
+          advance(lex);
+        }
+
+        uint64_t value = parse_binary_number(lex->input.buf + start,
+                                             lex->pos - start, is_negative);
+        make_token(lex, tok,
+                   is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL,
+                   start);
+        if (is_negative) {
+          tok->literal.i64 = -(int64_t)value;
+        } else {
+          tok->literal.u64 = value;
+        }
         return;
       }
-
-      while (IS_HEX_DIGIT(peek(lex)) || peek(lex) == '_') {
-        advance(lex);
-      }
-
-      uint64_t value = parse_hex_number(lex->input.buf + start, lex->pos - start, is_negative);
-      make_token(lex, tok, is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL, start);
-      if (is_negative) {
-        tok->literal.i64 = -(int64_t)value;
-      } else {
-        tok->literal.u64 = value;
-      }
-      return;
-    } else if (next == 'o' || next == 'O') {
-      // Octal
-      advance(lex);  // 'o'
-
-      if (!IS_OCTAL_DIGIT(peek(lex))) {
-        error_token(lex, tok, "Expected octal digit after '0o'", tok->line, tok->col);
-        return;
-      }
-
-      while (IS_OCTAL_DIGIT(peek(lex)) || peek(lex) == '_') {
-        advance(lex);
-      }
-
-      uint64_t value = parse_octal_number(lex->input.buf + start, lex->pos - start, is_negative);
-      make_token(lex, tok, is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL, start);
-      if (is_negative) {
-        tok->literal.i64 = -(int64_t)value;
-      } else {
-        tok->literal.u64 = value;
-      }
-      return;
-    } else if (next == 'b' || next == 'B') {
-      // Binary
-      advance(lex);  // 'b'
-
-      if (!IS_BINARY_DIGIT(peek(lex))) {
-        error_token(lex, tok, "Expected binary digit after '0b'", tok->line, tok->col);
-        return;
-      }
-
-      while (IS_BINARY_DIGIT(peek(lex)) || peek(lex) == '_') {
-        advance(lex);
-      }
-
-      uint64_t value = parse_binary_number(lex->input.buf + start, lex->pos - start, is_negative);
-      make_token(lex, tok, is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL, start);
-      if (is_negative) {
-        tok->literal.i64 = -(int64_t)value;
-      } else {
-        tok->literal.u64 = value;
-      }
-      return;
-    }
     }
   }
 
@@ -370,8 +397,10 @@ static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start, bool is_neg
     advance(lex);
   }
 
-  uint64_t value = parse_decimal_number(lex->input.buf + start, lex->pos - start, is_negative);
-  make_token(lex, tok, is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL, start);
+  uint64_t value = parse_decimal_number(lex->input.buf + start,
+                                        lex->pos - start, is_negative);
+  make_token(lex, tok,
+             is_negative ? TICK_TOK_INT_LITERAL : TICK_TOK_UINT_LITERAL, start);
   if (is_negative) {
     tok->literal.i64 = -(int64_t)value;
   } else {
@@ -382,19 +411,27 @@ static void scan_number(tick_lex_t* lex, tick_tok_t* tok, usz start, bool is_neg
 static char parse_escape_sequence(tick_lex_t* lex) {
   char c = advance(lex);
   switch (c) {
-    case 'n': return '\n';
-    case 'r': return '\r';
-    case 't': return '\t';
-    case '\\': return '\\';
-    case '"': return '"';
-    case '\'': return '\'';
-    case '0': return '\0';
+    case 'n':
+      return '\n';
+    case 'r':
+      return '\r';
+    case 't':
+      return '\t';
+    case '\\':
+      return '\\';
+    case '"':
+      return '"';
+    case '\'':
+      return '\'';
+    case '0':
+      return '\0';
     default:
       return c;  // Unknown escape, just return the character
   }
 }
 
-static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start, usz token_line, usz token_col) {
+static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start,
+                        usz token_line, usz token_col) {
   UNUSED(start);
   // Build the string with escape sequences processed
   tick_buf_t str_buf = {0};
@@ -402,14 +439,17 @@ static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start, usz token_l
   usz length = 0;
 
   tick_allocator_config_t config = {0};
-  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, capacity, &config) != TICK_OK) {
-    error_token(lex, tok, "Failed to allocate string buffer", token_line, token_col);
+  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, capacity, &config) !=
+      TICK_OK) {
+    error_token(lex, tok, "Failed to allocate string buffer", token_line,
+                token_col);
     return;
   }
 
   while (!is_at_end(lex) && peek(lex) != '"') {
     if (peek(lex) == '\n') {
-      error_token(lex, tok, "Unterminated string literal", token_line, token_col);
+      error_token(lex, tok, "Unterminated string literal", token_line,
+                  token_col);
       return;
     }
 
@@ -424,8 +464,10 @@ static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start, usz token_l
     // Grow buffer if needed
     if (length >= capacity) {
       capacity *= 2;
-      if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, capacity, &config) != TICK_OK) {
-        error_token(lex, tok, "Failed to grow string buffer", token_line, token_col);
+      if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, capacity, &config) !=
+          TICK_OK) {
+        error_token(lex, tok, "Failed to grow string buffer", token_line,
+                    token_col);
         return;
       }
     }
@@ -442,7 +484,8 @@ static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start, usz token_l
   advance(lex);
 
   // Null-terminate and shrink to fit
-  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, length + 1, &config) == TICK_OK) {
+  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, length + 1, &config) ==
+      TICK_OK) {
     str_buf.buf[length] = '\0';
   }
 
@@ -462,102 +505,198 @@ static void scan_comment(tick_lex_t* lex, tick_tok_t* tok, usz start) {
 
 static const char* tok_type_name(tick_tok_type_t type) {
   switch (type) {
-    case TICK_TOK_EOF: return "EOF";
-    case TICK_TOK_ERR: return "ERR";
-    case TICK_TOK_IDENT: return "IDENT";
-    case TICK_TOK_AT_BUILTIN: return "AT_BUILTIN";
-    case TICK_TOK_UINT_LITERAL: return "UINT_LITERAL";
-    case TICK_TOK_INT_LITERAL: return "INT_LITERAL";
-    case TICK_TOK_STRING_LITERAL: return "STRING_LITERAL";
-    case TICK_TOK_BOOL_LITERAL: return "BOOL_LITERAL";
-    case TICK_TOK_NULL: return "null";
-    case TICK_TOK_BOOL: return "bool";
-    case TICK_TOK_I8: return "i8";
-    case TICK_TOK_I16: return "i16";
-    case TICK_TOK_I32: return "i32";
-    case TICK_TOK_I64: return "i64";
-    case TICK_TOK_ISZ: return "isz";
-    case TICK_TOK_U8: return "u8";
-    case TICK_TOK_U16: return "u16";
-    case TICK_TOK_U32: return "u32";
-    case TICK_TOK_U64: return "u64";
-    case TICK_TOK_USZ: return "usz";
-    case TICK_TOK_VOID: return "void";
-    case TICK_TOK_ALIGN: return "align";
-    case TICK_TOK_AND: return "and";
-    case TICK_TOK_AS: return "as";
-    case TICK_TOK_ASYNC: return "async";
-    case TICK_TOK_BREAK: return "break";
-    case TICK_TOK_CASE: return "case";
-    case TICK_TOK_CATCH: return "catch";
-    case TICK_TOK_CONTINUE: return "continue";
-    case TICK_TOK_DEFAULT: return "default";
-    case TICK_TOK_DEFER: return "defer";
-    case TICK_TOK_ELSE: return "else";
-    case TICK_TOK_ENUM: return "enum";
-    case TICK_TOK_ERRDEFER: return "errdefer";
-    case TICK_TOK_EXTERN: return "extern";
-    case TICK_TOK_FN: return "fn";
-    case TICK_TOK_FOR: return "for";
-    case TICK_TOK_IF: return "if";
-    case TICK_TOK_IMPORT: return "import";
-    case TICK_TOK_LET: return "let";
-    case TICK_TOK_OR: return "or";
-    case TICK_TOK_ORELSE: return "orelse";
-    case TICK_TOK_PACKED: return "packed";
-    case TICK_TOK_PUB: return "pub";
-    case TICK_TOK_RESUME: return "resume";
-    case TICK_TOK_RETURN: return "return";
-    case TICK_TOK_STRUCT: return "struct";
-    case TICK_TOK_SUSPEND: return "suspend";
-    case TICK_TOK_SWITCH: return "switch";
-    case TICK_TOK_TRY: return "try";
-    case TICK_TOK_UNION: return "union";
-    case TICK_TOK_VAR: return "var";
-    case TICK_TOK_VOLATILE: return "volatile";
-    case TICK_TOK_LPAREN: return "(";
-    case TICK_TOK_RPAREN: return ")";
-    case TICK_TOK_LBRACE: return "{";
-    case TICK_TOK_RBRACE: return "}";
-    case TICK_TOK_LBRACKET: return "[";
-    case TICK_TOK_RBRACKET: return "]";
-    case TICK_TOK_COMMA: return ",";
-    case TICK_TOK_SEMICOLON: return ";";
-    case TICK_TOK_COLON: return ":";
-    case TICK_TOK_DOT: return ".";
-    case TICK_TOK_QUESTION: return "?";
-    case TICK_TOK_DOT_QUESTION: return ".?";
-    case TICK_TOK_UNDERSCORE: return "_";
-    case TICK_TOK_AT: return "@";
-    case TICK_TOK_PLUS: return "+";
-    case TICK_TOK_MINUS: return "-";
-    case TICK_TOK_STAR: return "*";
-    case TICK_TOK_SLASH: return "/";
-    case TICK_TOK_PERCENT: return "%";
-    case TICK_TOK_AMPERSAND: return "&";
-    case TICK_TOK_PIPE: return "|";
-    case TICK_TOK_CARET: return "^";
-    case TICK_TOK_TILDE: return "~";
-    case TICK_TOK_BANG: return "!";
-    case TICK_TOK_EQ: return "=";
-    case TICK_TOK_LT: return "<";
-    case TICK_TOK_GT: return ">";
-    case TICK_TOK_PLUS_PIPE: return "+|";
-    case TICK_TOK_MINUS_PIPE: return "-|";
-    case TICK_TOK_STAR_PIPE: return "*|";
-    case TICK_TOK_SLASH_PIPE: return "/|";
-    case TICK_TOK_PLUS_PERCENT: return "+%";
-    case TICK_TOK_MINUS_PERCENT: return "-%";
-    case TICK_TOK_STAR_PERCENT: return "*%";
-    case TICK_TOK_SLASH_PERCENT: return "/%";
-    case TICK_TOK_BANG_EQ: return "!=";
-    case TICK_TOK_EQ_EQ: return "==";
-    case TICK_TOK_LT_EQ: return "<=";
-    case TICK_TOK_GT_EQ: return ">=";
-    case TICK_TOK_LSHIFT: return "<<";
-    case TICK_TOK_RSHIFT: return ">>";
-    case TICK_TOK_COMMENT: return "COMMENT";
-    default: return "UNKNOWN";
+    case TICK_TOK_EOF:
+      return "EOF";
+    case TICK_TOK_ERR:
+      return "ERR";
+    case TICK_TOK_IDENT:
+      return "IDENT";
+    case TICK_TOK_AT_BUILTIN:
+      return "AT_BUILTIN";
+    case TICK_TOK_UINT_LITERAL:
+      return "UINT_LITERAL";
+    case TICK_TOK_INT_LITERAL:
+      return "INT_LITERAL";
+    case TICK_TOK_STRING_LITERAL:
+      return "STRING_LITERAL";
+    case TICK_TOK_BOOL_LITERAL:
+      return "BOOL_LITERAL";
+    case TICK_TOK_NULL:
+      return "null";
+    case TICK_TOK_BOOL:
+      return "bool";
+    case TICK_TOK_I8:
+      return "i8";
+    case TICK_TOK_I16:
+      return "i16";
+    case TICK_TOK_I32:
+      return "i32";
+    case TICK_TOK_I64:
+      return "i64";
+    case TICK_TOK_ISZ:
+      return "isz";
+    case TICK_TOK_U8:
+      return "u8";
+    case TICK_TOK_U16:
+      return "u16";
+    case TICK_TOK_U32:
+      return "u32";
+    case TICK_TOK_U64:
+      return "u64";
+    case TICK_TOK_USZ:
+      return "usz";
+    case TICK_TOK_VOID:
+      return "void";
+    case TICK_TOK_ALIGN:
+      return "align";
+    case TICK_TOK_AND:
+      return "and";
+    case TICK_TOK_AS:
+      return "as";
+    case TICK_TOK_ASYNC:
+      return "async";
+    case TICK_TOK_BREAK:
+      return "break";
+    case TICK_TOK_CASE:
+      return "case";
+    case TICK_TOK_CATCH:
+      return "catch";
+    case TICK_TOK_CONTINUE:
+      return "continue";
+    case TICK_TOK_DEFAULT:
+      return "default";
+    case TICK_TOK_DEFER:
+      return "defer";
+    case TICK_TOK_ELSE:
+      return "else";
+    case TICK_TOK_ENUM:
+      return "enum";
+    case TICK_TOK_ERRDEFER:
+      return "errdefer";
+    case TICK_TOK_EXTERN:
+      return "extern";
+    case TICK_TOK_FN:
+      return "fn";
+    case TICK_TOK_FOR:
+      return "for";
+    case TICK_TOK_IF:
+      return "if";
+    case TICK_TOK_IMPORT:
+      return "import";
+    case TICK_TOK_LET:
+      return "let";
+    case TICK_TOK_OR:
+      return "or";
+    case TICK_TOK_ORELSE:
+      return "orelse";
+    case TICK_TOK_PACKED:
+      return "packed";
+    case TICK_TOK_PUB:
+      return "pub";
+    case TICK_TOK_RESUME:
+      return "resume";
+    case TICK_TOK_RETURN:
+      return "return";
+    case TICK_TOK_STRUCT:
+      return "struct";
+    case TICK_TOK_SUSPEND:
+      return "suspend";
+    case TICK_TOK_SWITCH:
+      return "switch";
+    case TICK_TOK_TRY:
+      return "try";
+    case TICK_TOK_UNION:
+      return "union";
+    case TICK_TOK_VAR:
+      return "var";
+    case TICK_TOK_VOLATILE:
+      return "volatile";
+    case TICK_TOK_LPAREN:
+      return "(";
+    case TICK_TOK_RPAREN:
+      return ")";
+    case TICK_TOK_LBRACE:
+      return "{";
+    case TICK_TOK_RBRACE:
+      return "}";
+    case TICK_TOK_LBRACKET:
+      return "[";
+    case TICK_TOK_RBRACKET:
+      return "]";
+    case TICK_TOK_COMMA:
+      return ",";
+    case TICK_TOK_SEMICOLON:
+      return ";";
+    case TICK_TOK_COLON:
+      return ":";
+    case TICK_TOK_DOT:
+      return ".";
+    case TICK_TOK_QUESTION:
+      return "?";
+    case TICK_TOK_DOT_QUESTION:
+      return ".?";
+    case TICK_TOK_UNDERSCORE:
+      return "_";
+    case TICK_TOK_AT:
+      return "@";
+    case TICK_TOK_PLUS:
+      return "+";
+    case TICK_TOK_MINUS:
+      return "-";
+    case TICK_TOK_STAR:
+      return "*";
+    case TICK_TOK_SLASH:
+      return "/";
+    case TICK_TOK_PERCENT:
+      return "%";
+    case TICK_TOK_AMPERSAND:
+      return "&";
+    case TICK_TOK_PIPE:
+      return "|";
+    case TICK_TOK_CARET:
+      return "^";
+    case TICK_TOK_TILDE:
+      return "~";
+    case TICK_TOK_BANG:
+      return "!";
+    case TICK_TOK_EQ:
+      return "=";
+    case TICK_TOK_LT:
+      return "<";
+    case TICK_TOK_GT:
+      return ">";
+    case TICK_TOK_PLUS_PIPE:
+      return "+|";
+    case TICK_TOK_MINUS_PIPE:
+      return "-|";
+    case TICK_TOK_STAR_PIPE:
+      return "*|";
+    case TICK_TOK_SLASH_PIPE:
+      return "/|";
+    case TICK_TOK_PLUS_PERCENT:
+      return "+%";
+    case TICK_TOK_MINUS_PERCENT:
+      return "-%";
+    case TICK_TOK_STAR_PERCENT:
+      return "*%";
+    case TICK_TOK_SLASH_PERCENT:
+      return "/%";
+    case TICK_TOK_BANG_EQ:
+      return "!=";
+    case TICK_TOK_EQ_EQ:
+      return "==";
+    case TICK_TOK_LT_EQ:
+      return "<=";
+    case TICK_TOK_GT_EQ:
+      return ">=";
+    case TICK_TOK_LSHIFT:
+      return "<<";
+    case TICK_TOK_RSHIFT:
+      return ">>";
+    case TICK_TOK_COMMENT:
+      return "COMMENT";
+    default:
+      return "UNKNOWN";
   }
 }
 
@@ -567,52 +706,46 @@ const char* tick_tok_format(tick_tok_t* tok, char* buf, usz buf_sz) {
   switch (tok->type) {
     case TICK_TOK_IDENT:
     case TICK_TOK_AT_BUILTIN:
-      snprintf(buf, buf_sz, "%zu:%zu %s '%.*s'",
-               tok->line, tok->col, type_name,
+      snprintf(buf, buf_sz, "%zu:%zu %s '%.*s'", tok->line, tok->col, type_name,
                (int)tok->text.sz, tok->text.buf);
       break;
     case TICK_TOK_UINT_LITERAL:
-      snprintf(buf, buf_sz, "%zu:%zu %s %llu",
-               tok->line, tok->col, type_name, (unsigned long long)tok->literal.u64);
+      snprintf(buf, buf_sz, "%zu:%zu %s %llu", tok->line, tok->col, type_name,
+               (unsigned long long)tok->literal.u64);
       break;
     case TICK_TOK_INT_LITERAL:
-      snprintf(buf, buf_sz, "%zu:%zu %s %lld",
-               tok->line, tok->col, type_name, (long long)tok->literal.i64);
+      snprintf(buf, buf_sz, "%zu:%zu %s %lld", tok->line, tok->col, type_name,
+               (long long)tok->literal.i64);
       break;
     case TICK_TOK_STRING_LITERAL:
-      snprintf(buf, buf_sz, "%zu:%zu %s \"%.*s\"",
-               tok->line, tok->col, type_name,
-               (int)tok->text.sz, tok->text.buf);
+      snprintf(buf, buf_sz, "%zu:%zu %s \"%.*s\"", tok->line, tok->col,
+               type_name, (int)tok->text.sz, tok->text.buf);
       break;
     case TICK_TOK_BOOL_LITERAL:
-      snprintf(buf, buf_sz, "%zu:%zu %s %s",
-               tok->line, tok->col, type_name,
+      snprintf(buf, buf_sz, "%zu:%zu %s %s", tok->line, tok->col, type_name,
                tok->literal.u64 ? "true" : "false");
       break;
     case TICK_TOK_COMMENT:
-      snprintf(buf, buf_sz, "%zu:%zu %s '%.*s'",
-               tok->line, tok->col, type_name,
+      snprintf(buf, buf_sz, "%zu:%zu %s '%.*s'", tok->line, tok->col, type_name,
                (int)tok->text.sz, tok->text.buf);
       break;
     case TICK_TOK_EOF:
-      snprintf(buf, buf_sz, "%zu:%zu %s",
-               tok->line, tok->col, type_name);
+      snprintf(buf, buf_sz, "%zu:%zu %s", tok->line, tok->col, type_name);
       break;
     case TICK_TOK_ERR:
-      snprintf(buf, buf_sz, "%zu:%zu %s",
-               tok->line, tok->col, type_name);
+      snprintf(buf, buf_sz, "%zu:%zu %s", tok->line, tok->col, type_name);
       break;
     default:
       // For keywords and operators, just show the type name
-      snprintf(buf, buf_sz, "%zu:%zu %s",
-               tok->line, tok->col, type_name);
+      snprintf(buf, buf_sz, "%zu:%zu %s", tok->line, tok->col, type_name);
       break;
   }
 
   return buf;
 }
 
-static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz token_line, usz token_col) {
+static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start,
+                       usz token_line, usz token_col) {
   UNUSED(token_start);
   usz start = lex->pos;
   char c = advance(lex);
@@ -634,17 +767,39 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
 
   switch (c) {
     // Single-character tokens
-    case '(': make_token(lex, tok, TICK_TOK_LPAREN, start); return;
-    case ')': make_token(lex, tok, TICK_TOK_RPAREN, start); return;
-    case '{': make_token(lex, tok, TICK_TOK_LBRACE, start); return;
-    case '}': make_token(lex, tok, TICK_TOK_RBRACE, start); return;
-    case '[': make_token(lex, tok, TICK_TOK_LBRACKET, start); return;
-    case ']': make_token(lex, tok, TICK_TOK_RBRACKET, start); return;
-    case ',': make_token(lex, tok, TICK_TOK_COMMA, start); return;
-    case ';': make_token(lex, tok, TICK_TOK_SEMICOLON, start); return;
-    case ':': make_token(lex, tok, TICK_TOK_COLON, start); return;
-    case '~': make_token(lex, tok, TICK_TOK_TILDE, start); return;
-    case '?': make_token(lex, tok, TICK_TOK_QUESTION, start); return;
+    case '(':
+      make_token(lex, tok, TICK_TOK_LPAREN, start);
+      return;
+    case ')':
+      make_token(lex, tok, TICK_TOK_RPAREN, start);
+      return;
+    case '{':
+      make_token(lex, tok, TICK_TOK_LBRACE, start);
+      return;
+    case '}':
+      make_token(lex, tok, TICK_TOK_RBRACE, start);
+      return;
+    case '[':
+      make_token(lex, tok, TICK_TOK_LBRACKET, start);
+      return;
+    case ']':
+      make_token(lex, tok, TICK_TOK_RBRACKET, start);
+      return;
+    case ',':
+      make_token(lex, tok, TICK_TOK_COMMA, start);
+      return;
+    case ';':
+      make_token(lex, tok, TICK_TOK_SEMICOLON, start);
+      return;
+    case ':':
+      make_token(lex, tok, TICK_TOK_COLON, start);
+      return;
+    case '~':
+      make_token(lex, tok, TICK_TOK_TILDE, start);
+      return;
+    case '?':
+      make_token(lex, tok, TICK_TOK_QUESTION, start);
+      return;
     case '@':
       // Check if this is @identifier (AT_BUILTIN) or just @ (for struct init)
       if (IS_ALPHA(peek(lex))) {
@@ -658,7 +813,8 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
         tick_buf_t builtin_buf = {0};
         tick_allocator_config_t config = {0};
 
-        if (lex->alloc.realloc(lex->alloc.ctx, &builtin_buf, length + 1, &config) == TICK_OK) {
+        if (lex->alloc.realloc(lex->alloc.ctx, &builtin_buf, length + 1,
+                               &config) == TICK_OK) {
           memcpy(builtin_buf.buf, lex->input.buf + start, length);
           builtin_buf.buf[length] = '\0';
           tok->type = TICK_TOK_AT_BUILTIN;
@@ -667,7 +823,8 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
           tok->line = token_line;
           tok->col = token_col;
         } else {
-          error_token(lex, tok, "Failed to allocate memory for builtin", token_line, token_col);
+          error_token(lex, tok, "Failed to allocate memory for builtin",
+                      token_line, token_col);
         }
       } else {
         // Just @ for struct initialization
@@ -728,23 +885,27 @@ static void scan_token(tick_lex_t* lex, tick_tok_t* tok, usz token_start, usz to
       make_token(lex, tok, TICK_TOK_PERCENT, start);
       return;
     case '!':
-      make_token(lex, tok, match(lex, '=') ? TICK_TOK_BANG_EQ : TICK_TOK_BANG, start);
+      make_token(lex, tok, match(lex, '=') ? TICK_TOK_BANG_EQ : TICK_TOK_BANG,
+                 start);
       return;
     case '=':
-      make_token(lex, tok, match(lex, '=') ? TICK_TOK_EQ_EQ : TICK_TOK_EQ, start);
+      make_token(lex, tok, match(lex, '=') ? TICK_TOK_EQ_EQ : TICK_TOK_EQ,
+                 start);
       return;
     case '<':
       if (match(lex, '<')) {
         make_token(lex, tok, TICK_TOK_LSHIFT, start);
       } else {
-        make_token(lex, tok, match(lex, '=') ? TICK_TOK_LT_EQ : TICK_TOK_LT, start);
+        make_token(lex, tok, match(lex, '=') ? TICK_TOK_LT_EQ : TICK_TOK_LT,
+                   start);
       }
       return;
     case '>':
       if (match(lex, '>')) {
         make_token(lex, tok, TICK_TOK_RSHIFT, start);
       } else {
-        make_token(lex, tok, match(lex, '=') ? TICK_TOK_GT_EQ : TICK_TOK_GT, start);
+        make_token(lex, tok, match(lex, '=') ? TICK_TOK_GT_EQ : TICK_TOK_GT,
+                   start);
       }
       return;
     case '.':

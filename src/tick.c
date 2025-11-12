@@ -4,7 +4,8 @@
 // Driver functions
 // ============================================================================
 
-tick_cli_result_t tick_driver_parse_args(tick_driver_args_t* args, int argc, char** argv) {
+tick_cli_result_t tick_driver_parse_args(tick_driver_args_t* args, int argc,
+                                         char** argv) {
   // Need at least: tick emitc <input> -o <output>
   if (argc < 2) {
     return TICK_CLI_ERR;
@@ -64,7 +65,8 @@ tick_cli_result_t tick_driver_parse_args(tick_driver_args_t* args, int argc, cha
   return TICK_CLI_OK;
 }
 
-tick_err_t tick_driver_read_file(tick_alloc_t* alloc, tick_buf_t* output, tick_buf_t path) {
+tick_err_t tick_driver_read_file(tick_alloc_t* alloc, tick_buf_t* output,
+                                 tick_buf_t path) {
   // Check if path is already null-terminated
   const char* path_str;
   char path_buf[PATH_MAX];
@@ -114,7 +116,9 @@ tick_err_t tick_driver_read_file(tick_alloc_t* alloc, tick_buf_t* output, tick_b
 // Allocator functions
 // ============================================================================
 
-static tick_err_t tick_allocator_libc_realloc(void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config) {
+static tick_err_t tick_allocator_libc_realloc(void* ctx, tick_buf_t* buf,
+                                              usz newsz,
+                                              tick_allocator_config_t* config) {
   UNUSED(ctx);
 
   // Use default config if NULL/0
@@ -187,8 +191,8 @@ static tick_err_t tick_allocator_libc_realloc(void* ctx, tick_buf_t* buf, usz ne
 
 tick_alloc_t tick_allocator_libc(void) {
   tick_alloc_t alloc = {
-    .realloc = tick_allocator_libc_realloc,
-    .ctx = NULL,
+      .realloc = tick_allocator_libc_realloc,
+      .ctx = NULL,
   };
   return alloc;
 }
@@ -202,7 +206,8 @@ typedef struct tick_alloc_seglist_segment_t {
 
 #define SEGLIST_SEGMENT_SIZE (64 * 1024)  // 64KB segments
 
-static tick_err_t tick_allocator_seglist_realloc(void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config) {
+static tick_err_t tick_allocator_seglist_realloc(
+    void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config) {
   tick_alloc_seglist_t* seglist = (tick_alloc_seglist_t*)ctx;
 
   // Only support allocation, not reallocation
@@ -222,7 +227,8 @@ static tick_err_t tick_allocator_seglist_realloc(void* ctx, tick_buf_t* buf, usz
   }
 
   // Get current segment
-  tick_alloc_seglist_segment_t* seg = (tick_alloc_seglist_segment_t*)seglist->segments;
+  tick_alloc_seglist_segment_t* seg =
+      (tick_alloc_seglist_segment_t*)seglist->segments;
 
   // Handle alignment - default to max_align_t for proper platform alignment
   usz alignment = _Alignof(max_align_t);
@@ -260,11 +266,13 @@ static tick_err_t tick_allocator_seglist_realloc(void* ctx, tick_buf_t* buf, usz
   tick_buf_t seg_buf = {NULL, 0};
   tick_allocator_config_t seg_config = {.flags = 0, .alignment2 = 0};
   usz total_size = sizeof(tick_alloc_seglist_segment_t) + seg_size;
-  if (seglist->backing.realloc(seglist->backing.ctx, &seg_buf, total_size, &seg_config) != TICK_OK) {
+  if (seglist->backing.realloc(seglist->backing.ctx, &seg_buf, total_size,
+                               &seg_config) != TICK_OK) {
     return TICK_ERR;
   }
 
-  tick_alloc_seglist_segment_t* new_seg = (tick_alloc_seglist_segment_t*)seg_buf.buf;
+  tick_alloc_seglist_segment_t* new_seg =
+      (tick_alloc_seglist_segment_t*)seg_buf.buf;
   new_seg->next = seg;
   new_seg->size = seg_size;
   new_seg->used = newsz;
@@ -281,14 +289,15 @@ static tick_err_t tick_allocator_seglist_realloc(void* ctx, tick_buf_t* buf, usz
   return TICK_OK;
 }
 
-tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t backing) {
+tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist,
+                                    tick_alloc_t backing) {
   seglist->backing = backing;
   seglist->segments = NULL;
   seglist->total_allocated = 0;
 
   tick_alloc_t alloc = {
-    .realloc = tick_allocator_seglist_realloc,
-    .ctx = seglist,
+      .realloc = tick_allocator_seglist_realloc,
+      .ctx = seglist,
   };
   return alloc;
 }
@@ -298,12 +307,13 @@ tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t 
 // ============================================================================
 
 // Forward declarations for Lemon-generated parser
-void *ParseAlloc(void *(*mallocProc)(size_t));
-void Parse(void *yyp, int yymajor, tick_tok_t yyminor, tick_parse_t* parse);
-void ParseFree(void *p, void (*freeProc)(void*));
-void ParseTrace(FILE *stream, char *zPrefix);
+void* ParseAlloc(void* (*mallocProc)(size_t));
+void Parse(void* yyp, int yymajor, tick_tok_t yyminor, tick_parse_t* parse);
+void ParseFree(void* p, void (*freeProc)(void*));
+void ParseTrace(FILE* stream, char* zPrefix);
 
-void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf) {
+void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc,
+                     tick_buf_t errbuf) {
   parse->alloc = alloc;
   parse->errbuf = errbuf;
   parse->root.root = NULL;
@@ -348,20 +358,34 @@ tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok) {
 
 const char* tick_ast_kind_str(tick_ast_node_kind_t kind) {
   switch (kind) {
-    case TICK_AST_LITERAL:         return "LITERAL";
-    case TICK_AST_ERROR:           return "ERROR";
-    case TICK_AST_MODULE:          return "MODULE";
-    case TICK_AST_IMPORT_DECL:     return "IMPORT_DECL";
-    case TICK_AST_DECL:            return "DECL";
-    case TICK_AST_FUNCTION_DECL:   return "FUNCTION_DECL";
-    case TICK_AST_RETURN_STMT:     return "RETURN_STMT";
-    case TICK_AST_BLOCK_STMT:      return "BLOCK_STMT";
-    case TICK_AST_EXPR_STMT:       return "EXPR_STMT";
-    case TICK_AST_BINARY_EXPR:     return "BINARY_EXPR";
-    case TICK_AST_IDENTIFIER_EXPR: return "IDENTIFIER_EXPR";
-    case TICK_AST_TYPE_NAMED:      return "TYPE_NAMED";
-    case TICK_AST_EXPORT_STMT:     return "EXPORT_STMT";
-    default:                       return "UNKNOWN";
+    case TICK_AST_LITERAL:
+      return "LITERAL";
+    case TICK_AST_ERROR:
+      return "ERROR";
+    case TICK_AST_MODULE:
+      return "MODULE";
+    case TICK_AST_IMPORT_DECL:
+      return "IMPORT_DECL";
+    case TICK_AST_DECL:
+      return "DECL";
+    case TICK_AST_FUNCTION_DECL:
+      return "FUNCTION_DECL";
+    case TICK_AST_RETURN_STMT:
+      return "RETURN_STMT";
+    case TICK_AST_BLOCK_STMT:
+      return "BLOCK_STMT";
+    case TICK_AST_EXPR_STMT:
+      return "EXPR_STMT";
+    case TICK_AST_BINARY_EXPR:
+      return "BINARY_EXPR";
+    case TICK_AST_IDENTIFIER_EXPR:
+      return "IDENTIFIER_EXPR";
+    case TICK_AST_TYPE_NAMED:
+      return "TYPE_NAMED";
+    case TICK_AST_EXPORT_STMT:
+      return "EXPORT_STMT";
+    default:
+      return "UNKNOWN";
   }
 }
 
@@ -374,7 +398,8 @@ void tick_ast_list_init(tick_ast_node_t* node) {
 
 // Append a node to a list, maintaining doubly-linked structure
 // Returns the head of the list (unchanged)
-tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head, tick_ast_node_t* node) {
+tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head,
+                                      tick_ast_node_t* node) {
   if (head == NULL) {
     // Empty list: initialize the node as a single-element list
     tick_ast_list_init(node);
@@ -397,7 +422,9 @@ tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head, tick_ast_node_t* no
 // Output functions
 // ============================================================================
 
-tick_err_t tick_output_format_name(tick_buf_t output_path, tick_path_t* output_h, tick_path_t* output_c) {
+tick_err_t tick_output_format_name(tick_buf_t output_path,
+                                   tick_path_t* output_h,
+                                   tick_path_t* output_c) {
   // Check if output path fits (need room for ".h" or ".c")
   if (output_path.sz + 2 >= PATH_MAX) {
     return TICK_ERR;
@@ -431,8 +458,8 @@ static tick_err_t tick_file_writer_write(void* ctx, tick_buf_t* buf) {
 
 tick_writer_t tick_file_writer(FILE* f) {
   tick_writer_t writer = {
-    .write = tick_file_writer_write,
-    .ctx = f,
+      .write = tick_file_writer_write,
+      .ctx = f,
   };
   return writer;
 }

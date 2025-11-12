@@ -84,6 +84,7 @@ int vsnprintf_(char* s, size_t count, const char* format, va_list arg);
  *     not counting the terminating null character
  *
  */
-int vfctprintf(void (*out)(char c, void* extra_arg), void* extra_arg, const char* format, va_list arg);
+int vfctprintf(void (*out)(char c, void* extra_arg), void* extra_arg,
+               const char* format, va_list arg);
 
-#endif  /* PRINTF_H_ */
+#endif /* PRINTF_H_ */

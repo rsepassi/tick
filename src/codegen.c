@@ -1,7 +1,7 @@
+#include <stdarg.h>
+
 #include "tick.h"
 #include "tick_runtime_embedded.h"
-
-#include <stdarg.h>
 
 // ============================================================================
 // Code Generation
@@ -106,7 +106,8 @@ static tick_err_t write_array_suffix(tick_writer_t* w, tick_ast_node_t* type) {
             "array size must be literal (no VLAs)");
       CHECK_OK(write_str(w, "["));
       CHECK_OK(write_fmt(w, "%llu",
-                        (unsigned long long)type->data.type_array.size->data.literal.data.uint_value));
+                         (unsigned long long)type->data.type_array.size->data
+                             .literal.data.uint_value));
       CHECK_OK(write_str(w, "]"));
     }
   }
@@ -122,7 +123,8 @@ static tick_err_t write_line_directive(codegen_ctx_t* ctx, usz line) {
   }
   ctx->last_line = line;
 
-  return write_fmt(ctx->writer, "#line %zu \"%s\"\n", line, ctx->source_filename);
+  return write_fmt(ctx->writer, "#line %zu \"%s\"\n", line,
+                   ctx->source_filename);
 }
 
 // ============================================================================
@@ -132,25 +134,39 @@ static tick_err_t write_line_directive(codegen_ctx_t* ctx, usz line) {
 static const char* binop_to_c(tick_binop_t op) {
   switch (op) {
     // Only comparisons and logical operators can be emitted directly
-    case BINOP_EQ: return "==";
-    case BINOP_NE: return "!=";
-    case BINOP_LT: return "<";
-    case BINOP_GT: return ">";
-    case BINOP_LE: return "<=";
-    case BINOP_GE: return ">=";
-    case BINOP_LOGICAL_AND: return "&&";
-    case BINOP_LOGICAL_OR: return "||";
+    case BINOP_EQ:
+      return "==";
+    case BINOP_NE:
+      return "!=";
+    case BINOP_LT:
+      return "<";
+    case BINOP_GT:
+      return ">";
+    case BINOP_LE:
+      return "<=";
+    case BINOP_GE:
+      return ">=";
+    case BINOP_LOGICAL_AND:
+      return "&&";
+    case BINOP_LOGICAL_OR:
+      return "||";
     // Bitwise operators - these are well-defined in C
-    case BINOP_AND: return "&";
-    case BINOP_OR: return "|";
-    case BINOP_XOR: return "^";
+    case BINOP_AND:
+      return "&";
+    case BINOP_OR:
+      return "|";
+    case BINOP_XOR:
+      return "^";
 
-    // All arithmetic and shift operations should be handled by codegen_binary_expr
-    // If we reach here, it means resolved_type was not set by analysis pass
+    // All arithmetic and shift operations should be handled by
+    // codegen_binary_expr If we reach here, it means resolved_type was not set
+    // by analysis pass
     case BINOP_ADD:
     case BINOP_SUB:
     case BINOP_MUL:
-      CHECK(0, "arithmetic operations must have resolved_type set by analysis pass");
+      CHECK(
+          0,
+          "arithmetic operations must have resolved_type set by analysis pass");
     case BINOP_DIV:
     case BINOP_MOD:
       CHECK(0, "division/modulo must have resolved_type set by analysis pass");
@@ -158,19 +174,24 @@ static const char* binop_to_c(tick_binop_t op) {
     case BINOP_RSHIFT:
       CHECK(0, "shift operations must have resolved_type set by analysis pass");
 
-    // Saturating and wrapping operations should be handled by codegen_binary_expr
+    // Saturating and wrapping operations should be handled by
+    // codegen_binary_expr
     case BINOP_SAT_ADD:
     case BINOP_SAT_SUB:
     case BINOP_SAT_MUL:
     case BINOP_SAT_DIV:
-      CHECK(0, "saturating operations must have resolved_type set by analysis pass");
+      CHECK(
+          0,
+          "saturating operations must have resolved_type set by analysis pass");
     case BINOP_WRAP_ADD:
     case BINOP_WRAP_SUB:
     case BINOP_WRAP_MUL:
     case BINOP_WRAP_DIV:
-      CHECK(0, "wrapping operations must have resolved_type set by analysis pass");
+      CHECK(0,
+            "wrapping operations must have resolved_type set by analysis pass");
 
-    default: return "?";
+    default:
+      return "?";
   }
 }
 
@@ -180,11 +201,16 @@ static const char* unop_to_c(tick_unop_t op) {
       // Negation should be handled by codegen_unary_expr for signed types
       // If we reach here, it means resolved_type was not set or it's unsigned
       CHECK(0, "negation must have resolved_type set by analysis pass");
-    case UNOP_NOT: return "!";
-    case UNOP_BIT_NOT: return "~";
-    case UNOP_ADDR: return "&";
-    case UNOP_DEREF: return "*";
-    default: return "?";
+    case UNOP_NOT:
+      return "!";
+    case UNOP_BIT_NOT:
+      return "~";
+    case UNOP_ADDR:
+      return "&";
+    case UNOP_DEREF:
+      return "*";
+    default:
+      return "?";
   }
 }
 
@@ -201,18 +227,30 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
     case TICK_AST_TYPE_NAMED: {
       // Map builtin types to C types using enum
       switch (type->data.type_named.builtin_type) {
-        case TICK_TYPE_I8: return write_str(w, "int8_t");
-        case TICK_TYPE_I16: return write_str(w, "int16_t");
-        case TICK_TYPE_I32: return write_str(w, "int32_t");
-        case TICK_TYPE_I64: return write_str(w, "int64_t");
-        case TICK_TYPE_ISZ: return write_str(w, "ptrdiff_t");
-        case TICK_TYPE_U8: return write_str(w, "uint8_t");
-        case TICK_TYPE_U16: return write_str(w, "uint16_t");
-        case TICK_TYPE_U32: return write_str(w, "uint32_t");
-        case TICK_TYPE_U64: return write_str(w, "uint64_t");
-        case TICK_TYPE_USZ: return write_str(w, "size_t");
-        case TICK_TYPE_BOOL: return write_str(w, "bool");
-        case TICK_TYPE_VOID: return write_str(w, "void");
+        case TICK_TYPE_I8:
+          return write_str(w, "int8_t");
+        case TICK_TYPE_I16:
+          return write_str(w, "int16_t");
+        case TICK_TYPE_I32:
+          return write_str(w, "int32_t");
+        case TICK_TYPE_I64:
+          return write_str(w, "int64_t");
+        case TICK_TYPE_ISZ:
+          return write_str(w, "ptrdiff_t");
+        case TICK_TYPE_U8:
+          return write_str(w, "uint8_t");
+        case TICK_TYPE_U16:
+          return write_str(w, "uint16_t");
+        case TICK_TYPE_U32:
+          return write_str(w, "uint32_t");
+        case TICK_TYPE_U64:
+          return write_str(w, "uint64_t");
+        case TICK_TYPE_USZ:
+          return write_str(w, "size_t");
+        case TICK_TYPE_BOOL:
+          return write_str(w, "bool");
+        case TICK_TYPE_VOID:
+          return write_str(w, "void");
         case TICK_TYPE_USER_DEFINED:
           // User-defined types - emit with __u_ prefix to match typedef
           CHECK_OK(write_str(w, "__u_"));
@@ -292,22 +330,28 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
 
 // Forward declarations
 static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx);
-static tick_builtin_t map_binop_to_builtin(tick_binop_t op, tick_builtin_type_t type);
-static const char* get_builtin_function_name(tick_builtin_t builtin, tick_builtin_type_t type);
+static tick_builtin_t map_binop_to_builtin(tick_binop_t op,
+                                           tick_builtin_type_t type);
+static const char* get_builtin_function_name(tick_builtin_t builtin,
+                                             tick_builtin_type_t type);
 
 static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   switch (node->data.literal.kind) {
     case TICK_LIT_UINT:
-      return write_fmt(ctx->writer, "%llu", (unsigned long long)node->data.literal.data.uint_value);
+      return write_fmt(ctx->writer, "%llu",
+                       (unsigned long long)node->data.literal.data.uint_value);
 
     case TICK_LIT_INT:
-      return write_fmt(ctx->writer, "%lld", (long long)node->data.literal.data.int_value);
+      return write_fmt(ctx->writer, "%lld",
+                       (long long)node->data.literal.data.int_value);
 
     case TICK_LIT_BOOL:
-      return write_str(ctx->writer, node->data.literal.data.bool_value ? "true" : "false");
+      return write_str(ctx->writer,
+                       node->data.literal.data.bool_value ? "true" : "false");
 
     case TICK_LIT_STRING: {
-      // Emit as const char* cast of u8 array: (const char*)(uint8_t[]){byte1, byte2, ..., 0}
+      // Emit as const char* cast of u8 array: (const char*)(uint8_t[]){byte1,
+      // byte2, ..., 0}
       tick_buf_t str = node->data.literal.data.string_value;
       CHECK_OK(write_str(ctx->writer, "(const char*)(uint8_t[]){"));
 
@@ -337,7 +381,8 @@ static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   }
 }
 
-static tick_err_t codegen_identifier(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+static tick_err_t codegen_identifier(tick_ast_node_t* node,
+                                     codegen_ctx_t* ctx) {
   // Check if this is an AT builtin
   if (node->data.identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
     // Emit runtime function name based on builtin enum
@@ -350,20 +395,22 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node, codegen_ctx_t* ctx) 
   }
 
   // User-written identifiers get __u_ prefix
-  // TODO: This should check if the identifier refers to an extern/pub declaration
-  // For now, we'll prefix all identifiers except when they're known to be extern/pub
-  // A proper solution would require a symbol table lookup
+  // TODO: This should check if the identifier refers to an extern/pub
+  // declaration For now, we'll prefix all identifiers except when they're known
+  // to be extern/pub A proper solution would require a symbol table lookup
   CHECK_OK(write_str(ctx->writer, "__u_"));
   return write_ident(ctx->writer, node->data.identifier_expr.name);
 }
 
-static tick_err_t codegen_binary_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
+                                      codegen_ctx_t* ctx) {
   // Check if this is an arithmetic/shift operation that needs a builtin call
   tick_ast_node_t* resolved_type = node->data.binary_expr.resolved_type;
 
   if (resolved_type && resolved_type->kind == TICK_AST_TYPE_NAMED) {
     tick_builtin_type_t type = resolved_type->data.type_named.builtin_type;
-    tick_builtin_t builtin = map_binop_to_builtin(node->data.binary_expr.op, type);
+    tick_builtin_t builtin =
+        map_binop_to_builtin(node->data.binary_expr.op, type);
 
     if (builtin != 0) {
       // Emit as builtin function call
@@ -390,7 +437,8 @@ static tick_err_t codegen_binary_expr(tick_ast_node_t* node, codegen_ctx_t* ctx)
   return TICK_OK;
 }
 
-static tick_err_t codegen_unary_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
+                                     codegen_ctx_t* ctx) {
   // Check if this is negation with a signed type (needs checked_neg builtin)
   if (node->data.unary_expr.op == UNOP_NEG) {
     tick_ast_node_t* resolved_type = node->data.unary_expr.resolved_type;
@@ -401,7 +449,8 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) 
 
       if (is_signed) {
         // Emit checked_neg builtin call
-        const char* func_name = get_builtin_function_name(TICK_BUILTIN_CHECKED_NEG, type);
+        const char* func_name =
+            get_builtin_function_name(TICK_BUILTIN_CHECKED_NEG, type);
         CHECK(func_name, "failed to get checked_neg function name");
 
         CHECK_OK(write_str(ctx->writer, func_name));
@@ -439,7 +488,8 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   return TICK_OK;
 }
 
-static tick_err_t codegen_field_access(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+static tick_err_t codegen_field_access(tick_ast_node_t* node,
+                                       codegen_ctx_t* ctx) {
   CHECK_OK(codegen_expr(node->data.field_access_expr.object, ctx));
   const char* op = node->data.field_access_expr.is_arrow ? "->" : ".";
   CHECK_OK(write_str(ctx->writer, op));
@@ -447,7 +497,8 @@ static tick_err_t codegen_field_access(tick_ast_node_t* node, codegen_ctx_t* ctx
   return TICK_OK;
 }
 
-static tick_err_t codegen_index_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+static tick_err_t codegen_index_expr(tick_ast_node_t* node,
+                                     codegen_ctx_t* ctx) {
   CHECK_OK(codegen_expr(node->data.index_expr.array, ctx));
   CHECK_OK(write_str(ctx->writer, "["));
   CHECK_OK(codegen_expr(node->data.index_expr.index, ctx));
@@ -464,7 +515,8 @@ static bool is_numeric_builtin_type(tick_builtin_type_t type) {
   return (type >= TICK_TYPE_I8 && type <= TICK_TYPE_USZ);
 }
 
-// Check if a cast is a widening conversion (always safe, no runtime check needed)
+// Check if a cast is a widening conversion (always safe, no runtime check
+// needed)
 static bool is_widening_cast(tick_builtin_type_t src, tick_builtin_type_t dst) {
   // Widening casts are safe when destination can represent all source values
 
@@ -472,20 +524,35 @@ static bool is_widening_cast(tick_builtin_type_t src, tick_builtin_type_t dst) {
   if (src == dst) return true;
 
   // Signed to signed widening
-  if (src == TICK_TYPE_I8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ)) return true;
-  if (src == TICK_TYPE_I16 && (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ)) return true;
-  if (src == TICK_TYPE_I32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ)) return true;
+  if (src == TICK_TYPE_I8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
+                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_I16 &&
+      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_I32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
 
   // Unsigned to unsigned widening
-  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_U16 || dst == TICK_TYPE_U32 || dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ)) return true;
-  if (src == TICK_TYPE_U16 && (dst == TICK_TYPE_U32 || dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ)) return true;
-  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ)) return true;
+  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_U16 || dst == TICK_TYPE_U32 ||
+                              dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
+    return true;
+  if (src == TICK_TYPE_U16 &&
+      (dst == TICK_TYPE_U32 || dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
+    return true;
+  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
+    return true;
 
   // Unsigned to signed widening (safe if destination is larger)
   // u8 can fit in i16, i32, i64 (but not i8)
-  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ)) return true;
-  if (src == TICK_TYPE_U16 && (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ)) return true;
-  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ)) return true;
+  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
+                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_U16 &&
+      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
 
   // Note: Platform-dependent types (isz, usz) conservatively assume 64-bit
   // TODO: Could optimize for known target platforms
@@ -495,37 +562,80 @@ static bool is_widening_cast(tick_builtin_type_t src, tick_builtin_type_t dst) {
 
 // Get the checked cast function name for a given source and destination type
 // Returns NULL if no checked cast function exists (use bare C cast instead)
-static const char* get_checked_cast_function_name(tick_builtin_type_t src, tick_builtin_type_t dst) {
+static const char* get_checked_cast_function_name(tick_builtin_type_t src,
+                                                  tick_builtin_type_t dst) {
   // Map type enum to string suffix
   const char* src_str = NULL;
   const char* dst_str = NULL;
 
   switch (src) {
-    case TICK_TYPE_I8: src_str = "i8"; break;
-    case TICK_TYPE_I16: src_str = "i16"; break;
-    case TICK_TYPE_I32: src_str = "i32"; break;
-    case TICK_TYPE_I64: src_str = "i64"; break;
-    case TICK_TYPE_ISZ: src_str = "isz"; break;
-    case TICK_TYPE_U8: src_str = "u8"; break;
-    case TICK_TYPE_U16: src_str = "u16"; break;
-    case TICK_TYPE_U32: src_str = "u32"; break;
-    case TICK_TYPE_U64: src_str = "u64"; break;
-    case TICK_TYPE_USZ: src_str = "usz"; break;
-    default: return NULL;  // Not a numeric type
+    case TICK_TYPE_I8:
+      src_str = "i8";
+      break;
+    case TICK_TYPE_I16:
+      src_str = "i16";
+      break;
+    case TICK_TYPE_I32:
+      src_str = "i32";
+      break;
+    case TICK_TYPE_I64:
+      src_str = "i64";
+      break;
+    case TICK_TYPE_ISZ:
+      src_str = "isz";
+      break;
+    case TICK_TYPE_U8:
+      src_str = "u8";
+      break;
+    case TICK_TYPE_U16:
+      src_str = "u16";
+      break;
+    case TICK_TYPE_U32:
+      src_str = "u32";
+      break;
+    case TICK_TYPE_U64:
+      src_str = "u64";
+      break;
+    case TICK_TYPE_USZ:
+      src_str = "usz";
+      break;
+    default:
+      return NULL;  // Not a numeric type
   }
 
   switch (dst) {
-    case TICK_TYPE_I8: dst_str = "i8"; break;
-    case TICK_TYPE_I16: dst_str = "i16"; break;
-    case TICK_TYPE_I32: dst_str = "i32"; break;
-    case TICK_TYPE_I64: dst_str = "i64"; break;
-    case TICK_TYPE_ISZ: dst_str = "isz"; break;
-    case TICK_TYPE_U8: dst_str = "u8"; break;
-    case TICK_TYPE_U16: dst_str = "u16"; break;
-    case TICK_TYPE_U32: dst_str = "u32"; break;
-    case TICK_TYPE_U64: dst_str = "u64"; break;
-    case TICK_TYPE_USZ: dst_str = "usz"; break;
-    default: return NULL;  // Not a numeric type
+    case TICK_TYPE_I8:
+      dst_str = "i8";
+      break;
+    case TICK_TYPE_I16:
+      dst_str = "i16";
+      break;
+    case TICK_TYPE_I32:
+      dst_str = "i32";
+      break;
+    case TICK_TYPE_I64:
+      dst_str = "i64";
+      break;
+    case TICK_TYPE_ISZ:
+      dst_str = "isz";
+      break;
+    case TICK_TYPE_U8:
+      dst_str = "u8";
+      break;
+    case TICK_TYPE_U16:
+      dst_str = "u16";
+      break;
+    case TICK_TYPE_U32:
+      dst_str = "u32";
+      break;
+    case TICK_TYPE_U64:
+      dst_str = "u64";
+      break;
+    case TICK_TYPE_USZ:
+      dst_str = "usz";
+      break;
+    default:
+      return NULL;  // Not a numeric type
   }
 
   // Build function name: tick_checked_cast_{src}_{dst}
@@ -543,14 +653,16 @@ static tick_builtin_type_t get_expr_builtin_type(tick_ast_node_t* expr) {
     case TICK_AST_BINARY_EXPR:
       if (expr->data.binary_expr.resolved_type &&
           expr->data.binary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->data.binary_expr.resolved_type->data.type_named.builtin_type;
+        return expr->data.binary_expr.resolved_type->data.type_named
+            .builtin_type;
       }
       break;
 
     case TICK_AST_UNARY_EXPR:
       if (expr->data.unary_expr.resolved_type &&
           expr->data.unary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->data.unary_expr.resolved_type->data.type_named.builtin_type;
+        return expr->data.unary_expr.resolved_type->data.type_named
+            .builtin_type;
       }
       break;
 
@@ -573,7 +685,8 @@ static tick_builtin_type_t get_expr_builtin_type(tick_ast_node_t* expr) {
 
 static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   // Get destination type (must be resolved by analysis pass)
-  if (!node->data.cast_expr.type || node->data.cast_expr.type->kind != TICK_AST_TYPE_NAMED) {
+  if (!node->data.cast_expr.type ||
+      node->data.cast_expr.type->kind != TICK_AST_TYPE_NAMED) {
     // Non-builtin type (pointer, struct, etc.) - emit bare C cast
     CHECK_OK(write_str(ctx->writer, "("));
     CHECK_OK(codegen_type(node->data.cast_expr.type, ctx->writer));
@@ -582,16 +695,20 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     return TICK_OK;
   }
 
-  tick_builtin_type_t dst_type = node->data.cast_expr.type->data.type_named.builtin_type;
+  tick_builtin_type_t dst_type =
+      node->data.cast_expr.type->data.type_named.builtin_type;
 
-  CHECK(dst_type != TICK_TYPE_UNKNOWN, "cast destination type not resolved - analysis pass missing?");
+  CHECK(dst_type != TICK_TYPE_UNKNOWN,
+        "cast destination type not resolved - analysis pass missing?");
 
   // Get source type from the expression being cast
-  tick_builtin_type_t src_type = get_expr_builtin_type(node->data.cast_expr.expr);
+  tick_builtin_type_t src_type =
+      get_expr_builtin_type(node->data.cast_expr.expr);
 
   // Decision tree for cast code generation:
 
-  // 1. If source type is unknown (literals, identifiers without type annotation),
+  // 1. If source type is unknown (literals, identifiers without type
+  // annotation),
   //    we can't determine if checked cast is needed - emit bare C cast
   if (src_type == TICK_TYPE_UNKNOWN) {
     CHECK_OK(write_str(ctx->writer, "("));
@@ -603,7 +720,8 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
   // 2. If either type is non-numeric (bool, void, user-defined),
   //    emit bare C cast (no runtime checking available)
-  if (!is_numeric_builtin_type(src_type) || !is_numeric_builtin_type(dst_type)) {
+  if (!is_numeric_builtin_type(src_type) ||
+      !is_numeric_builtin_type(dst_type)) {
     CHECK_OK(write_str(ctx->writer, "("));
     CHECK_OK(codegen_type(node->data.cast_expr.type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, ")"));
@@ -634,20 +752,26 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 }
 
 // Map binary operation + type to appropriate builtin
-static tick_builtin_t map_binop_to_builtin(tick_binop_t op, tick_builtin_type_t type) {
+static tick_builtin_t map_binop_to_builtin(tick_binop_t op,
+                                           tick_builtin_type_t type) {
   // Check if type is signed for wrapping operations
   bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
 
   switch (op) {
     // Saturating operations
-    case BINOP_SAT_ADD: return TICK_BUILTIN_SAT_ADD;
-    case BINOP_SAT_SUB: return TICK_BUILTIN_SAT_SUB;
-    case BINOP_SAT_MUL: return TICK_BUILTIN_SAT_MUL;
-    case BINOP_SAT_DIV: return TICK_BUILTIN_SAT_DIV;
+    case BINOP_SAT_ADD:
+      return TICK_BUILTIN_SAT_ADD;
+    case BINOP_SAT_SUB:
+      return TICK_BUILTIN_SAT_SUB;
+    case BINOP_SAT_MUL:
+      return TICK_BUILTIN_SAT_MUL;
+    case BINOP_SAT_DIV:
+      return TICK_BUILTIN_SAT_DIV;
 
     // Wrapping operations - only for signed types
     case BINOP_WRAP_ADD:
-      return is_signed ? TICK_BUILTIN_WRAP_ADD : (tick_builtin_t)0;  // Unsigned: no builtin needed
+      return is_signed ? TICK_BUILTIN_WRAP_ADD
+                       : (tick_builtin_t)0;  // Unsigned: no builtin needed
     case BINOP_WRAP_SUB:
       return is_signed ? TICK_BUILTIN_WRAP_SUB : (tick_builtin_t)0;
     case BINOP_WRAP_MUL:
@@ -664,12 +788,16 @@ static tick_builtin_t map_binop_to_builtin(tick_binop_t op, tick_builtin_type_t 
       return is_signed ? TICK_BUILTIN_CHECKED_MUL : TICK_BUILTIN_WRAP_MUL;
 
     // Division and modulo - always checked
-    case BINOP_DIV: return TICK_BUILTIN_CHECKED_DIV;
-    case BINOP_MOD: return TICK_BUILTIN_CHECKED_MOD;
+    case BINOP_DIV:
+      return TICK_BUILTIN_CHECKED_DIV;
+    case BINOP_MOD:
+      return TICK_BUILTIN_CHECKED_MOD;
 
     // Shifts - always checked
-    case BINOP_LSHIFT: return TICK_BUILTIN_CHECKED_SHL;
-    case BINOP_RSHIFT: return TICK_BUILTIN_CHECKED_SHR;
+    case BINOP_LSHIFT:
+      return TICK_BUILTIN_CHECKED_SHL;
+    case BINOP_RSHIFT:
+      return TICK_BUILTIN_CHECKED_SHR;
 
     default:
       return (tick_builtin_t)0;  // Not an arithmetic operation
@@ -677,37 +805,88 @@ static tick_builtin_t map_binop_to_builtin(tick_binop_t op, tick_builtin_type_t 
 }
 
 // Map builtin + type to runtime function name
-static const char* get_builtin_function_name(tick_builtin_t builtin, tick_builtin_type_t type) {
+static const char* get_builtin_function_name(tick_builtin_t builtin,
+                                             tick_builtin_type_t type) {
   // Determine the operation suffix and prefix
   const char* op_suffix = NULL;
   const char* op_prefix = NULL;
 
   switch (builtin) {
-    case TICK_BUILTIN_SAT_ADD: op_prefix = "tick_sat"; op_suffix = "add"; break;
-    case TICK_BUILTIN_SAT_SUB: op_prefix = "tick_sat"; op_suffix = "sub"; break;
-    case TICK_BUILTIN_SAT_MUL: op_prefix = "tick_sat"; op_suffix = "mul"; break;
-    case TICK_BUILTIN_SAT_DIV: op_prefix = "tick_sat"; op_suffix = "div"; break;
-    case TICK_BUILTIN_WRAP_ADD: op_prefix = "tick_wrap"; op_suffix = "add"; break;
-    case TICK_BUILTIN_WRAP_SUB: op_prefix = "tick_wrap"; op_suffix = "sub"; break;
-    case TICK_BUILTIN_WRAP_MUL: op_prefix = "tick_wrap"; op_suffix = "mul"; break;
-    case TICK_BUILTIN_WRAP_DIV: op_prefix = "tick_wrap"; op_suffix = "div"; break;
-    case TICK_BUILTIN_CHECKED_ADD: op_prefix = "tick_checked"; op_suffix = "add"; break;
-    case TICK_BUILTIN_CHECKED_SUB: op_prefix = "tick_checked"; op_suffix = "sub"; break;
-    case TICK_BUILTIN_CHECKED_MUL: op_prefix = "tick_checked"; op_suffix = "mul"; break;
-    case TICK_BUILTIN_CHECKED_DIV: op_prefix = "tick_checked"; op_suffix = "div"; break;
-    case TICK_BUILTIN_CHECKED_MOD: op_prefix = "tick_checked"; op_suffix = "mod"; break;
-    case TICK_BUILTIN_CHECKED_SHL: op_prefix = "tick_checked"; op_suffix = "shl"; break;
-    case TICK_BUILTIN_CHECKED_SHR: op_prefix = "tick_checked"; op_suffix = "shr"; break;
-    case TICK_BUILTIN_CHECKED_NEG: op_prefix = "tick_checked"; op_suffix = "neg"; break;
+    case TICK_BUILTIN_SAT_ADD:
+      op_prefix = "tick_sat";
+      op_suffix = "add";
+      break;
+    case TICK_BUILTIN_SAT_SUB:
+      op_prefix = "tick_sat";
+      op_suffix = "sub";
+      break;
+    case TICK_BUILTIN_SAT_MUL:
+      op_prefix = "tick_sat";
+      op_suffix = "mul";
+      break;
+    case TICK_BUILTIN_SAT_DIV:
+      op_prefix = "tick_sat";
+      op_suffix = "div";
+      break;
+    case TICK_BUILTIN_WRAP_ADD:
+      op_prefix = "tick_wrap";
+      op_suffix = "add";
+      break;
+    case TICK_BUILTIN_WRAP_SUB:
+      op_prefix = "tick_wrap";
+      op_suffix = "sub";
+      break;
+    case TICK_BUILTIN_WRAP_MUL:
+      op_prefix = "tick_wrap";
+      op_suffix = "mul";
+      break;
+    case TICK_BUILTIN_WRAP_DIV:
+      op_prefix = "tick_wrap";
+      op_suffix = "div";
+      break;
+    case TICK_BUILTIN_CHECKED_ADD:
+      op_prefix = "tick_checked";
+      op_suffix = "add";
+      break;
+    case TICK_BUILTIN_CHECKED_SUB:
+      op_prefix = "tick_checked";
+      op_suffix = "sub";
+      break;
+    case TICK_BUILTIN_CHECKED_MUL:
+      op_prefix = "tick_checked";
+      op_suffix = "mul";
+      break;
+    case TICK_BUILTIN_CHECKED_DIV:
+      op_prefix = "tick_checked";
+      op_suffix = "div";
+      break;
+    case TICK_BUILTIN_CHECKED_MOD:
+      op_prefix = "tick_checked";
+      op_suffix = "mod";
+      break;
+    case TICK_BUILTIN_CHECKED_SHL:
+      op_prefix = "tick_checked";
+      op_suffix = "shl";
+      break;
+    case TICK_BUILTIN_CHECKED_SHR:
+      op_prefix = "tick_checked";
+      op_suffix = "shr";
+      break;
+    case TICK_BUILTIN_CHECKED_NEG:
+      op_prefix = "tick_checked";
+      op_suffix = "neg";
+      break;
     case TICK_BUILTIN_CHECKED_CAST:
       // Cast is handled specially - needs both source and dest types
       return NULL;
-    default: return NULL;
+    default:
+      return NULL;
   }
 
   // For wrapping operations, only signed types need wrapping functions
   // Unsigned types have guaranteed modulo semantics in C
-  bool is_wrap = (builtin >= TICK_BUILTIN_WRAP_ADD && builtin <= TICK_BUILTIN_WRAP_DIV);
+  bool is_wrap =
+      (builtin >= TICK_BUILTIN_WRAP_ADD && builtin <= TICK_BUILTIN_WRAP_DIV);
 
   // Map type enum to suffix
   // Format: {prefix}_{op}_{type}
@@ -715,29 +894,49 @@ static const char* get_builtin_function_name(tick_builtin_t builtin, tick_builti
   const char* type_suffix = NULL;
 
   switch (type) {
-    case TICK_TYPE_I8: type_suffix = "i8"; break;
-    case TICK_TYPE_I16: type_suffix = "i16"; break;
-    case TICK_TYPE_I32: type_suffix = "i32"; break;
-    case TICK_TYPE_I64: type_suffix = "i64"; break;
-    case TICK_TYPE_ISZ: type_suffix = "isz"; break;
+    case TICK_TYPE_I8:
+      type_suffix = "i8";
+      break;
+    case TICK_TYPE_I16:
+      type_suffix = "i16";
+      break;
+    case TICK_TYPE_I32:
+      type_suffix = "i32";
+      break;
+    case TICK_TYPE_I64:
+      type_suffix = "i64";
+      break;
+    case TICK_TYPE_ISZ:
+      type_suffix = "isz";
+      break;
     case TICK_TYPE_U8:
-      CHECK(!is_wrap, "wrapping builtin used with unsigned type - unsigned types don't need wrapping");
+      CHECK(!is_wrap,
+            "wrapping builtin used with unsigned type - unsigned types don't "
+            "need wrapping");
       type_suffix = "u8";
       break;
     case TICK_TYPE_U16:
-      CHECK(!is_wrap, "wrapping builtin used with unsigned type - unsigned types don't need wrapping");
+      CHECK(!is_wrap,
+            "wrapping builtin used with unsigned type - unsigned types don't "
+            "need wrapping");
       type_suffix = "u16";
       break;
     case TICK_TYPE_U32:
-      CHECK(!is_wrap, "wrapping builtin used with unsigned type - unsigned types don't need wrapping");
+      CHECK(!is_wrap,
+            "wrapping builtin used with unsigned type - unsigned types don't "
+            "need wrapping");
       type_suffix = "u32";
       break;
     case TICK_TYPE_U64:
-      CHECK(!is_wrap, "wrapping builtin used with unsigned type - unsigned types don't need wrapping");
+      CHECK(!is_wrap,
+            "wrapping builtin used with unsigned type - unsigned types don't "
+            "need wrapping");
       type_suffix = "u64";
       break;
     case TICK_TYPE_USZ:
-      CHECK(!is_wrap, "wrapping builtin used with unsigned type - unsigned types don't need wrapping");
+      CHECK(!is_wrap,
+            "wrapping builtin used with unsigned type - unsigned types don't "
+            "need wrapping");
       type_suffix = "usz";
       break;
     default:
@@ -748,18 +947,24 @@ static const char* get_builtin_function_name(tick_builtin_t builtin, tick_builti
   return buf;
 }
 
-static tick_err_t codegen_builtin_call(tick_ast_node_t* node, codegen_ctx_t* ctx) {
+static tick_err_t codegen_builtin_call(tick_ast_node_t* node,
+                                       codegen_ctx_t* ctx) {
   // Special handling for CHECKED_CAST - needs both source and dest type
-  CHECK(node->data.builtin_call.builtin != TICK_BUILTIN_CHECKED_CAST, "checked cast not yet implemented");
+  CHECK(node->data.builtin_call.builtin != TICK_BUILTIN_CHECKED_CAST,
+        "checked cast not yet implemented");
 
   // Get the builtin type
-  CHECK(node->data.builtin_call.type && node->data.builtin_call.type->kind == TICK_AST_TYPE_NAMED,
+  CHECK(node->data.builtin_call.type &&
+            node->data.builtin_call.type->kind == TICK_AST_TYPE_NAMED,
         "builtin call missing or invalid type");
 
-  tick_builtin_type_t type = node->data.builtin_call.type->data.type_named.builtin_type;
-  CHECK(type != TICK_TYPE_UNKNOWN, "builtin call type not resolved - analysis pass missing?");
+  tick_builtin_type_t type =
+      node->data.builtin_call.type->data.type_named.builtin_type;
+  CHECK(type != TICK_TYPE_UNKNOWN,
+        "builtin call type not resolved - analysis pass missing?");
 
-  const char* func_name = get_builtin_function_name(node->data.builtin_call.builtin, type);
+  const char* func_name =
+      get_builtin_function_name(node->data.builtin_call.builtin, type);
   CHECK(func_name, "unknown builtin or type for builtin call");
 
   // Emit function call
@@ -806,11 +1011,13 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
     // High-level expressions that must be lowered before codegen
     case TICK_AST_ASYNC_EXPR:
-      CHECK(0, "async must be lowered before codegen (use async state machine)");
+      CHECK(0,
+            "async must be lowered before codegen (use async state machine)");
 
     case TICK_AST_STRUCT_INIT_EXPR: {
       // Emit: (TypeName) { .field1 = val1, .field2 = val2 }
-      // Requires: All field values must be LITERAL or IDENTIFIER_EXPR (lowering decomposed complex expressions)
+      // Requires: All field values must be LITERAL or IDENTIFIER_EXPR (lowering
+      // decomposed complex expressions)
 
       CHECK_OK(write_str(ctx->writer, "("));
       CHECK_OK(codegen_type(expr->data.struct_init_expr.type, ctx->writer));
@@ -819,7 +1026,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       tick_ast_node_t* field = expr->data.struct_init_expr.fields;
       bool first = true;
       while (field) {
-        CHECK(field->kind == TICK_AST_STRUCT_INIT_FIELD, "expected STRUCT_INIT_FIELD in struct initializer");
+        CHECK(field->kind == TICK_AST_STRUCT_INIT_FIELD,
+              "expected STRUCT_INIT_FIELD in struct initializer");
 
         tick_ast_node_t* value = field->data.struct_init_field.value;
 
@@ -830,7 +1038,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
         // Emit: .fieldname = value
         CHECK_OK(write_str(ctx->writer, "."));
-        CHECK_OK(write_ident(ctx->writer, field->data.struct_init_field.field_name));
+        CHECK_OK(
+            write_ident(ctx->writer, field->data.struct_init_field.field_name));
         CHECK_OK(write_str(ctx->writer, " = "));
         CHECK_OK(codegen_expr(value, ctx));
 
@@ -872,9 +1081,11 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 // Statement Generation
 // ============================================================================
 
-static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int indent);
+static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
+                               int indent);
 
-static tick_err_t codegen_block_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_block_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                     int indent) {
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "{\n"));
 
@@ -889,7 +1100,8 @@ static tick_err_t codegen_block_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, 
   return TICK_OK;
 }
 
-static tick_err_t codegen_return_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_return_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                      int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "return"));
@@ -901,7 +1113,9 @@ static tick_err_t codegen_return_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   return TICK_OK;
 }
 
-static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent, bool is_var) {
+static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
+                                          codegen_ctx_t* ctx, int indent,
+                                          bool is_var) {
   UNUSED(is_var);  // In C, both let and var are just regular variables
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
@@ -922,8 +1136,9 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node, codegen_ctx_t* 
   // Emit initializer if present and not undefined
   if (node->data.decl.init) {
     // Check if init is undefined literal
-    bool is_undefined = (node->data.decl.init->kind == TICK_AST_LITERAL &&
-                        node->data.decl.init->data.literal.kind == TICK_LIT_UNDEFINED);
+    bool is_undefined =
+        (node->data.decl.init->kind == TICK_AST_LITERAL &&
+         node->data.decl.init->data.literal.kind == TICK_LIT_UNDEFINED);
 
     if (!is_undefined) {
       CHECK_OK(write_str(ctx->writer, " = "));
@@ -935,7 +1150,8 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node, codegen_ctx_t* 
   return TICK_OK;
 }
 
-static tick_err_t codegen_assign_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_assign_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                      int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(codegen_expr(node->data.assign_stmt.lhs, ctx));
@@ -945,7 +1161,8 @@ static tick_err_t codegen_assign_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   return TICK_OK;
 }
 
-static tick_err_t codegen_unused_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_unused_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                      int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "TICK_UNUSED("));
@@ -954,7 +1171,8 @@ static tick_err_t codegen_unused_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   return TICK_OK;
 }
 
-static tick_err_t codegen_expr_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_expr_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                    int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(codegen_expr(node->data.expr_stmt.expr, ctx));
@@ -962,7 +1180,8 @@ static tick_err_t codegen_expr_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, i
   return TICK_OK;
 }
 
-static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                  int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "if ("));
@@ -972,7 +1191,8 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int
   // Then block (strip outer braces, we add them)
   if (node->data.if_stmt.then_block->kind == TICK_AST_BLOCK_STMT) {
     CHECK_OK(write_str(ctx->writer, "{\n"));
-    tick_ast_node_t* stmt = node->data.if_stmt.then_block->data.block_stmt.stmts;
+    tick_ast_node_t* stmt =
+        node->data.if_stmt.then_block->data.block_stmt.stmts;
     while (stmt) {
       CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
       stmt = stmt->next;
@@ -993,7 +1213,8 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int
       CHECK_OK(codegen_stmt(node->data.if_stmt.else_block, ctx, 0));
     } else if (node->data.if_stmt.else_block->kind == TICK_AST_BLOCK_STMT) {
       CHECK_OK(write_str(ctx->writer, "{\n"));
-      tick_ast_node_t* stmt = node->data.if_stmt.else_block->data.block_stmt.stmts;
+      tick_ast_node_t* stmt =
+          node->data.if_stmt.else_block->data.block_stmt.stmts;
       while (stmt) {
         CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
         stmt = stmt->next;
@@ -1011,21 +1232,24 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int
   return TICK_OK;
 }
 
-static tick_err_t codegen_break_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_break_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                     int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "break;\n"));
   return TICK_OK;
 }
 
-static tick_err_t codegen_continue_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_continue_stmt(tick_ast_node_t* node,
+                                        codegen_ctx_t* ctx, int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "continue;\n"));
   return TICK_OK;
 }
 
-static tick_err_t codegen_goto_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_goto_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                    int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "goto "));
@@ -1034,7 +1258,8 @@ static tick_err_t codegen_goto_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, i
   return TICK_OK;
 }
 
-static tick_err_t codegen_label_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_label_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                     int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_ident(ctx->writer, node->data.label_stmt.label));
@@ -1042,7 +1267,8 @@ static tick_err_t codegen_label_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, 
   return TICK_OK;
 }
 
-static tick_err_t codegen_for_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_for_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                   int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
 
   // Emit init statement before the loop (if present)
@@ -1089,7 +1315,8 @@ static tick_err_t codegen_for_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, in
   return TICK_OK;
 }
 
-static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                      int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "switch ("));
@@ -1144,7 +1371,8 @@ static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   return TICK_OK;
 }
 
-static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
+                               int indent) {
   if (!stmt) return TICK_OK;
 
   switch (stmt->kind) {
@@ -1178,7 +1406,8 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int in
       return codegen_label_stmt(stmt, ctx, indent);
     case TICK_AST_DECL:
       // Declaration as statement (let/var)
-      return codegen_let_or_var_stmt(stmt, ctx, indent, stmt->data.decl.quals.is_var);
+      return codegen_let_or_var_stmt(stmt, ctx, indent,
+                                     stmt->data.decl.quals.is_var);
 
     // High-level statements that must be lowered before codegen
     case TICK_AST_DEFER_STMT:
@@ -1186,9 +1415,11 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int in
     case TICK_AST_ERRDEFER_STMT:
       CHECK(0, "errdefer must be lowered before codegen (use goto/label)");
     case TICK_AST_SUSPEND_STMT:
-      CHECK(0, "suspend must be lowered before codegen (use async state machine)");
+      CHECK(0,
+            "suspend must be lowered before codegen (use async state machine)");
     case TICK_AST_RESUME_STMT:
-      CHECK(0, "resume must be lowered before codegen (use async state machine)");
+      CHECK(0,
+            "resume must be lowered before codegen (use async state machine)");
     case TICK_AST_TRY_CATCH_STMT:
       CHECK(0, "try/catch must be lowered before codegen");
     case TICK_AST_FOR_SWITCH_STMT:
@@ -1210,9 +1441,11 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx, int in
 // ============================================================================
 
 // Emit struct declaration to header or C file
-static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, bool full_definition) {
+static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
+                                      bool full_definition) {
   tick_ast_node_t* struct_node = decl->data.decl.init;
-  CHECK(struct_node && struct_node->kind == TICK_AST_STRUCT_DECL, "expected STRUCT_DECL");
+  CHECK(struct_node && struct_node->kind == TICK_AST_STRUCT_DECL,
+        "expected STRUCT_DECL");
 
   if (!full_definition) {
     // Forward declaration
@@ -1226,7 +1459,8 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, b
     return TICK_OK;
   }
 
-  // Full definition - use "struct __u_Name { ... };" to avoid typedef redefinition
+  // Full definition - use "struct __u_Name { ... };" to avoid typedef
+  // redefinition
   CHECK_OK(write_str(w, "struct "));
 
   // Handle packed attribute
@@ -1238,8 +1472,10 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, b
   if (struct_node->data.struct_decl.alignment) {
     CHECK(struct_node->data.struct_decl.alignment->kind == TICK_AST_LITERAL,
           "alignment must be literal (analysis didn't evaluate constant)");
-    uint64_t align_val = struct_node->data.struct_decl.alignment->data.literal.data.uint_value;
-    CHECK_OK(write_fmt(w, "__attribute__((aligned(%llu))) ", (unsigned long long)align_val));
+    uint64_t align_val =
+        struct_node->data.struct_decl.alignment->data.literal.data.uint_value;
+    CHECK_OK(write_fmt(w, "__attribute__((aligned(%llu))) ",
+                       (unsigned long long)align_val));
   }
 
   CHECK_OK(write_str(w, "__u_"));
@@ -1259,9 +1495,12 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, b
     // Handle per-field alignment
     if (field->data.field.alignment) {
       CHECK(field->data.field.alignment->kind == TICK_AST_LITERAL,
-            "field alignment must be literal (analysis didn't evaluate constant)");
-      uint64_t align_val = field->data.field.alignment->data.literal.data.uint_value;
-      CHECK_OK(write_fmt(w, " __attribute__((aligned(%llu)))", (unsigned long long)align_val));
+            "field alignment must be literal (analysis didn't evaluate "
+            "constant)");
+      uint64_t align_val =
+          field->data.field.alignment->data.literal.data.uint_value;
+      CHECK_OK(write_fmt(w, " __attribute__((aligned(%llu)))",
+                         (unsigned long long)align_val));
     }
 
     CHECK_OK(write_str(w, ";\n"));
@@ -1276,7 +1515,8 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w, b
 // Emit enum declaration to header or C file
 static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
   tick_ast_node_t* enum_node = decl->data.decl.init;
-  CHECK(enum_node && enum_node->kind == TICK_AST_ENUM_DECL, "expected ENUM_DECL");
+  CHECK(enum_node && enum_node->kind == TICK_AST_ENUM_DECL,
+        "expected ENUM_DECL");
 
   // Emit enum with underlying type
   CHECK_OK(write_str(w, "typedef enum {\n"));
@@ -1285,7 +1525,8 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
   tick_ast_node_t* value = enum_node->data.enum_decl.values;
   bool first = true;
   while (value) {
-    CHECK(value->kind == TICK_AST_ENUM_VALUE, "expected ENUM_VALUE node in enum");
+    CHECK(value->kind == TICK_AST_ENUM_VALUE,
+          "expected ENUM_VALUE node in enum");
 
     if (!first) {
       CHECK_OK(write_str(w, ",\n"));
@@ -1301,7 +1542,8 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
     // Value must be a literal (analysis calculated auto-increment)
     if (value->data.enum_value.value) {
       CHECK(value->data.enum_value.value->kind == TICK_AST_LITERAL,
-            "enum value must be literal (analysis didn't calculate auto-increment)");
+            "enum value must be literal (analysis didn't calculate "
+            "auto-increment)");
       uint64_t val = value->data.enum_value.value->data.literal.data.uint_value;
       CHECK_OK(write_fmt(w, " = %llu", (unsigned long long)val));
     } else {
@@ -1322,9 +1564,11 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
 }
 
 // Emit union declaration to header or C file
-static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w, bool full_definition) {
+static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
+                                     bool full_definition) {
   tick_ast_node_t* union_node = decl->data.decl.init;
-  CHECK(union_node && union_node->kind == TICK_AST_UNION_DECL, "expected UNION_DECL");
+  CHECK(union_node && union_node->kind == TICK_AST_UNION_DECL,
+        "expected UNION_DECL");
 
   // Unions must have explicit tag type (lowering generates it if auto)
   CHECK(union_node->data.union_decl.tag_type != NULL,
@@ -1342,15 +1586,18 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w, bo
     return TICK_OK;
   }
 
-  // Full definition - emit tagged union structure using "struct __u_Name { ... };"
+  // Full definition - emit tagged union structure using "struct __u_Name { ...
+  // };"
   CHECK_OK(write_str(w, "struct "));
 
   // Handle alignment
   if (union_node->data.union_decl.alignment) {
     CHECK(union_node->data.union_decl.alignment->kind == TICK_AST_LITERAL,
           "alignment must be literal (analysis didn't evaluate constant)");
-    uint64_t align_val = union_node->data.union_decl.alignment->data.literal.data.uint_value;
-    CHECK_OK(write_fmt(w, "__attribute__((aligned(%llu))) ", (unsigned long long)align_val));
+    uint64_t align_val =
+        union_node->data.union_decl.alignment->data.literal.data.uint_value;
+    CHECK_OK(write_fmt(w, "__attribute__((aligned(%llu))) ",
+                       (unsigned long long)align_val));
   }
 
   CHECK_OK(write_str(w, "__u_"));
@@ -1389,7 +1636,9 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w, bo
 // Function Generation
 // ============================================================================
 
-static tick_err_t codegen_function_signature(tick_ast_node_t* decl, codegen_ctx_t* ctx, bool include_param_names) {
+static tick_err_t codegen_function_signature(tick_ast_node_t* decl,
+                                             codegen_ctx_t* ctx,
+                                             bool include_param_names) {
   tick_ast_node_t* func = decl->data.decl.init;
 
   // Return type
@@ -1432,25 +1681,30 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl, codegen_ctx_
   return TICK_OK;
 }
 
-static tick_err_t codegen_function_decl_h(tick_ast_node_t* decl, codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_function_signature(decl, ctx, false));  // No parameter names in header
+static tick_err_t codegen_function_decl_h(tick_ast_node_t* decl,
+                                          codegen_ctx_t* ctx) {
+  CHECK_OK(codegen_function_signature(decl, ctx,
+                                      false));  // No parameter names in header
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
 
-static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl, codegen_ctx_t* ctx) {
+static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
+                                          codegen_ctx_t* ctx) {
   tick_ast_node_t* func = decl->data.decl.init;
 
   // Emit #line directive for function start
   CHECK_OK(write_line_directive(ctx, decl->loc.line));
 
   // Function signature
-  CHECK_OK(codegen_function_signature(decl, ctx, true));  // Include parameter names in implementation
+  CHECK_OK(codegen_function_signature(
+      decl, ctx, true));  // Include parameter names in implementation
   CHECK_OK(write_str(ctx->writer, " "));
 
   // Function body
   if (func->data.function.body) {
-    CHECK(func->data.function.body->kind == TICK_AST_BLOCK_STMT, "function body is not a block statement");
+    CHECK(func->data.function.body->kind == TICK_AST_BLOCK_STMT,
+          "function body is not a block statement");
     CHECK_OK(codegen_block_stmt(func->data.function.body, ctx, 0));
   } else {
     CHECK_OK(write_str(ctx->writer, ";\n"));
@@ -1464,7 +1718,8 @@ static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl, codegen_ctx_t* 
 // Global Variable Generation
 // ============================================================================
 
-static tick_err_t codegen_global_var_h(tick_ast_node_t* decl, codegen_ctx_t* ctx) {
+static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
+                                       codegen_ctx_t* ctx) {
   // Emit extern declaration in header
   bool is_volatile = decl->data.decl.quals.is_volatile;
   bool is_extern = decl->data.decl.quals.is_extern;
@@ -1483,7 +1738,8 @@ static tick_err_t codegen_global_var_h(tick_ast_node_t* decl, codegen_ctx_t* ctx
   return TICK_OK;
 }
 
-static tick_err_t codegen_global_var_c(tick_ast_node_t* decl, codegen_ctx_t* ctx) {
+static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
+                                       codegen_ctx_t* ctx) {
   bool is_volatile = decl->data.decl.quals.is_volatile;
   bool is_extern = decl->data.decl.quals.is_extern;
   tick_ast_node_t* type = decl->data.decl.type;
@@ -1505,7 +1761,8 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl, codegen_ctx_t* ctx
     }
 
     // Emit return type
-    CHECK_OK(codegen_type(fn_type->data.type_function.return_type, ctx->writer));
+    CHECK_OK(
+        codegen_type(fn_type->data.type_function.return_type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, " (*"));
     CHECK_OK(write_decl_name(ctx->writer, decl));
     CHECK_OK(write_str(ctx->writer, ")("));
@@ -1549,8 +1806,9 @@ finish_decl:
   // Emit initializer only if not extern and if present and not undefined
   if (!is_extern && decl->data.decl.init) {
     // Check if init is undefined literal
-    bool is_undefined = (decl->data.decl.init->kind == TICK_AST_LITERAL &&
-                        decl->data.decl.init->data.literal.kind == TICK_LIT_UNDEFINED);
+    bool is_undefined =
+        (decl->data.decl.init->kind == TICK_AST_LITERAL &&
+         decl->data.decl.init->data.literal.kind == TICK_LIT_UNDEFINED);
 
     if (!is_undefined) {
       CHECK_OK(write_str(ctx->writer, " = "));
@@ -1572,23 +1830,24 @@ static tick_err_t codegen_header_prologue(tick_writer_t* w) {
   CHECK_OK(write_str(w, "#pragma once\n\n"));
 
   // Write embedded runtime header as a string
-  tick_buf_t runtime_buf = {
-    .buf = (u8*)tick_runtime_header,
-    .sz = tick_runtime_header_len
-  };
+  tick_buf_t runtime_buf = {.buf = (u8*)tick_runtime_header,
+                            .sz = tick_runtime_header_len};
   CHECK_OK(w->write(w->ctx, &runtime_buf));
   CHECK_OK(write_str(w, "\n"));
 
   return TICK_OK;
 }
 
-static tick_err_t codegen_c_prologue(tick_writer_t* w, const char* header_name) {
+static tick_err_t codegen_c_prologue(tick_writer_t* w,
+                                     const char* header_name) {
   CHECK_OK(write_str(w, "// Generated by tick compiler\n"));
   CHECK_OK(write_fmt(w, "#include \"%s\"\n\n", header_name));
   return TICK_OK;
 }
 
-tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename, const char* header_filename, tick_writer_t writer_h, tick_writer_t writer_c) {
+tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
+                        const char* header_filename, tick_writer_t writer_h,
+                        tick_writer_t writer_c) {
   codegen_ctx_t ctx_h = {&writer_h, source_filename, 0};
   codegen_ctx_t ctx_c = {&writer_c, source_filename, 0};
 
@@ -1609,7 +1868,8 @@ tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename, const char
 
   // Single pass: Emit declarations in order
   // Lowering is responsible for inserting forward declarations and ordering
-  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+  for (tick_ast_node_t* decl = module->data.module.decls; decl;
+       decl = decl->next) {
     if (decl->kind != TICK_AST_DECL) {
       continue;
     }
@@ -1623,7 +1883,8 @@ tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename, const char
       continue;
     }
 
-    tick_ast_node_kind_t init_kind = decl->data.decl.init ? decl->data.decl.init->kind : TICK_AST_DECL;
+    tick_ast_node_kind_t init_kind =
+        decl->data.decl.init ? decl->data.decl.init->kind : TICK_AST_DECL;
 
     switch (init_kind) {
       case TICK_AST_STRUCT_DECL:

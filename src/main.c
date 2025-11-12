@@ -25,7 +25,8 @@ int main(int argc, char** argv) {
   // setup output early to fail early
   tick_path_t output_h;
   tick_path_t output_c;
-  if (tick_output_format_name(args.emitc.output, &output_h, &output_c) != TICK_OK) {
+  if (tick_output_format_name(args.emitc.output, &output_h, &output_c) !=
+      TICK_OK) {
     TICK_USER_LOGE("output file path too long");
     exit(1);
   }
@@ -44,8 +45,10 @@ int main(int argc, char** argv) {
   // setup segmented list allocators
   tick_alloc_seglist_t str_pool_alloc_;
   tick_alloc_seglist_t ast_pool_alloc_;
-  tick_alloc_t str_pool_alloc = tick_allocator_seglist(&str_pool_alloc_, libc_alloc);
-  tick_alloc_t ast_pool_alloc = tick_allocator_seglist(&ast_pool_alloc_, libc_alloc);
+  tick_alloc_t str_pool_alloc =
+      tick_allocator_seglist(&str_pool_alloc_, libc_alloc);
+  tick_alloc_t ast_pool_alloc =
+      tick_allocator_seglist(&ast_pool_alloc_, libc_alloc);
 
   // setup lexer + parser
   u8 errbuf_storage[4096];
@@ -55,10 +58,11 @@ int main(int argc, char** argv) {
   tick_parse_t parse;
   tick_parse_init(&parse, ast_pool_alloc, errbuf);
 
-#define COMPILE_ERR() do { \
-  TICK_USER_LOGE("%s", errbuf.buf); \
-  exit(1); \
-} while (0)
+#define COMPILE_ERR()                 \
+  do {                                \
+    TICK_USER_LOGE("%s", errbuf.buf); \
+    exit(1);                          \
+  } while (0)
 
   // tokenize + parse
   tick_tok_t tok = {0};
@@ -69,13 +73,10 @@ int main(int argc, char** argv) {
     UNUSED(tok_buf);
     DLOG("[lex] %s", tick_tok_format(&tok, tok_buf, sizeof(tok_buf)));
 
-    if (tok.type == TICK_TOK_ERR)
-      COMPILE_ERR();
+    if (tok.type == TICK_TOK_ERR) COMPILE_ERR();
 
-    if (tick_parse_tok(&parse, &tok) != TICK_OK)
-      COMPILE_ERR();
-    if (parse.has_error)
-      COMPILE_ERR();
+    if (tick_parse_tok(&parse, &tok) != TICK_OK) COMPILE_ERR();
+    if (parse.has_error) COMPILE_ERR();
   } while (tok.type != TICK_TOK_EOF);
   tick_ast_t root = parse.root;
   if (root.root == NULL) {
@@ -84,17 +85,17 @@ int main(int argc, char** argv) {
   }
 
   // analyze, typecheck, lower
-  if (tick_ast_analyze(&root, parse.alloc, errbuf) != TICK_OK)
-    COMPILE_ERR();
-  if (tick_ast_lower(&root, parse.alloc, errbuf) != TICK_OK)
-    COMPILE_ERR();
+  if (tick_ast_analyze(&root, parse.alloc, errbuf) != TICK_OK) COMPILE_ERR();
+  if (tick_ast_lower(&root, parse.alloc, errbuf) != TICK_OK) COMPILE_ERR();
 
 #undef COMPILE_ERR
 
   // codegen
   tick_writer_t out_writer_h = tick_file_writer(f_h);
   tick_writer_t out_writer_c = tick_file_writer(f_c);
-  if (tick_codegen(&root, (const char*)args.emitc.input.buf, (const char*)output_h.buf, out_writer_h, out_writer_c) != TICK_OK) {
+  if (tick_codegen(&root, (const char*)args.emitc.input.buf,
+                   (const char*)output_h.buf, out_writer_h,
+                   out_writer_c) != TICK_OK) {
     TICK_USER_LOGE("failed to write to output files");
     exit(1);
   }

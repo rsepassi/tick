@@ -30,10 +30,12 @@ typedef struct type_symbol_s {
 
 // Register a type symbol
 static tick_err_t register_type_symbol(type_symbol_t** head, tick_buf_t name,
-                                       tick_ast_node_t* decl, tick_alloc_t alloc) {
+                                       tick_ast_node_t* decl,
+                                       tick_alloc_t alloc) {
   // Check for duplicates
   for (type_symbol_t* sym = *head; sym; sym = sym->next) {
-    if (sym->name.sz == name.sz && memcmp(sym->name.buf, name.buf, name.sz) == 0) {
+    if (sym->name.sz == name.sz &&
+        memcmp(sym->name.buf, name.buf, name.sz) == 0) {
       // Duplicate type name - for now, just skip
       // TODO: Report error
       return TICK_OK;
@@ -41,7 +43,8 @@ static tick_err_t register_type_symbol(type_symbol_t** head, tick_buf_t name,
   }
 
   // Allocate new symbol
-  tick_allocator_config_t config = { .flags = TICK_ALLOCATOR_ZEROMEM, .alignment2 = 0 };
+  tick_allocator_config_t config = {.flags = TICK_ALLOCATOR_ZEROMEM,
+                                    .alignment2 = 0};
   tick_buf_t buf = {0};
   CHECK_OK(alloc.realloc(alloc.ctx, &buf, sizeof(type_symbol_t), &config));
 
@@ -55,9 +58,11 @@ static tick_err_t register_type_symbol(type_symbol_t** head, tick_buf_t name,
 }
 
 // Look up a type symbol by name
-static tick_ast_node_t* lookup_type_symbol(type_symbol_t* head, tick_buf_t name) {
+static tick_ast_node_t* lookup_type_symbol(type_symbol_t* head,
+                                           tick_buf_t name) {
   for (type_symbol_t* sym = head; sym; sym = sym->next) {
-    if (sym->name.sz == name.sz && memcmp(sym->name.buf, name.buf, name.sz) == 0) {
+    if (sym->name.sz == name.sz &&
+        memcmp(sym->name.buf, name.buf, name.sz) == 0) {
       return sym->decl;
     }
   }
@@ -69,13 +74,15 @@ static tick_ast_node_t* lookup_type_symbol(type_symbol_t* head, tick_buf_t name)
 // ============================================================================
 
 // Helper to allocate a type node
-static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc, tick_builtin_type_t builtin_type) {
+static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc,
+                                        tick_builtin_type_t builtin_type) {
   tick_allocator_config_t config = {
-    .flags = TICK_ALLOCATOR_ZEROMEM,
-    .alignment2 = 0,
+      .flags = TICK_ALLOCATOR_ZEROMEM,
+      .alignment2 = 0,
   };
   tick_buf_t buf = {0};
-  tick_err_t err = alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config);
+  tick_err_t err =
+      alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config);
   if (err != TICK_OK) {
     return NULL;
   }
@@ -90,9 +97,12 @@ static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc, tick_builtin_type_t 
 
 // Helper to allocate a literal node
 static tick_ast_node_t* alloc_literal_node(tick_alloc_t alloc, int64_t value) {
-  tick_allocator_config_t config = { .flags = TICK_ALLOCATOR_ZEROMEM, .alignment2 = 0 };
+  tick_allocator_config_t config = {.flags = TICK_ALLOCATOR_ZEROMEM,
+                                    .alignment2 = 0};
   tick_buf_t buf = {0};
-  if (alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config) != TICK_OK) return NULL;
+  if (alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config) !=
+      TICK_OK)
+    return NULL;
 
   tick_ast_node_t* node = (tick_ast_node_t*)buf.buf;
   node->kind = TICK_AST_LITERAL;
@@ -124,8 +134,10 @@ static tick_err_t eval_const_expr(tick_ast_node_t* expr, int64_t* out_value) {
 
     case TICK_AST_BINARY_EXPR: {
       int64_t left, right;
-      if (eval_const_expr(expr->data.binary_expr.left, &left) != TICK_OK) return TICK_ERR;
-      if (eval_const_expr(expr->data.binary_expr.right, &right) != TICK_OK) return TICK_ERR;
+      if (eval_const_expr(expr->data.binary_expr.left, &left) != TICK_OK)
+        return TICK_ERR;
+      if (eval_const_expr(expr->data.binary_expr.right, &right) != TICK_OK)
+        return TICK_ERR;
 
       switch (expr->data.binary_expr.op) {
         case BINOP_ADD:
@@ -185,7 +197,8 @@ static tick_err_t eval_const_expr(tick_ast_node_t* expr, int64_t* out_value) {
 
     case TICK_AST_UNARY_EXPR: {
       int64_t operand;
-      if (eval_const_expr(expr->data.unary_expr.operand, &operand) != TICK_OK) return TICK_ERR;
+      if (eval_const_expr(expr->data.unary_expr.operand, &operand) != TICK_OK)
+        return TICK_ERR;
 
       switch (expr->data.unary_expr.op) {
         case UNOP_NEG:
@@ -208,7 +221,8 @@ static tick_err_t eval_const_expr(tick_ast_node_t* expr, int64_t* out_value) {
 
 // Reduce a constant expression to a literal node
 // Replaces *expr with a new LITERAL node containing the evaluated value
-static tick_err_t reduce_to_literal(tick_ast_node_t** expr, tick_alloc_t alloc) {
+static tick_err_t reduce_to_literal(tick_ast_node_t** expr,
+                                    tick_alloc_t alloc) {
   if (!expr || !*expr) return TICK_ERR;
 
   int64_t value;
@@ -226,8 +240,10 @@ static tick_err_t reduce_to_literal(tick_ast_node_t** expr, tick_alloc_t alloc) 
 
 // Map type name to builtin type enum
 static tick_builtin_type_t resolve_type_name(tick_buf_t name) {
-  #define TYPE_CMP(str, type) \
-    if (name.sz == sizeof(str)-1 && memcmp(name.buf, str, sizeof(str)-1) == 0) return type
+#define TYPE_CMP(str, type)                        \
+  if (name.sz == sizeof(str) - 1 &&                \
+      memcmp(name.buf, str, sizeof(str) - 1) == 0) \
+  return type
 
   TYPE_CMP("i8", TICK_TYPE_I8);
   TYPE_CMP("i16", TICK_TYPE_I16);
@@ -242,35 +258,42 @@ static tick_builtin_type_t resolve_type_name(tick_buf_t name) {
   TYPE_CMP("bool", TICK_TYPE_BOOL);
   TYPE_CMP("void", TICK_TYPE_VOID);
 
-  #undef TYPE_CMP
+#undef TYPE_CMP
   return TICK_TYPE_USER_DEFINED;
 }
 
 // Forward declarations
-static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_symbols, tick_alloc_t alloc, tick_buf_t errbuf);
-static tick_err_t analyze_type(tick_ast_node_t* type_node, type_symbol_t* type_symbols, tick_alloc_t alloc);
+static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
+                                     type_symbol_t* type_symbols,
+                                     tick_alloc_t alloc, tick_buf_t errbuf);
+static tick_err_t analyze_type(tick_ast_node_t* type_node,
+                               type_symbol_t* type_symbols, tick_alloc_t alloc);
 
 // Analyze type node - resolve builtin type names and user-defined types
-static tick_err_t analyze_type(tick_ast_node_t* type_node, type_symbol_t* type_symbols, tick_alloc_t alloc) {
+static tick_err_t analyze_type(tick_ast_node_t* type_node,
+                               type_symbol_t* type_symbols,
+                               tick_alloc_t alloc) {
   if (!type_node) return TICK_OK;
 
   switch (type_node->kind) {
     case TICK_AST_TYPE_NAMED:
       if (type_node->data.type_named.builtin_type == TICK_TYPE_UNKNOWN) {
         type_node->data.type_named.builtin_type =
-          resolve_type_name(type_node->data.type_named.name);
+            resolve_type_name(type_node->data.type_named.name);
       }
 
       // If it's a user-defined type, look it up in the symbol table
       if (type_node->data.type_named.builtin_type == TICK_TYPE_USER_DEFINED) {
-        tick_ast_node_t* decl = lookup_type_symbol(type_symbols, type_node->data.type_named.name);
+        tick_ast_node_t* decl =
+            lookup_type_symbol(type_symbols, type_node->data.type_named.name);
         type_node->data.type_named.type_decl = decl;
         // If not found, type_decl will be NULL (error will be caught later)
       }
       return TICK_OK;
 
     case TICK_AST_TYPE_POINTER:
-      return analyze_type(type_node->data.type_pointer.pointee_type, type_symbols, alloc);
+      return analyze_type(type_node->data.type_pointer.pointee_type,
+                          type_symbols, alloc);
 
     case TICK_AST_TYPE_ARRAY:
       // Reduce array size to literal if it's a constant expression
@@ -278,11 +301,13 @@ static tick_err_t analyze_type(tick_ast_node_t* type_node, type_symbol_t* type_s
         // Try to reduce to literal, but don't fail if it's already a literal
         reduce_to_literal(&type_node->data.type_array.size, alloc);
       }
-      return analyze_type(type_node->data.type_array.element_type, type_symbols, alloc);
+      return analyze_type(type_node->data.type_array.element_type, type_symbols,
+                          alloc);
 
     case TICK_AST_TYPE_FUNCTION: {
       // Analyze return type
-      tick_err_t err = analyze_type(type_node->data.type_function.return_type, type_symbols, alloc);
+      tick_err_t err = analyze_type(type_node->data.type_function.return_type,
+                                    type_symbols, alloc);
       if (err != TICK_OK) return err;
 
       // Analyze parameter types
@@ -301,7 +326,9 @@ static tick_err_t analyze_type(tick_ast_node_t* type_node, type_symbol_t* type_s
 }
 
 // Get the type of an expression (returns resolved_type or infers it)
-static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_symbols, tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
+                                     type_symbol_t* type_symbols,
+                                     tick_alloc_t alloc, tick_buf_t errbuf) {
   UNUSED(errbuf);
 
   if (!expr) return NULL;
@@ -320,8 +347,10 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
       }
 
       // Analyze operands
-      tick_ast_node_t* left_type = analyze_expr(expr->data.binary_expr.left, type_symbols, alloc, errbuf);
-      tick_ast_node_t* right_type = analyze_expr(expr->data.binary_expr.right, type_symbols, alloc, errbuf);
+      tick_ast_node_t* left_type = analyze_expr(expr->data.binary_expr.left,
+                                                type_symbols, alloc, errbuf);
+      tick_ast_node_t* right_type = analyze_expr(expr->data.binary_expr.right,
+                                                 type_symbols, alloc, errbuf);
 
       tick_ast_node_t* result_type = NULL;
 
@@ -339,7 +368,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
         // For simplicity, use left operand's type as result type
         // TODO: Proper type checking and type promotion
         if (left_type && left_type->kind == TICK_AST_TYPE_NAMED) {
-          result_type = alloc_type_node(alloc, left_type->data.type_named.builtin_type);
+          result_type =
+              alloc_type_node(alloc, left_type->data.type_named.builtin_type);
         }
       }
 
@@ -354,7 +384,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
       }
 
       // Result type is same as operand type for most unary ops
-      tick_ast_node_t* operand_type = analyze_expr(expr->data.unary_expr.operand, type_symbols, alloc, errbuf);
+      tick_ast_node_t* operand_type = analyze_expr(
+          expr->data.unary_expr.operand, type_symbols, alloc, errbuf);
 
       expr->data.unary_expr.resolved_type = operand_type;
       return operand_type;
@@ -380,9 +411,11 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
       analyze_type(expr->data.struct_init_expr.type, type_symbols, alloc);
 
       // Analyze field initializer expressions
-      for (tick_ast_node_t* field = expr->data.struct_init_expr.fields; field; field = field->next) {
+      for (tick_ast_node_t* field = expr->data.struct_init_expr.fields; field;
+           field = field->next) {
         if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
-          analyze_expr(field->data.struct_init_field.value, type_symbols, alloc, errbuf);
+          analyze_expr(field->data.struct_init_field.value, type_symbols, alloc,
+                       errbuf);
         }
       }
 
@@ -400,9 +433,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
         } else {
           // Unknown builtin
           snprintf((char*)errbuf.buf, errbuf.sz,
-                   "%zu:%zu: unknown builtin '%.*s'\n",
-                   expr->loc.line, expr->loc.col,
-                   (int)expr->data.identifier_expr.name.sz,
+                   "%zu:%zu: unknown builtin '%.*s'\n", expr->loc.line,
+                   expr->loc.col, (int)expr->data.identifier_expr.name.sz,
                    expr->data.identifier_expr.name.buf);
           return NULL;
         }
@@ -418,7 +450,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
       analyze_expr(expr->data.call_expr.callee, type_symbols, alloc, errbuf);
 
       // Analyze arguments
-      for (tick_ast_node_t* arg = expr->data.call_expr.args; arg; arg = arg->next) {
+      for (tick_ast_node_t* arg = expr->data.call_expr.args; arg;
+           arg = arg->next) {
         analyze_expr(arg, type_symbols, alloc, errbuf);
       }
 
@@ -434,7 +467,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
       }
 
       // Analyze operand
-      tick_ast_node_t* operand_type = analyze_expr(expr->data.unwrap_panic_expr.operand, type_symbols, alloc, errbuf);
+      tick_ast_node_t* operand_type = analyze_expr(
+          expr->data.unwrap_panic_expr.operand, type_symbols, alloc, errbuf);
 
       // For 'a.?': a is ?T, result is T
       tick_ast_node_t* result_type = NULL;
@@ -453,8 +487,9 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr, type_symbol_t* type_
 }
 
 // Analyze a statement
-static tick_err_t analyze_stmt(tick_ast_node_t* stmt, type_symbol_t* type_symbols,
-                                tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_err_t analyze_stmt(tick_ast_node_t* stmt,
+                               type_symbol_t* type_symbols, tick_alloc_t alloc,
+                               tick_buf_t errbuf) {
   if (!stmt) return TICK_OK;
 
   switch (stmt->kind) {
@@ -474,7 +509,8 @@ static tick_err_t analyze_stmt(tick_ast_node_t* stmt, type_symbol_t* type_symbol
     case TICK_AST_DECL: {
       // If type is NULL, infer from initializer
       if (stmt->data.decl.type == NULL && stmt->data.decl.init) {
-        tick_ast_node_t* inferred_type = analyze_expr(stmt->data.decl.init, type_symbols, alloc, errbuf);
+        tick_ast_node_t* inferred_type =
+            analyze_expr(stmt->data.decl.init, type_symbols, alloc, errbuf);
         stmt->data.decl.type = inferred_type;
       }
       // Analyze declaration type
@@ -495,8 +531,10 @@ static tick_err_t analyze_stmt(tick_ast_node_t* stmt, type_symbol_t* type_symbol
 
     case TICK_AST_IF_STMT:
       analyze_expr(stmt->data.if_stmt.condition, type_symbols, alloc, errbuf);
-      CHECK_OK(analyze_stmt(stmt->data.if_stmt.then_block, type_symbols, alloc, errbuf));
-      CHECK_OK(analyze_stmt(stmt->data.if_stmt.else_block, type_symbols, alloc, errbuf));
+      CHECK_OK(analyze_stmt(stmt->data.if_stmt.then_block, type_symbols, alloc,
+                            errbuf));
+      CHECK_OK(analyze_stmt(stmt->data.if_stmt.else_block, type_symbols, alloc,
+                            errbuf));
       return TICK_OK;
 
     default:
@@ -505,8 +543,9 @@ static tick_err_t analyze_stmt(tick_ast_node_t* stmt, type_symbol_t* type_symbol
 }
 
 // Analyze an enum declaration and populate auto-increment values
-static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_symbols,
-                                     tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_err_t analyze_enum_decl(tick_ast_node_t* decl,
+                                    type_symbol_t* type_symbols,
+                                    tick_alloc_t alloc, tick_buf_t errbuf) {
   UNUSED(errbuf);
 
   if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
@@ -515,7 +554,8 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
   if (!enum_node || enum_node->kind != TICK_AST_ENUM_DECL) return TICK_OK;
 
   // Analyze underlying type
-  CHECK_OK(analyze_type(enum_node->data.enum_decl.underlying_type, type_symbols, alloc));
+  CHECK_OK(analyze_type(enum_node->data.enum_decl.underlying_type, type_symbols,
+                        alloc));
 
   // Walk the enum values and calculate auto-increment
   // The list is in source order (parser builds it with append)
@@ -523,8 +563,7 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
 
   // First pass: reduce all explicit values to literals
   for (tick_ast_node_t* value_node = enum_node->data.enum_decl.values;
-       value_node;
-       value_node = value_node->next) {
+       value_node; value_node = value_node->next) {
     if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
 
     if (value_node->data.enum_value.value != NULL) {
@@ -536,8 +575,7 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
   // Second pass: assign auto-increment values in source order
   int64_t current_value = 0;
   for (tick_ast_node_t* value_node = enum_node->data.enum_decl.values;
-       value_node;
-       value_node = value_node->next) {
+       value_node; value_node = value_node->next) {
     if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
 
     if (value_node->data.enum_value.value == NULL) {
@@ -547,7 +585,8 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
       value_node->data.enum_value.value = literal;
     } else {
       // Explicit value: already reduced in first pass
-      current_value = value_node->data.enum_value.value->data.literal.data.int_value;
+      current_value =
+          value_node->data.enum_value.value->data.literal.data.int_value;
     }
 
     // Increment for next value
@@ -558,8 +597,9 @@ static tick_err_t analyze_enum_decl(tick_ast_node_t* decl, type_symbol_t* type_s
 }
 
 // Analyze a function declaration
-static tick_err_t analyze_function(tick_ast_node_t* decl, type_symbol_t* type_symbols,
-                                    tick_alloc_t alloc, tick_buf_t errbuf) {
+static tick_err_t analyze_function(tick_ast_node_t* decl,
+                                   type_symbol_t* type_symbols,
+                                   tick_alloc_t alloc, tick_buf_t errbuf) {
   if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
 
   tick_ast_node_t* func = decl->data.decl.init;
@@ -569,7 +609,8 @@ static tick_err_t analyze_function(tick_ast_node_t* decl, type_symbol_t* type_sy
   CHECK_OK(analyze_type(func->data.function.return_type, type_symbols, alloc));
 
   // Analyze parameters
-  for (tick_ast_node_t* param = func->data.function.params; param; param = param->next) {
+  for (tick_ast_node_t* param = func->data.function.params; param;
+       param = param->next) {
     if (param->kind == TICK_AST_PARAM) {
       CHECK_OK(analyze_type(param->data.param.type, type_symbols, alloc));
     }
@@ -582,14 +623,17 @@ static tick_err_t analyze_function(tick_ast_node_t* decl, type_symbol_t* type_sy
 }
 
 // Analyze struct declaration - resolve field types
-static tick_err_t analyze_struct_decl(tick_ast_node_t* decl, type_symbol_t* type_symbols, tick_alloc_t alloc) {
+static tick_err_t analyze_struct_decl(tick_ast_node_t* decl,
+                                      type_symbol_t* type_symbols,
+                                      tick_alloc_t alloc) {
   if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
 
   tick_ast_node_t* struct_node = decl->data.decl.init;
   if (!struct_node || struct_node->kind != TICK_AST_STRUCT_DECL) return TICK_OK;
 
   // Analyze field types
-  for (tick_ast_node_t* field = struct_node->data.struct_decl.fields; field; field = field->next) {
+  for (tick_ast_node_t* field = struct_node->data.struct_decl.fields; field;
+       field = field->next) {
     if (field->kind == TICK_AST_FIELD) {
       CHECK_OK(analyze_type(field->data.field.type, type_symbols, alloc));
     }
@@ -599,7 +643,9 @@ static tick_err_t analyze_struct_decl(tick_ast_node_t* decl, type_symbol_t* type
 }
 
 // Analyze union declaration - resolve field types
-static tick_err_t analyze_union_decl(tick_ast_node_t* decl, type_symbol_t* type_symbols, tick_alloc_t alloc) {
+static tick_err_t analyze_union_decl(tick_ast_node_t* decl,
+                                     type_symbol_t* type_symbols,
+                                     tick_alloc_t alloc) {
   if (!decl || decl->kind != TICK_AST_DECL) return TICK_OK;
 
   tick_ast_node_t* union_node = decl->data.decl.init;
@@ -607,11 +653,13 @@ static tick_err_t analyze_union_decl(tick_ast_node_t* decl, type_symbol_t* type_
 
   // Analyze tag type if present
   if (union_node->data.union_decl.tag_type) {
-    CHECK_OK(analyze_type(union_node->data.union_decl.tag_type, type_symbols, alloc));
+    CHECK_OK(analyze_type(union_node->data.union_decl.tag_type, type_symbols,
+                          alloc));
   }
 
   // Analyze field types
-  for (tick_ast_node_t* field = union_node->data.union_decl.fields; field; field = field->next) {
+  for (tick_ast_node_t* field = union_node->data.union_decl.fields; field;
+       field = field->next) {
     if (field->kind == TICK_AST_FIELD) {
       CHECK_OK(analyze_type(field->data.field.type, type_symbols, alloc));
     }
@@ -620,7 +668,8 @@ static tick_err_t analyze_union_decl(tick_ast_node_t* decl, type_symbol_t* type_
   return TICK_OK;
 }
 
-tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf) {
+tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
+                            tick_buf_t errbuf) {
   if (!ast || !ast->root) return TICK_OK;
 
   if (ast->root->kind != TICK_AST_MODULE) {
@@ -633,7 +682,8 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errb
   type_symbol_t* type_symbols = NULL;
 
   // PASS 1: Register all type declarations
-  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+  for (tick_ast_node_t* decl = module->data.module.decls; decl;
+       decl = decl->next) {
     if (decl->kind == TICK_AST_DECL && decl->data.decl.init) {
       tick_ast_node_t* init = decl->data.decl.init;
 
@@ -642,13 +692,15 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errb
           init->kind == TICK_AST_ENUM_DECL ||
           init->kind == TICK_AST_UNION_DECL) {
         // The type name is in the parent DECL node
-        CHECK_OK(register_type_symbol(&type_symbols, decl->data.decl.name, init, alloc));
+        CHECK_OK(register_type_symbol(&type_symbols, decl->data.decl.name, init,
+                                      alloc));
       }
     }
   }
 
   // PASS 2: Analyze all declarations with type resolution
-  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+  for (tick_ast_node_t* decl = module->data.module.decls; decl;
+       decl = decl->next) {
     if (decl->kind == TICK_AST_DECL) {
       if (decl->data.decl.init) {
         // Analyze functions
@@ -666,12 +718,12 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errb
         // Analyze unions
         else if (decl->data.decl.init->kind == TICK_AST_UNION_DECL) {
           CHECK_OK(analyze_union_decl(decl, type_symbols, alloc));
-        }
-        else {
+        } else {
           // Regular variable declaration with initializer
           // If type is NULL, infer from initializer
           if (decl->data.decl.type == NULL) {
-            tick_ast_node_t* inferred_type = analyze_expr(decl->data.decl.init, type_symbols, alloc, errbuf);
+            tick_ast_node_t* inferred_type =
+                analyze_expr(decl->data.decl.init, type_symbols, alloc, errbuf);
             decl->data.decl.type = inferred_type;
           }
           // Analyze the type
@@ -722,15 +774,18 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errb
 
 // Helper to allocate a new AST node (for forward declarations)
 static tick_ast_node_t* alloc_ast_node(tick_alloc_t alloc) {
-  tick_allocator_config_t config = { .flags = TICK_ALLOCATOR_ZEROMEM, .alignment2 = 0 };
+  tick_allocator_config_t config = {.flags = TICK_ALLOCATOR_ZEROMEM,
+                                    .alignment2 = 0};
   tick_buf_t buf = {0};
-  if (alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config) != TICK_OK) {
+  if (alloc.realloc(alloc.ctx, &buf, sizeof(tick_ast_node_t), &config) !=
+      TICK_OK) {
     return NULL;
   }
   return (tick_ast_node_t*)buf.buf;
 }
 
-tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf) {
+tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
+                          tick_buf_t errbuf) {
   UNUSED(errbuf);
 
   if (!ast || !ast->root || ast->root->kind != TICK_AST_MODULE) {
@@ -739,13 +794,14 @@ tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc, tick_buf_t errbuf
 
   tick_ast_node_t* module = ast->root;
 
-  // PASS 1: Build new declaration list with forward declarations at the beginning
-  // Create forward declarations for ALL struct/enum/union types
+  // PASS 1: Build new declaration list with forward declarations at the
+  // beginning Create forward declarations for ALL struct/enum/union types
   tick_ast_node_t* new_decls = NULL;
   tick_ast_node_t* new_decls_tail = NULL;
 
   // First, emit forward declarations for all user-defined types
-  for (tick_ast_node_t* decl = module->data.module.decls; decl; decl = decl->next) {
+  for (tick_ast_node_t* decl = module->data.module.decls; decl;
+       decl = decl->next) {
     if (decl->kind == TICK_AST_DECL && decl->data.decl.init) {
       tick_ast_node_t* init = decl->data.decl.init;
 
