@@ -66,6 +66,7 @@ int main(int argc, char** argv) {
     tick_lex_next(&lex, &tok);
 
     char tok_buf[256];
+    UNUSED(tok_buf);
     DLOG("[lex] %s", tick_tok_format(&tok, tok_buf, sizeof(tok_buf)));
 
     if (tok.type == TICK_TOK_ERR)

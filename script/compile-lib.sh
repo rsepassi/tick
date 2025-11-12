@@ -36,10 +36,8 @@ BASENAME=$(basename "$SRC" .tick)
 mkdir -p "$INTERMEDIATE_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-echo "==> Compiling Tick source to C: $SRC"
 "$COMPILER" emitc "$SRC" -o "$INTERMEDIATE_DIR/$BASENAME"
 
-echo "==> Compiling C to object file: $INTERMEDIATE_DIR/$BASENAME.c"
 "$CC" -std=c11 -Wpedantic \
     -Wall -Wextra -Werror -Wvla \
     -g3 -O1 -fno-omit-frame-pointer \
@@ -48,9 +46,4 @@ echo "==> Compiling C to object file: $INTERMEDIATE_DIR/$BASENAME.c"
     -o "$INTERMEDIATE_DIR/$BASENAME.o" \
     -c "$INTERMEDIATE_DIR/$BASENAME.c"
 
-echo "==> Creating static library: $OUTPUT_DIR/lib$BASENAME.a"
 "$AR" rcs "$OUTPUT_DIR/lib$BASENAME.a" "$INTERMEDIATE_DIR/$BASENAME.o"
-
-echo "==> Success! Library created at: $OUTPUT_DIR/lib$BASENAME.a"
-ls -lh "$OUTPUT_DIR/lib$BASENAME.a"
-file "$OUTPUT_DIR/lib$BASENAME.a"

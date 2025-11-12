@@ -160,5 +160,3 @@ test: $(COMPILER)
 	./build/tick emitc test/hello.tick -o build/gen/hello
 	@echo "Testing grammar.tick..."
 	./build/tick emitc test/grammar.tick -o build/gen/grammar
-
-.SUFFIXES:  # Disable built-in suffix rules (prevents yacc from running on .y files)
