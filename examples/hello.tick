@@ -1,0 +1,7 @@
+let std = import "std";
+
+let add = fn (a: usz, b: usz) usz {
+  return a + b;
+};
+
+export add;

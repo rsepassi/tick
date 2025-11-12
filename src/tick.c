@@ -1,0 +1,426 @@
+#include "tick.h"
+
+// ============================================================================
+// Driver functions
+// ============================================================================
+
+tick_cli_result_t tick_driver_parse_args(tick_driver_args_t* args, int argc, char** argv) {
+  // Need at least: tick emitc <input> -o <output>
+  if (argc < 2) {
+    return TICK_CLI_ERR;
+  }
+
+  // Parse command
+  if (strcmp(argv[1], "emitc") != 0) {
+    return TICK_CLI_ERR;
+  }
+  args->cmd = TICK_CMD_EMITC;
+
+  // Initialize to NULL to detect missing arguments
+  char* input_arg = NULL;
+  char* output_arg = NULL;
+
+  // Parse remaining arguments
+  for (int i = 2; i < argc; i++) {
+    // Check for help flag
+    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+      return TICK_CLI_HELP;
+    }
+
+    // Check for -o flag
+    if (strcmp(argv[i], "-o") == 0) {
+      i++;  // Move to next argument for the value
+      if (i >= argc) {
+        return TICK_CLI_ERR;  // -o without a value
+      }
+      output_arg = argv[i];
+      continue;
+    }
+
+    // Check for unrecognized flag
+    if (argv[i][0] == '-') {
+      return TICK_CLI_ERR;  // Unrecognized flag
+    }
+
+    // Non-flag argument is the input file
+    if (input_arg == NULL) {
+      input_arg = argv[i];
+    } else {
+      return TICK_CLI_ERR;  // Multiple input files not supported
+    }
+  }
+
+  // Validate required arguments
+  if (input_arg == NULL || output_arg == NULL) {
+    return TICK_CLI_ERR;
+  }
+
+  // Set parsed values
+  args->emitc.input.buf = (u8*)input_arg;
+  args->emitc.input.sz = strlen(input_arg);
+  args->emitc.output.buf = (u8*)output_arg;
+  args->emitc.output.sz = strlen(output_arg);
+
+  return TICK_CLI_OK;
+}
+
+tick_err_t tick_driver_read_file(tick_alloc_t* alloc, tick_buf_t* output, tick_buf_t path) {
+  // Check if path is already null-terminated
+  const char* path_str;
+  char path_buf[PATH_MAX];
+  if (path.buf[path.sz] == '\0') {
+    path_str = (const char*)path.buf;
+  } else {
+    if (path.sz >= PATH_MAX) {
+      return TICK_ERR;
+    }
+    memcpy(path_buf, path.buf, path.sz);
+    path_buf[path.sz] = '\0';
+    path_str = path_buf;
+  }
+
+  FILE* f = fopen(path_str, "rb");
+  if (f == NULL) {
+    return TICK_ERR;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long file_size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (file_size < 0) {
+    fclose(f);
+    return TICK_ERR;
+  }
+
+  tick_buf_t buf = {NULL, 0};
+  if (alloc->realloc(alloc->ctx, &buf, (usz)file_size, 0) != TICK_OK) {
+    fclose(f);
+    return TICK_ERR;
+  }
+
+  usz bytes_read = fread(buf.buf, 1, (usz)file_size, f);
+  fclose(f);
+  if (bytes_read != (usz)file_size) {
+    CHECK_OK(alloc->realloc(alloc->ctx, &buf, 0, 0));
+    return TICK_ERR;
+  }
+
+  output->buf = buf.buf;
+  output->sz = (usz)file_size;
+  return TICK_OK;
+}
+
+// ============================================================================
+// Allocator functions
+// ============================================================================
+
+static tick_err_t tick_allocator_libc_realloc(void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config) {
+  UNUSED(ctx);
+
+  // Use default config if NULL/0
+  tick_allocator_config_t default_config = {.flags = 0, .alignment2 = 0};
+  if (config == NULL || (usz)config == 0) {
+    config = &default_config;
+  }
+
+  // Handle alignment
+  usz alignment = 1;
+  if (config->alignment2 > 0) {
+    alignment = (usz)1 << config->alignment2;
+  }
+
+  void* ptr = NULL;
+  if (newsz > 0) {
+    // Use realloc directly if no special alignment and existing buffer
+    // This allows potential in-place growth without copying
+    if (alignment <= 1 && buf->buf != NULL) {
+      ptr = realloc(buf->buf, newsz);
+      if (ptr == NULL) {
+        return TICK_ERR;
+      }
+
+      // Zero memory if requested (only new bytes)
+      if (config->flags & TICK_ALLOCATOR_ZEROMEM) {
+        if (buf->sz < newsz) {
+          memset((u8*)ptr + buf->sz, 0, newsz - buf->sz);
+        }
+      }
+    } else {
+      // Use aligned_alloc if alignment is needed, or malloc for new allocation
+      if (alignment > 1) {
+        // aligned_alloc requires size to be multiple of alignment
+        usz aligned_size = ALIGNF(newsz, alignment);
+        ptr = aligned_alloc(alignment, aligned_size);
+      } else {
+        ptr = malloc(newsz);
+      }
+
+      if (ptr == NULL) {
+        return TICK_ERR;
+      }
+
+      // Copy old data if resizing
+      if (buf->buf != NULL && buf->sz > 0) {
+        usz copy_size = buf->sz < newsz ? buf->sz : newsz;
+        memcpy(ptr, buf->buf, copy_size);
+        free(buf->buf);
+      }
+
+      // Zero memory if requested
+      if (config->flags & TICK_ALLOCATOR_ZEROMEM) {
+        if (buf->sz < newsz) {
+          memset((u8*)ptr + buf->sz, 0, newsz - buf->sz);
+        }
+      }
+    }
+  } else {
+    // Free memory
+    if (buf->buf != NULL) {
+      free(buf->buf);
+    }
+  }
+
+  buf->buf = (u8*)ptr;
+  buf->sz = newsz;
+  return TICK_OK;
+}
+
+tick_alloc_t tick_allocator_libc(void) {
+  tick_alloc_t alloc = {
+    .realloc = tick_allocator_libc_realloc,
+    .ctx = NULL,
+  };
+  return alloc;
+}
+
+typedef struct tick_alloc_seglist_segment_t {
+  struct tick_alloc_seglist_segment_t* next;
+  usz size;
+  usz used;
+  u8 data[];
+} tick_alloc_seglist_segment_t;
+
+#define SEGLIST_SEGMENT_SIZE (64 * 1024)  // 64KB segments
+
+static tick_err_t tick_allocator_seglist_realloc(void* ctx, tick_buf_t* buf, usz newsz, tick_allocator_config_t* config) {
+  tick_alloc_seglist_t* seglist = (tick_alloc_seglist_t*)ctx;
+
+  // Only support allocation, not reallocation
+  if (buf->buf != NULL) {
+    return TICK_ERR;
+  }
+
+  // free is a no-op
+  if (newsz == 0) {
+    return TICK_OK;
+  }
+
+  // Use default config if NULL/0
+  tick_allocator_config_t default_config = {.flags = 0, .alignment2 = 0};
+  if (config == NULL || (usz)config == 0) {
+    config = &default_config;
+  }
+
+  // Get current segment
+  tick_alloc_seglist_segment_t* seg = (tick_alloc_seglist_segment_t*)seglist->segments;
+
+  // Handle alignment
+  usz alignment = 1;
+  if (config->alignment2 > 0) {
+    alignment = (usz)1 << config->alignment2;
+  }
+
+  // Try to allocate from current segment
+  if (seg != NULL) {
+    usz aligned_used = ALIGNF(seg->used, alignment);
+    if (aligned_used + newsz <= seg->size) {
+      buf->buf = seg->data + aligned_used;
+      buf->sz = newsz;
+      seg->used = aligned_used + newsz;
+
+      if (config->flags & TICK_ALLOCATOR_ZEROMEM) {
+        memset(buf->buf, 0, newsz);
+      }
+
+      seglist->total_allocated += newsz;
+      return TICK_OK;
+    }
+  }
+
+  // Need a new segment
+  usz seg_size = SEGLIST_SEGMENT_SIZE;
+  if (newsz > seg_size) {
+    seg_size = newsz;
+  }
+
+  tick_buf_t seg_buf = {NULL, 0};
+  tick_allocator_config_t seg_config = {.flags = 0, .alignment2 = 0};
+  usz total_size = sizeof(tick_alloc_seglist_segment_t) + seg_size;
+  if (seglist->backing.realloc(seglist->backing.ctx, &seg_buf, total_size, &seg_config) != TICK_OK) {
+    return TICK_ERR;
+  }
+
+  tick_alloc_seglist_segment_t* new_seg = (tick_alloc_seglist_segment_t*)seg_buf.buf;
+  new_seg->next = seg;
+  new_seg->size = seg_size;
+  new_seg->used = newsz;
+  seglist->segments = new_seg;
+
+  buf->buf = new_seg->data;
+  buf->sz = newsz;
+
+  if (config->flags & TICK_ALLOCATOR_ZEROMEM) {
+    memset(buf->buf, 0, newsz);
+  }
+
+  seglist->total_allocated += newsz;
+  return TICK_OK;
+}
+
+tick_alloc_t tick_allocator_seglist(tick_alloc_seglist_t* seglist, tick_alloc_t backing) {
+  seglist->backing = backing;
+  seglist->segments = NULL;
+  seglist->total_allocated = 0;
+
+  tick_alloc_t alloc = {
+    .realloc = tick_allocator_seglist_realloc,
+    .ctx = seglist,
+  };
+  return alloc;
+}
+
+// ============================================================================
+// Lexer functions
+// ============================================================================
+
+void tick_lex_init(tick_lex_t* lex, tick_buf_t input, tick_alloc_t alloc, tick_buf_t errbuf) {
+  lex->input = input;
+  lex->alloc = alloc;
+  lex->errbuf = errbuf;
+  lex->pos = 0;
+  lex->line = 1;
+  lex->col = 1;
+
+  // Null-terminate error buffer
+  if (errbuf.sz > 0) {
+    errbuf.buf[0] = '\0';
+  }
+}
+
+void tick_lex_next(tick_lex_t* lex, tick_tok_t* tok) {
+  UNUSED(lex);
+  // Return EOF for now (stub implementation)
+  tok->type = TICK_TOK_EOF;
+  tok->text.buf = NULL;
+  tok->text.sz = 0;
+  tok->line = lex->line;
+  tok->col = lex->col;
+}
+
+// ============================================================================
+// Parser functions
+// ============================================================================
+
+void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf) {
+  parse->alloc = alloc;
+  parse->errbuf = errbuf;
+  parse->root.root = NULL;
+
+  // Null-terminate error buffer
+  if (errbuf.sz > 0) {
+    errbuf.buf[0] = '\0';
+  }
+}
+
+tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok) {
+  UNUSED(parse);
+  UNUSED(tok);
+  // Accept all tokens for now (stub implementation)
+  return TICK_OK;
+}
+
+// ============================================================================
+// AST functions
+// ============================================================================
+
+tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_buf_t errbuf) {
+  UNUSED(ast);
+  UNUSED(errbuf);
+  // Accept all ASTs for now (stub implementation)
+  return TICK_OK;
+}
+
+tick_err_t tick_ast_lower(tick_ast_t* ast, tick_buf_t errbuf) {
+  UNUSED(ast);
+  UNUSED(errbuf);
+  // Accept all ASTs for now (stub implementation)
+  return TICK_OK;
+}
+
+// ============================================================================
+// Output functions
+// ============================================================================
+
+tick_err_t tick_output_format_name(tick_buf_t output_path, tick_path_t* output_h, tick_path_t* output_c) {
+  // Check if output path fits (need room for ".h" or ".c")
+  if (output_path.sz + 2 >= PATH_MAX) {
+    return TICK_ERR;
+  }
+
+  // Format .h file path
+  memcpy(output_h->buf, output_path.buf, output_path.sz);
+  output_h->buf[output_path.sz] = '.';
+  output_h->buf[output_path.sz + 1] = 'h';
+  output_h->buf[output_path.sz + 2] = '\0';
+  output_h->sz = output_path.sz + 2;
+
+  // Format .c file path
+  memcpy(output_c->buf, output_path.buf, output_path.sz);
+  output_c->buf[output_path.sz] = '.';
+  output_c->buf[output_path.sz + 1] = 'c';
+  output_c->buf[output_path.sz + 2] = '\0';
+  output_c->sz = output_path.sz + 2;
+
+  return TICK_OK;
+}
+
+static tick_err_t tick_file_writer_write(void* ctx, tick_buf_t* buf) {
+  FILE* f = (FILE*)ctx;
+  usz written = fwrite(buf->buf, 1, buf->sz, f);
+  if (written != buf->sz) {
+    return TICK_ERR;
+  }
+  return TICK_OK;
+}
+
+tick_writer_t tick_file_writer(FILE* f) {
+  tick_writer_t writer = {
+    .write = tick_file_writer_write,
+    .ctx = f,
+  };
+  return writer;
+}
+
+// ============================================================================
+// Codegen functions
+// ============================================================================
+
+tick_err_t tick_codegen(tick_ast_t* ast, tick_writer_t writer_h, tick_writer_t writer_c) {
+  UNUSED(ast);
+
+  // Write stub header file
+  const char* stub_h = "// Generated by tick compiler\n#pragma once\n";
+  tick_buf_t h_buf = {(u8*)stub_h, strlen(stub_h)};
+  if (writer_h.write(writer_h.ctx, &h_buf) != TICK_OK) {
+    return TICK_ERR;
+  }
+
+  // Write stub C file
+  const char* stub_c = "// Generated by tick compiler\n";
+  tick_buf_t c_buf = {(u8*)stub_c, strlen(stub_c)};
+  if (writer_c.write(writer_c.ctx, &c_buf) != TICK_OK) {
+    return TICK_ERR;
+  }
+
+  return TICK_OK;
+}
