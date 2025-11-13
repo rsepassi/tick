@@ -11,7 +11,7 @@ CC := clang
 LD := clang
 CFLAGS := -std=c11 -Wall -Werror -Wpedantic -Wextra \
 					-Wvla -Wno-gnu-zero-variadic-macro-arguments \
-					-Isrc -I$(BUILD_DIR)/gen
+					-Isrc -I$(BUILD_DIR)/gen -Ivendor/hashmap
 
 # Debug vs Release flags
 ifeq ($(RELEASE),0)
@@ -34,6 +34,10 @@ HDRS := $(shell find src -name '*.h')
 SRCS := $(shell find src -name '*.c' -not -path 'src/runtime/*')
 OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
 
+# Vendor sources (hashmap)
+VENDOR_SRCS := vendor/hashmap/hash.c vendor/hashmap/hashmap.c
+VENDOR_OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(VENDOR_SRCS))
+
 # Embedded runtime header
 RUNTIME_HEADER := src/runtime/std/tick_runtime.h
 RUNTIME_EMBEDDED := $(BUILD_DIR)/gen/tick_runtime_embedded.h
@@ -41,14 +45,19 @@ RUNTIME_EMBEDDED := $(BUILD_DIR)/gen/tick_runtime_embedded.h
 # Add generated parser object
 GENPARSEOBJ := $(BUILD_DIR)/gen/tick_grammar.o
 
-$(COMPILER): $(RUNTIME_EMBEDDED) $(OBJS) $(GENPARSEOBJ) $(SRCS) $(HDRS)
-	$(LD) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(GENPARSEOBJ)
+$(COMPILER): $(RUNTIME_EMBEDDED) $(OBJS) $(VENDOR_OBJS) $(GENPARSEOBJ) $(SRCS) $(HDRS)
+	$(LD) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(VENDOR_OBJS) $(GENPARSEOBJ)
 
 $(BUILD_DIR)/src/codegen.o: src/codegen.c $(HDRS) $(RUNTIME_EMBEDDED)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD_DIR)/%.o: %.c $(HDRS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Build vendor object files
+$(BUILD_DIR)/vendor/hashmap/%.o: vendor/hashmap/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
@@ -104,6 +113,18 @@ STD_CFLAGS := $(RUNTIME_CFLAGS) -ffreestanding
 # Standard library (freestanding)
 STD_SRCS := $(wildcard src/runtime/std/*.c)
 STD_OBJS := $(patsubst src/runtime/std/%.c,$(BUILD_DIR)/runtime/std/%.o,$(STD_SRCS))
+
+# Vendor libraries for runtime standard library
+VENDOR_STD_SRCS := $(wildcard vendor/monocypher/*.c) \
+									 $(wildcard vendor/utf8proc/*.c) \
+									 $(wildcard vendor/hashmap/*.c) \
+									 $(wildcard vendor/lz4/*.c) \
+									 $(wildcard vendor/tai/*.c)
+VENDOR_STD_OBJS := $(patsubst vendor/%.c,$(BUILD_DIR)/runtime/vendor/%.o,$(VENDOR_STD_SRCS))
+
+# Generated tai leapsecs data
+TAI_LEAPSECS_DAT := $(BUILD_DIR)/gen/tai_leapsecs_dat.h
+
 STD_LIB := $(BUILD_DIR)/runtime/libtick_std.a
 
 # Platform library (platform-specific)
@@ -119,9 +140,33 @@ $(BUILD_DIR)/runtime/std/%.o: src/runtime/std/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(STD_CFLAGS) -c -o $@ $<
 
-$(STD_LIB): $(STD_OBJS)
+$(STD_LIB): $(STD_OBJS) $(VENDOR_STD_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
+
+# Vendor LZ4 library (with freestanding flags)
+$(BUILD_DIR)/runtime/vendor/lz4/%.o: vendor/lz4/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(STD_CFLAGS) -DLZ4_FREESTANDING \
+		-DLZ4_memcpy=__builtin_memcpy \
+		-DLZ4_memset=__builtin_memset \
+		-DLZ4_memmove=__builtin_memmove \
+		-c -o $@ $<
+
+# Generate tai leapsecs data
+$(TAI_LEAPSECS_DAT): vendor/tai/leap-seconds.list vendor/tai/gen_leapsecs_dat.py
+	@mkdir -p $(dir $@)
+	python3 vendor/tai/gen_leapsecs_dat.py $< $@
+
+# Vendor tai library (depends on generated header)
+$(BUILD_DIR)/runtime/vendor/tai/%.o: vendor/tai/%.c $(TAI_LEAPSECS_DAT)
+	@mkdir -p $(dir $@)
+	$(CC) $(STD_CFLAGS) -I$(BUILD_DIR)/gen -c -o $@ $<
+
+# Vendor libraries for runtime
+$(BUILD_DIR)/runtime/vendor/%.o: vendor/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(STD_CFLAGS) -c -o $@ $<
 
 # Platform library (platform-specific)
 $(BUILD_DIR)/runtime/platform/%.o: src/runtime/platform/%.c
@@ -134,7 +179,6 @@ $(PLATFORM_LIB): $(PLATFORM_OBJS)
 
 compile-lib: $(COMPILER) $(STD_LIB) $(PLATFORM_LIB)
 	COMPILER=$(COMPILER) BUILD_DIR=$(BUILD_DIR) CC=$(CC) AR=$(AR) \
-		STD_LIB=$(STD_LIB) PLATFORM_LIB=$(PLATFORM_LIB) \
 		./script/compile-lib.sh $(SRC)
 
 compile-exe: $(COMPILER) $(STD_LIB) $(PLATFORM_LIB)

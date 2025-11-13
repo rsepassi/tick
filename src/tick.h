@@ -705,6 +705,47 @@ typedef enum {
   TICK_AT_BUILTIN_DBG,      // @dbg - debug log
 } tick_at_builtin_t;
 
+// ============================================================================
+// Symbol Table and Type Table
+// ============================================================================
+
+// Forward declarations for symbol/type table structures
+struct hashmap;
+typedef struct tick_scope_s tick_scope_t;
+typedef struct tick_symbol_s tick_symbol_t;
+typedef struct tick_type_entry_s tick_type_entry_t;
+typedef struct tick_analyze_ctx_s tick_analyze_ctx_t;
+
+// Symbol table entry
+struct tick_symbol_s {
+  tick_buf_t name;           // Symbol name (key for hashmap)
+  tick_ast_node_t* decl;     // Pointer to DECL/PARAM node
+  tick_ast_node_t* type;     // Cached resolved type
+};
+
+// Type table entry
+struct tick_type_entry_s {
+  tick_buf_t name;              // Type name (key for hashmap)
+  tick_ast_node_t* decl;        // Pointer to STRUCT_DECL/ENUM_DECL/UNION_DECL (NULL for builtins)
+  tick_builtin_type_t builtin_type;  // Resolved builtin type or TICK_TYPE_USER_DEFINED
+};
+
+// Scope structure for symbol lookups
+struct tick_scope_s {
+  struct hashmap* symbols;      // Symbol hashmap for this scope
+  tick_scope_t* parent;         // Parent scope (NULL for module scope)
+  tick_alloc_t alloc;           // Allocator for scope lifetime
+};
+
+// Analysis context
+struct tick_analyze_ctx_s {
+  struct hashmap* types;         // Global type table (module-level)
+  tick_scope_t* current_scope;   // Current scope for lookups
+  tick_scope_t* module_scope;    // Root module scope
+  tick_alloc_t alloc;
+  tick_buf_t errbuf;
+};
+
 // AST node structure
 struct tick_ast_node_s {
   tick_ast_node_kind_t kind;
@@ -844,6 +885,7 @@ struct tick_ast_node_s {
       tick_buf_t name;
       tick_at_builtin_t
           at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
+      tick_symbol_t* symbol;  // Cached symbol lookup (NULL until first resolution)
     } identifier_expr;
     struct {
       tick_ast_node_t* call;   // Function call expression
@@ -879,8 +921,8 @@ struct tick_ast_node_s {
     struct {
       tick_buf_t name;
       tick_builtin_type_t builtin_type;  // Resolved during analysis
-      tick_ast_node_t*
-          type_decl;  // For user-defined types, pointer to declaration
+      tick_type_entry_t*
+          type_entry;  // Cached type table lookup (NULL until first resolution)
     } type_named;
     struct {
       tick_ast_node_t* element_type;
@@ -978,6 +1020,24 @@ tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
 void tick_ast_list_init(tick_ast_node_t* node);
 tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head,
                                       tick_ast_node_t* node);
+
+// Symbol table and type table functions
+tick_scope_t* tick_scope_create(tick_scope_t* parent, tick_alloc_t alloc);
+void tick_scope_destroy(tick_scope_t* scope);
+tick_err_t tick_scope_insert_symbol(tick_scope_t* scope, tick_buf_t name,
+                                    tick_ast_node_t* decl);
+tick_symbol_t* tick_scope_lookup_symbol(tick_scope_t* scope, tick_buf_t name);
+tick_symbol_t* tick_scope_lookup_local(tick_scope_t* scope, tick_buf_t name);
+tick_err_t tick_types_insert(struct hashmap* types, tick_buf_t name,
+                             tick_ast_node_t* decl,
+                             tick_builtin_type_t builtin_type,
+                             tick_alloc_t alloc);
+tick_type_entry_t* tick_types_lookup(struct hashmap* types, tick_buf_t name);
+void tick_analyze_ctx_init(tick_analyze_ctx_t* ctx, tick_alloc_t alloc,
+                           tick_buf_t errbuf);
+void tick_analyze_ctx_destroy(tick_analyze_ctx_t* ctx);
+void tick_scope_push(tick_analyze_ctx_t* ctx);
+void tick_scope_pop(tick_analyze_ctx_t* ctx);
 
 // Output functions
 tick_err_t tick_output_format_name(tick_buf_t output_path,
