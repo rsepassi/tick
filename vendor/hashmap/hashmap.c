@@ -21,16 +21,17 @@ struct bucket {
 
 // hashmap is an open addressed hash map using robinhood hashing.
 struct hashmap {
-    void *(*malloc)(size_t);
-    void *(*realloc)(void *, size_t);
-    void (*free)(void *);
+    void *(*malloc)(void *ctx, size_t);
+    void *(*realloc)(void *ctx, void *, size_t);
+    void (*free)(void *ctx, void *);
+    void *allocator_ctx;
     size_t elsize;
     size_t cap;
     uint64_t seed0;
     uint64_t seed1;
     uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1);
     int (*compare)(const void *a, const void *b, void *udata);
-    void (*elfree)(void *item);
+    void (*elfree)(void *ctx, void *item);
     void *udata;
     size_t bucketsz;
     size_t nbuckets;
@@ -84,12 +85,15 @@ static uint64_t get_hash(const struct hashmap *map, const void *key) {
     return clip_hash(map->hash(key, map->seed0, map->seed1));
 }
 
-struct hashmap *hashmap_new_with_allocator(void *(*_malloc)(size_t), 
-    void *(*_realloc)(void*, size_t), void (*_free)(void*),
+struct hashmap *hashmap_new_with_allocator(
+    void *(*_malloc)(void *ctx, size_t),
+    void *(*_realloc)(void *ctx, void*, size_t),
+    void (*_free)(void *ctx, void*),
+    void *allocator_ctx,
     size_t elsize, size_t cap, uint64_t seed0, uint64_t seed1,
     uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1),
     int (*compare)(const void *a, const void *b, void *udata),
-    void (*elfree)(void *item),
+    void (*elfree)(void *ctx, void *item),
     void *udata)
 {
     size_t ncap = 16;
@@ -107,7 +111,7 @@ struct hashmap *hashmap_new_with_allocator(void *(*_malloc)(size_t),
     }
     // hashmap + spare + edata
     size_t size = sizeof(struct hashmap)+bucketsz*2;
-    struct hashmap *map = _malloc(size);
+    struct hashmap *map = _malloc(allocator_ctx, size);
     if (!map) {
         return NULL;
     }
@@ -125,9 +129,9 @@ struct hashmap *hashmap_new_with_allocator(void *(*_malloc)(size_t),
     map->cap = cap;
     map->nbuckets = cap;
     map->mask = map->nbuckets-1;
-    map->buckets = _malloc(map->bucketsz*map->nbuckets);
+    map->buckets = _malloc(allocator_ctx, map->bucketsz*map->nbuckets);
     if (!map->buckets) {
-        _free(map);
+        _free(allocator_ctx, map);
         return NULL;
     }
     memset(map->buckets, 0, map->bucketsz*map->nbuckets);
@@ -138,14 +142,15 @@ struct hashmap *hashmap_new_with_allocator(void *(*_malloc)(size_t),
     map->malloc = _malloc;
     map->realloc = _realloc;
     map->free = _free;
-    return map;  
+    map->allocator_ctx = allocator_ctx;
+    return map;
 }
 
 static void free_elements(struct hashmap *map) {
     if (map->elfree) {
         for (size_t i = 0; i < map->nbuckets; i++) {
             struct bucket *bucket = bucket_at(map, i);
-            if (bucket->dib) map->elfree(bucket_item(bucket));
+            if (bucket->dib) map->elfree(map->allocator_ctx, bucket_item(bucket));
         }
     }
 }
@@ -162,9 +167,9 @@ void hashmap_clear(struct hashmap *map, bool update_cap) {
     if (update_cap) {
         map->cap = map->nbuckets;
     } else if (map->nbuckets != map->cap) {
-        void *new_buckets = map->malloc(map->bucketsz*map->cap);
+        void *new_buckets = map->malloc(map->allocator_ctx, map->bucketsz*map->cap);
         if (new_buckets) {
-            map->free(map->buckets);
+            map->free(map->allocator_ctx, map->buckets);
             map->buckets = new_buckets;
         }
         map->nbuckets = map->cap;
@@ -176,8 +181,8 @@ void hashmap_clear(struct hashmap *map, bool update_cap) {
 }
 
 static bool resize0(struct hashmap *map, size_t new_cap) {
-    struct hashmap *map2 = hashmap_new_with_allocator(map->malloc, map->realloc, 
-        map->free, map->elsize, new_cap, map->seed0, map->seed1, map->hash, 
+    struct hashmap *map2 = hashmap_new_with_allocator(map->malloc, map->realloc,
+        map->free, map->allocator_ctx, map->elsize, new_cap, map->seed0, map->seed1, map->hash,
         map->compare, map->elfree, map->udata);
     if (!map2) return false;
     for (size_t i = 0; i < map->nbuckets; i++) {
@@ -202,13 +207,13 @@ static bool resize0(struct hashmap *map, size_t new_cap) {
             entry->dib += 1;
         }
     }
-    map->free(map->buckets);
+    map->free(map->allocator_ctx, map->buckets);
     map->buckets = map2->buckets;
     map->nbuckets = map2->nbuckets;
     map->mask = map2->mask;
     map->growat = map2->growat;
     map->shrinkat = map2->shrinkat;
-    map->free(map2);
+    map->free(map->allocator_ctx, map2);
     return true;
 }
 
@@ -373,8 +378,8 @@ size_t hashmap_count(const struct hashmap *map) {
 void hashmap_free(struct hashmap *map) {
     if (!map) return;
     free_elements(map);
-    map->free(map->buckets);
-    map->free(map);
+    map->free(map->allocator_ctx, map->buckets);
+    map->free(map->allocator_ctx, map);
 }
 
 // hashmap_oom returns true if the last hashmap_set() call failed due to the 

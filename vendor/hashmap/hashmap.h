@@ -27,12 +27,16 @@ struct hashmap;
 // The hashmap must be freed with hashmap_free(). 
 // Param `elfree` is a function that frees a specific item. This should be NULL
 // unless you're storing some kind of reference data in the hash.
-struct hashmap *hashmap_new_with_allocator(void *(*malloc)(size_t), 
-    void *(*realloc)(void *, size_t), void (*free)(void*), size_t elsize, 
+struct hashmap *hashmap_new_with_allocator(
+    void *(*malloc)(void *ctx, size_t),
+    void *(*realloc)(void *ctx, void *, size_t),
+    void (*free)(void *ctx, void*),
+    void *allocator_ctx,
+    size_t elsize,
     size_t cap, uint64_t seed0, uint64_t seed1,
     uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1),
     int (*compare)(const void *a, const void *b, void *udata),
-    void (*elfree)(void *item),
+    void (*elfree)(void *ctx, void *item),
     void *udata);
 
 void hashmap_free(struct hashmap *map);
