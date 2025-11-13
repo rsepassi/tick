@@ -176,6 +176,18 @@ static inline u64 tick_betoh64(u64 x) { return x; }
 #define TICK_ICMPV6_NEIGHBOR_SOLICIT 135
 #define TICK_ICMPV6_NEIGHBOR_ADVERT 136
 
+// ICMPv6 NDP Option Types (RFC 4861)
+#define TICK_ICMPV6_OPT_SRC_LINK_ADDR 1
+#define TICK_ICMPV6_OPT_TGT_LINK_ADDR 2
+#define TICK_ICMPV6_OPT_PREFIX_INFO 3
+#define TICK_ICMPV6_OPT_REDIRECTED_HDR 4
+#define TICK_ICMPV6_OPT_MTU 5
+
+// ICMPv6 Neighbor Advertisement Flags
+#define TICK_ICMPV6_ND_ROUTER 0x80000000     // Router flag
+#define TICK_ICMPV6_ND_SOLICITED 0x40000000  // Solicited flag
+#define TICK_ICMPV6_ND_OVERRIDE 0x20000000   // Override flag
+
 // DNS Resource Record Types
 #define TICK_DNS_TYPE_A 1      // IPv4 address
 #define TICK_DNS_TYPE_NS 2     // Name server
@@ -352,6 +364,66 @@ typedef struct {
 } __attribute__((packed)) tick_icmpv6_hdr_t;
 
 // ============================================================================
+// ICMPv6 Neighbor Discovery Protocol (NDP)
+// ============================================================================
+
+// ICMPv6 NDP Option (RFC 4861)
+typedef struct {
+  u8 type;              // Option type
+  u8 length;            // Length in units of 8 octets
+  // Followed by option-specific data
+} __attribute__((packed)) tick_icmpv6_ndp_opt_t;
+
+// ICMPv6 NDP Link-Layer Address Option
+typedef struct {
+  u8 type;              // Option type (1=source, 2=target)
+  u8 length;            // Length (1 for 6-byte MAC)
+  tick_mac_addr_t addr; // Link-layer address (MAC)
+} __attribute__((packed)) tick_icmpv6_ndp_ll_addr_opt_t;
+
+// ICMPv6 Neighbor Solicitation (RFC 4861)
+typedef struct {
+  u8 type;              // Type (135)
+  u8 code;              // Code (0)
+  u16 checksum;         // Checksum (network byte order)
+  u32 reserved;         // Reserved (must be zero)
+  tick_ipv6_addr_t target;    // Target address
+  // Followed by options (e.g., source link-layer address)
+} __attribute__((packed)) tick_icmpv6_neighbor_solicit_t;
+
+// ICMPv6 Neighbor Advertisement (RFC 4861)
+typedef struct {
+  u8 type;              // Type (136)
+  u8 code;              // Code (0)
+  u16 checksum;         // Checksum (network byte order)
+  u32 flags;            // Flags: Router(R), Solicited(S), Override(O)
+  tick_ipv6_addr_t target;    // Target address
+  // Followed by options (e.g., target link-layer address)
+} __attribute__((packed)) tick_icmpv6_neighbor_advert_t;
+
+// ICMPv6 Router Solicitation (RFC 4861)
+typedef struct {
+  u8 type;              // Type (133)
+  u8 code;              // Code (0)
+  u16 checksum;         // Checksum (network byte order)
+  u32 reserved;         // Reserved (must be zero)
+  // Followed by options (e.g., source link-layer address)
+} __attribute__((packed)) tick_icmpv6_router_solicit_t;
+
+// ICMPv6 Router Advertisement (RFC 4861)
+typedef struct {
+  u8 type;              // Type (134)
+  u8 code;              // Code (0)
+  u16 checksum;         // Checksum (network byte order)
+  u8 cur_hop_limit;     // Current hop limit
+  u8 flags;             // Flags: Managed(M), Other(O)
+  u16 router_lifetime;  // Router lifetime (network byte order)
+  u32 reachable_time;   // Reachable time (network byte order)
+  u32 retrans_timer;    // Retransmit timer (network byte order)
+  // Followed by options
+} __attribute__((packed)) tick_icmpv6_router_advert_t;
+
+// ============================================================================
 // UDP (User Datagram Protocol)
 // ============================================================================
 
@@ -470,5 +542,77 @@ static inline bool tick_ipv6_equal(tick_ipv6_addr_t a, tick_ipv6_addr_t b) {
   }
   return true;
 }
+
+// ============================================================================
+// Checksum Functions (RFC 1071)
+// ============================================================================
+
+// Internet checksum algorithm (RFC 1071)
+// Used for IP, ICMP, ICMPv6, UDP, TCP checksums
+// Returns checksum in network byte order
+u16 tick_inet_checksum(const void *data, usz len);
+
+// IPv4 header checksum
+// Calculates checksum for IPv4 header (assumes checksum field is zero)
+u16 tick_ipv4_checksum(const tick_ipv4_hdr_t *hdr);
+
+// IPv4 pseudo-header for UDP/TCP checksum calculation
+typedef struct {
+  tick_ipv4_addr_t src;
+  tick_ipv4_addr_t dst;
+  u8 zero;
+  u8 protocol;
+  u16 length;
+} __attribute__((packed)) tick_ipv4_pseudo_hdr_t;
+
+// IPv6 pseudo-header for UDP/TCP checksum calculation
+typedef struct {
+  tick_ipv6_addr_t src;
+  tick_ipv6_addr_t dst;
+  u32 length;
+  u8 zero[3];
+  u8 next_hdr;
+} __attribute__((packed)) tick_ipv6_pseudo_hdr_t;
+
+// UDP checksum for IPv4
+// Parameters:
+//   udp_hdr: UDP header (checksum field should be zero)
+//   payload: UDP payload data
+//   payload_len: Length of payload in bytes
+//   src_ip: Source IPv4 address
+//   dst_ip: Destination IPv4 address
+u16 tick_udp_checksum_ipv4(const tick_udp_hdr_t *udp_hdr, const void *payload,
+                            usz payload_len, tick_ipv4_addr_t src_ip,
+                            tick_ipv4_addr_t dst_ip);
+
+// UDP checksum for IPv6
+// Parameters:
+//   udp_hdr: UDP header (checksum field should be zero)
+//   payload: UDP payload data
+//   payload_len: Length of payload in bytes
+//   src_ip: Source IPv6 address
+//   dst_ip: Destination IPv6 address
+u16 tick_udp_checksum_ipv6(const tick_udp_hdr_t *udp_hdr, const void *payload,
+                            usz payload_len, tick_ipv6_addr_t src_ip,
+                            tick_ipv6_addr_t dst_ip);
+
+// ICMP checksum
+// Calculates checksum for ICMP message (header + payload)
+// icmp_hdr: ICMP header (checksum field should be zero)
+// payload: ICMP payload data
+// payload_len: Length of payload in bytes
+u16 tick_icmp_checksum(const tick_icmp_hdr_t *icmp_hdr, const void *payload,
+                       usz payload_len);
+
+// ICMPv6 checksum
+// Calculates checksum for ICMPv6 message with IPv6 pseudo-header
+// icmpv6_hdr: ICMPv6 header (checksum field should be zero)
+// payload: ICMPv6 payload data
+// payload_len: Length of payload in bytes
+// src_ip: Source IPv6 address
+// dst_ip: Destination IPv6 address
+u16 tick_icmpv6_checksum(const tick_icmpv6_hdr_t *icmpv6_hdr,
+                         const void *payload, usz payload_len,
+                         tick_ipv6_addr_t src_ip, tick_ipv6_addr_t dst_ip);
 
 #endif // TICK_NET_H

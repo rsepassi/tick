@@ -3,6 +3,7 @@
 // tick_drive.h - Drive and partition table structures (MBR, GPT)
 // Freestanding header for reading/writing partition tables
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -160,5 +161,36 @@ typedef struct __attribute__((packed)) {
 // Apple APFS
 #define TICK_GPT_TYPE_APPLE_APFS                                               \
   ((tick_guid_t){0x7C3457EF, 0x0000, 0x11AA, {0xAA, 0x11, 0x00, 0x30, 0x65, 0x43, 0xEC, 0xAC}})
+
+// ============================================================================
+// Function Declarations
+// ============================================================================
+
+// CRC32 checksum (IEEE 802.3 polynomial)
+u32 tick_crc32(const void *data, usz len);
+
+// GUID utilities
+bool tick_guid_equal(tick_guid_t a, tick_guid_t b);
+bool tick_guid_is_zero(tick_guid_t g);
+
+// MBR functions
+bool tick_mbr_validate(const tick_mbr_t *mbr);
+void tick_mbr_init(tick_mbr_t *mbr);
+u32 tick_mbr_chs_to_lba(tick_mbr_chs_t chs, u8 heads, u8 sectors_per_track);
+tick_mbr_chs_t tick_mbr_lba_to_chs(u32 lba, u8 heads, u8 sectors_per_track);
+
+// GPT functions
+bool tick_gpt_header_validate(const tick_gpt_header_t *hdr);
+void tick_gpt_header_init(tick_gpt_header_t *hdr, u64 disk_size_sectors,
+                          tick_guid_t disk_guid);
+u32 tick_gpt_header_calc_crc32(const tick_gpt_header_t *hdr);
+u32 tick_gpt_partition_array_calc_crc32(const tick_gpt_partition_t *parts,
+                                        u32 num_entries, u32 entry_size);
+bool tick_gpt_partition_is_used(const tick_gpt_partition_t *part);
+
+// UTF-16LE string utilities (for GPT partition names)
+usz tick_utf8_to_utf16le(const char *utf8, u16 *utf16, usz max_utf16_units);
+usz tick_utf16le_to_utf8(const u16 *utf16, usz utf16_len, char *utf8,
+                         usz max_bytes);
 
 #endif  // TICK_DRIVE_H_
