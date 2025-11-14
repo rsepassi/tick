@@ -75,12 +75,15 @@ static tick_err_t write_ident(tick_writer_t* w, tick_buf_t name) {
 }
 
 // Write a variable name with appropriate prefix based on tmpid and qualifiers
-// tmpid == 0: user-named variable → __u_{name} (unless extern or pub)
-// tmpid > 0: compiler temporary → __tmp{N}
+// user variable: __u_{name} (unless extern or pub)
+// compiler temporary: __tmp{N}
 // extern: no prefix (links to external C symbol)
 // pub: no prefix (exported for C code to use)
 static tick_err_t write_decl_name(tick_writer_t* w, tick_ast_node_t* decl) {
-  if (decl->decl.tmpid == 0) {
+  if (tick_node_is_temporary(decl)) {
+    // Compiler-generated temporary
+    return write_fmt(w, "__tmp%u", decl->decl.tmpid);
+  } else {
     // User-named variable
     bool is_extern = decl->decl.quals.is_extern;
     bool is_pub = decl->decl.quals.is_pub;
@@ -90,9 +93,6 @@ static tick_err_t write_decl_name(tick_writer_t* w, tick_ast_node_t* decl) {
       CHECK_OK(write_str(w, "__u_"));
     }
     return write_ident(w, decl->decl.name);
-  } else {
-    // Compiler-generated temporary
-    return write_fmt(w, "__tmp%u", decl->decl.tmpid);
   }
 }
 
@@ -404,7 +404,7 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
     tick_ast_node_t* sym_node = node->identifier_expr.symbol->decl;
 
     // Check if this is a compiler-generated temporary
-    if (sym_node->kind == TICK_AST_DECL && sym_node->decl.tmpid > 0) {
+    if (tick_node_is_temporary(sym_node)) {
       // Emit __tmpN for temporaries
       return write_fmt(ctx->writer, "__tmp%u", sym_node->decl.tmpid);
     }

@@ -788,10 +788,19 @@ struct tick_analyze_ctx_s {
   tick_ast_node_t* current_stmt;   // Current statement being analyzed (for insertion point)
 };
 
+// AST node metadata flags
+// These flags track the provenance and state of AST nodes explicitly,
+// eliminating brittle assumptions like "name.sz == 0" for synthetic nodes.
+#define TICK_NODE_FLAG_SYNTHETIC  (1 << 0)  // Compiler-generated, not from source
+#define TICK_NODE_FLAG_ANALYZED   (1 << 1)  // Analysis pass completed
+#define TICK_NODE_FLAG_LOWERED    (1 << 2)  // Lowering pass completed
+#define TICK_NODE_FLAG_TEMPORARY  (1 << 4)  // Compiler temporary variable
+
 // AST node structure
 struct tick_ast_node_s {
   tick_ast_node_kind_t kind;
   tick_ast_loc_t loc;
+  u8 node_flags;          // TICK_NODE_FLAG_* metadata
   tick_ast_node_t* next;  // Next node in list
   tick_ast_node_t* prev;  // Previous node in list
   tick_ast_node_t*
@@ -1061,6 +1070,29 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
                             tick_buf_t errbuf);
 tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
                           tick_buf_t errbuf);
+
+// AST helper functions (canonical query API)
+// Node state queries
+bool tick_node_is_synthetic(tick_ast_node_t* node);
+bool tick_node_is_analyzed(tick_ast_node_t* node);
+bool tick_node_is_lowered(tick_ast_node_t* node);
+bool tick_node_is_temporary(tick_ast_node_t* node);
+
+// Type queries
+bool tick_type_is_unresolved(tick_ast_node_t* type);
+bool tick_type_is_resolved(tick_ast_node_t* type);
+bool tick_type_is_named(tick_ast_node_t* type);
+bool tick_type_is_pointer(tick_ast_node_t* type);
+bool tick_type_is_user_defined(tick_ast_node_t* type);
+bool tick_type_is_builtin(tick_ast_node_t* type);
+bool tick_type_is_integer(tick_ast_node_t* type);
+bool tick_type_is_signed(tick_ast_node_t* type);
+bool tick_type_is_unsigned(tick_ast_node_t* type);
+bool tick_type_is_numeric(tick_ast_node_t* type);
+tick_builtin_type_t tick_type_get_builtin(tick_ast_node_t* type);
+tick_ast_node_t* tick_type_get_pointee(tick_ast_node_t* type);
+tick_ast_node_t* tick_type_get_element(tick_ast_node_t* type);
+bool tick_types_equal(tick_ast_node_t* t1, tick_ast_node_t* t2);
 
 // AST list helpers
 void tick_ast_list_init(tick_ast_node_t* node);

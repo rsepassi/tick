@@ -68,6 +68,7 @@ tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
           // Copy the declaration but mark as forward
           *fwd_decl = *decl;
           fwd_decl->decl.quals.is_forward_decl = true;
+          fwd_decl->node_flags = TICK_NODE_FLAG_SYNTHETIC | TICK_NODE_FLAG_LOWERED;
           fwd_decl->next = NULL;
 
           // Append forward declaration

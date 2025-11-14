@@ -462,3 +462,139 @@ tick_writer_t tick_file_writer(FILE* f) {
   };
   return writer;
 }
+
+// ============================================================================
+// AST Helper Functions (Canonical Query API)
+// ============================================================================
+
+// Check if a node was compiler-generated (not from source)
+bool tick_node_is_synthetic(tick_ast_node_t* node) {
+  return node && (node->node_flags & TICK_NODE_FLAG_SYNTHETIC);
+}
+
+// Check if a node has completed analysis
+bool tick_node_is_analyzed(tick_ast_node_t* node) {
+  return node && (node->node_flags & TICK_NODE_FLAG_ANALYZED);
+}
+
+// Check if a node has completed lowering
+bool tick_node_is_lowered(tick_ast_node_t* node) {
+  return node && (node->node_flags & TICK_NODE_FLAG_LOWERED);
+}
+
+// Check if a node is a compiler temporary variable
+bool tick_node_is_temporary(tick_ast_node_t* node) {
+  if (!node) return false;
+  // Check explicit flag first, fall back to tmpid check for compatibility
+  if (node->node_flags & TICK_NODE_FLAG_TEMPORARY) return true;
+  if (node->kind == TICK_AST_DECL && node->decl.tmpid > 0) return true;
+  return false;
+}
+
+// Check if a type is unresolved (still TICK_TYPE_UNKNOWN)
+bool tick_type_is_unresolved(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_NAMED &&
+         type->type_named.builtin_type == TICK_TYPE_UNKNOWN;
+}
+
+// Check if a type is fully resolved
+bool tick_type_is_resolved(tick_ast_node_t* type) {
+  if (!type) return false;
+  if (type->kind == TICK_AST_TYPE_NAMED) {
+    return type->type_named.builtin_type != TICK_TYPE_UNKNOWN;
+  }
+  return true;
+}
+
+// Check if a type is a named type
+bool tick_type_is_named(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_NAMED;
+}
+
+// Check if a type is a pointer type
+bool tick_type_is_pointer(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_POINTER;
+}
+
+// Check if a type is a user-defined type (struct/enum/union)
+bool tick_type_is_user_defined(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_NAMED &&
+         type->type_named.builtin_type == TICK_TYPE_USER_DEFINED;
+}
+
+// Check if a type is a builtin type
+bool tick_type_is_builtin(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_NAMED &&
+         type->type_named.builtin_type != TICK_TYPE_UNKNOWN &&
+         type->type_named.builtin_type != TICK_TYPE_USER_DEFINED;
+}
+
+// Check if a type is an integer type (signed or unsigned)
+bool tick_type_is_integer(tick_ast_node_t* type) {
+  if (!tick_type_is_named(type)) return false;
+  tick_builtin_type_t bt = type->type_named.builtin_type;
+  return (bt >= TICK_TYPE_I8 && bt <= TICK_TYPE_ISZ) ||
+         (bt >= TICK_TYPE_U8 && bt <= TICK_TYPE_USZ);
+}
+
+// Check if a type is a signed integer type
+bool tick_type_is_signed(tick_ast_node_t* type) {
+  if (!tick_type_is_named(type)) return false;
+  tick_builtin_type_t bt = type->type_named.builtin_type;
+  return bt >= TICK_TYPE_I8 && bt <= TICK_TYPE_ISZ;
+}
+
+// Check if a type is an unsigned integer type
+bool tick_type_is_unsigned(tick_ast_node_t* type) {
+  if (!tick_type_is_named(type)) return false;
+  tick_builtin_type_t bt = type->type_named.builtin_type;
+  return bt >= TICK_TYPE_U8 && bt <= TICK_TYPE_USZ;
+}
+
+// Check if a type is numeric (integer type - floats not yet supported)
+bool tick_type_is_numeric(tick_ast_node_t* type) {
+  return tick_type_is_integer(type);
+}
+
+// Get the builtin type enum from a type node
+tick_builtin_type_t tick_type_get_builtin(tick_ast_node_t* type) {
+  if (!type || type->kind != TICK_AST_TYPE_NAMED) {
+    return TICK_TYPE_UNKNOWN;
+  }
+  return type->type_named.builtin_type;
+}
+
+// Get the pointee type from a pointer type
+tick_ast_node_t* tick_type_get_pointee(tick_ast_node_t* type) {
+  if (!type || type->kind != TICK_AST_TYPE_POINTER) return NULL;
+  return type->type_pointer.pointee_type;
+}
+
+// Get the element type from an array type
+tick_ast_node_t* tick_type_get_element(tick_ast_node_t* type) {
+  if (!type || type->kind != TICK_AST_TYPE_ARRAY) return NULL;
+  return type->type_array.element_type;
+}
+
+// Check if two types are structurally equal
+bool tick_types_equal(tick_ast_node_t* t1, tick_ast_node_t* t2) {
+  if (!t1 || !t2) return t1 == t2;
+  if (t1->kind != t2->kind) return false;
+
+  switch (t1->kind) {
+    case TICK_AST_TYPE_NAMED:
+      return t1->type_named.builtin_type == t2->type_named.builtin_type &&
+             t1->type_named.type_entry == t2->type_named.type_entry;
+
+    case TICK_AST_TYPE_POINTER:
+      return tick_types_equal(t1->type_pointer.pointee_type,
+                             t2->type_pointer.pointee_type);
+
+    case TICK_AST_TYPE_ARRAY:
+      return tick_types_equal(t1->type_array.element_type,
+                             t2->type_array.element_type);
+
+    default:
+      return t1 == t2;
+  }
+}

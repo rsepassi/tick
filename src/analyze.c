@@ -202,26 +202,6 @@ static const char* tick_analysis_state_str(tick_analysis_state_t state) {
 } while(0)
 
 // ============================================================================
-// Helper Functions
-// ============================================================================
-
-// Check if a type is unresolved (UNKNOWN and needs resolution)
-static inline bool is_type_unresolved(tick_ast_node_t* type) {
-  return type && type->kind == TICK_AST_TYPE_NAMED &&
-         type->type_named.builtin_type == TICK_TYPE_UNKNOWN;
-}
-
-// Check if a type is numeric (integer type)
-static bool is_numeric_type(tick_builtin_type_t type) {
-  return type == TICK_TYPE_I8 || type == TICK_TYPE_I16 ||
-         type == TICK_TYPE_I32 || type == TICK_TYPE_I64 ||
-         type == TICK_TYPE_ISZ || type == TICK_TYPE_U8 ||
-         type == TICK_TYPE_U16 || type == TICK_TYPE_U32 ||
-         type == TICK_TYPE_U64 || type == TICK_TYPE_USZ ||
-         type == TICK_TYPE_UNKNOWN;
-}
-
-// ============================================================================
 // Analysis pass
 // ============================================================================
 //
@@ -239,8 +219,16 @@ static bool is_numeric_type(tick_builtin_type_t type) {
 // ============================================================================
 
 // ============================================================================
+// Canonical AST Helper Functions
+// ============================================================================
+// These functions provide explicit, robust APIs for querying and manipulating
+// AST nodes, eliminating brittle assumptions like "name.sz == 0" checks.
+
+// ============================================================================
 // Type Analysis Helper Functions
 // ============================================================================
+// Note: The canonical query API functions (tick_node_is_*, tick_type_is_*, etc.)
+// are now defined in tick.c and declared in tick.h for use across all files.
 
 // Helper to allocate a type node
 static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc,
@@ -251,6 +239,7 @@ static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc,
   node->type_named.name = (tick_buf_t){.buf = NULL, .sz = 0};  // Empty name for synthetic nodes
   node->type_named.builtin_type = builtin_type;
   node->type_named.type_entry = NULL;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;  // Compiler-generated
   node->loc.line = 0;  // Synthesized node
   node->loc.col = 0;
   return node;
@@ -263,6 +252,9 @@ static tick_ast_node_t* alloc_literal_node(tick_alloc_t alloc, int64_t value) {
   node->kind = TICK_AST_LITERAL;
   node->literal.kind = TICK_LIT_INT;
   node->literal.data.int_value = value;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;  // Compiler-generated
+  node->loc.line = 0;
+  node->loc.col = 0;
   return node;
 }
 
@@ -276,6 +268,7 @@ static tick_ast_node_t* alloc_function_type_node(
   node->kind = TICK_AST_TYPE_FUNCTION;
   node->type_function.params = params;
   node->type_function.return_type = return_type;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;  // Compiler-generated
   node->loc.line = 0;  // Synthesized node
   node->loc.col = 0;
   return node;
@@ -291,6 +284,7 @@ static tick_ast_node_t* alloc_user_type_node(tick_alloc_t alloc,
   node->type_named.name = type_name;
   node->type_named.builtin_type = TICK_TYPE_UNKNOWN;  // Will be resolved
   node->type_named.type_entry = NULL;                 // Will be resolved
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;  // Compiler-generated
   node->loc.line = 0;  // Synthesized node
   node->loc.col = 0;
   return node;
@@ -507,6 +501,7 @@ static tick_ast_node_t* create_temp_decl(tick_alloc_t alloc, u32 tmpid,
   }
 
   decl->decl.analysis_state = TICK_ANALYSIS_STATE_COMPLETED;  // Already analyzed
+  decl->node_flags = TICK_NODE_FLAG_SYNTHETIC | TICK_NODE_FLAG_TEMPORARY | TICK_NODE_FLAG_ANALYZED;
   decl->loc = init ? init->loc : (tick_ast_loc_t){0};
   decl->next = NULL;
   decl->prev = NULL;
@@ -527,6 +522,7 @@ static tick_ast_node_t* create_temp_identifier(tick_alloc_t alloc,
   ALLOC_AST_NODE(alloc, ident);
   ident->kind = TICK_AST_IDENTIFIER_EXPR;
   ident->identifier_expr.at_builtin = TICK_AT_BUILTIN_UNKNOWN;
+  ident->node_flags = TICK_NODE_FLAG_SYNTHETIC;  // Compiler-generated reference
   ident->loc = temp_decl->loc;
 
   // Create name buffer to hold empty name (but non-NULL pointer)
@@ -599,7 +595,7 @@ static void resolve_named_type(tick_ast_node_t* type_node,
         type_node->type_named.type_entry->builtin_type;
 
     if (track_dependencies &&
-        type_node->type_named.builtin_type == TICK_TYPE_USER_DEFINED &&
+        tick_type_is_user_defined(type_node) &&
         type_node->type_named.type_entry->parent_decl) {
       tick_ast_node_t* type_decl = type_node->type_named.type_entry->parent_decl;
       if (type_decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED) {
@@ -735,9 +731,8 @@ static tick_analyze_error_t analyze_type(tick_ast_node_t* type_node,
 
   switch (type_node->kind) {
     case TICK_AST_TYPE_NAMED:
-      // Skip lookup for synthetic nodes that already have builtin_type set
-      if (type_node->type_named.builtin_type != TICK_TYPE_UNKNOWN &&
-          type_node->type_named.name.sz == 0) {
+      // Skip lookup for synthetic nodes that are already resolved
+      if (tick_node_is_synthetic(type_node) && tick_type_is_resolved(type_node)) {
         // This is a synthetic node from alloc_type_node, already resolved
         ALOG("type: %s (synthetic)",
              tick_builtin_type_str(type_node->type_named.builtin_type));
@@ -757,9 +752,8 @@ static tick_analyze_error_t analyze_type(tick_ast_node_t* type_node,
         ALOG("pointer type: *%.*s",
              (int)pointee->type_named.name.sz, pointee->type_named.name.buf);
 
-        // Skip lookup for synthetic nodes (empty name, already resolved)
-        if (pointee->type_named.builtin_type == TICK_TYPE_UNKNOWN ||
-            pointee->type_named.name.sz > 0) {
+        // Skip lookup for synthetic nodes that are already resolved
+        if (!tick_node_is_synthetic(pointee) || tick_type_is_unresolved(pointee)) {
           resolve_named_type(pointee, ctx, false);
         }
 
@@ -888,10 +882,10 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
         if (!left_type || !right_type) {
           // Operand not analyzed yet
           result_type = NULL;
-        } else if (is_type_unresolved(left_type)) {
+        } else if (tick_type_is_unresolved(left_type)) {
           // Left operand type not resolved yet
           result_type = NULL;
-        } else if (is_type_unresolved(right_type)) {
+        } else if (tick_type_is_unresolved(right_type)) {
           // Right operand type not resolved yet
           result_type = NULL;
         } else if (left_type->kind == TICK_AST_TYPE_NAMED) {
@@ -924,7 +918,7 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       if (!operand_type) {
         // Operand not analyzed yet
         result_type = NULL;
-      } else if (is_type_unresolved(operand_type)) {
+      } else if (tick_type_is_unresolved(operand_type)) {
         // Operand type not resolved yet
         result_type = NULL;
       } else {
@@ -1081,7 +1075,7 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
         if (!result_type) {
           // No type info at all
           needs_dependency = true;
-        } else if (is_type_unresolved(result_type)) {
+        } else if (tick_type_is_unresolved(result_type)) {
           // Type is UNKNOWN - needs to be analyzed
           needs_dependency = true;
         }
@@ -1184,15 +1178,12 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
           analyze_expr(expr->index_expr.index, ctx);
 
       // Validate index is numeric
-      if (index_type && index_type->kind == TICK_AST_TYPE_NAMED) {
-        tick_builtin_type_t idx_type = index_type->type_named.builtin_type;
-        if (!is_numeric_type(idx_type)) {
-          ANALYSIS_ERROR(ctx, expr->loc,
-                         "array index must be numeric, got %s",
-                         tick_builtin_type_str(idx_type));
-          ALOG_EXIT("FAILED");
-          return NULL;
-        }
+      if (index_type && !tick_type_is_numeric(index_type)) {
+        ANALYSIS_ERROR(ctx, expr->loc,
+                       "array index must be numeric, got %s",
+                       tick_type_str(index_type));
+        ALOG_EXIT("FAILED");
+        return NULL;
       }
 
       // Determine element type based on array type
@@ -1302,7 +1293,7 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       }
 
       // Check if type is resolved
-      if (is_type_unresolved(base_type)) {
+      if (tick_type_is_unresolved(base_type)) {
         ALOG_EXIT("base type not resolved yet");
         expr->field_access_expr.resolved_type = NULL;
         return NULL;
