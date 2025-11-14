@@ -106,8 +106,9 @@ static tick_err_t write_array_suffix(tick_writer_t* w, tick_ast_node_t* type) {
       CHECK(type->type_array.size->kind == TICK_AST_LITERAL,
             "array size must be literal (no VLAs)");
       CHECK_OK(write_str(w, "["));
-      CHECK_OK(write_fmt(w, "%llu",
-                         (unsigned long long)type->type_array.size->literal.data.uint_value));
+      CHECK_OK(write_fmt(
+          w, "%llu",
+          (unsigned long long)type->type_array.size->literal.data.uint_value));
       CHECK_OK(write_str(w, "]"));
     }
   }
@@ -409,7 +410,8 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
       return write_fmt(ctx->writer, "__tmp%u", sym_node->decl.tmpid);
     }
 
-    // Skip __u_ prefix for pub and extern declarations so they can link with C code
+    // Skip __u_ prefix for pub and extern declarations so they can link with C
+    // code
     if (sym_node->kind == TICK_AST_DECL) {
       bool is_extern = sym_node->decl.quals.is_extern;
       bool is_pub = sym_node->decl.quals.is_pub;
@@ -433,8 +435,7 @@ static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
 
   if (resolved_type && resolved_type->kind == TICK_AST_TYPE_NAMED) {
     tick_builtin_type_t type = resolved_type->type_named.builtin_type;
-    tick_builtin_t builtin =
-        map_binop_to_builtin(node->binary_expr.op, type);
+    tick_builtin_t builtin = map_binop_to_builtin(node->binary_expr.op, type);
 
     if (builtin != 0) {
       // Emit as builtin function call
@@ -494,9 +495,10 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
 
 static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   // Check if this is a @dbg call (tick_debug_log)
-  bool is_dbg_call = node->call_expr.callee &&
-                     node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR &&
-                     node->call_expr.callee->identifier_expr.at_builtin == TICK_AT_BUILTIN_DBG;
+  bool is_dbg_call =
+      node->call_expr.callee &&
+      node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR &&
+      node->call_expr.callee->identifier_expr.at_builtin == TICK_AT_BUILTIN_DBG;
 
   CHECK_OK(codegen_expr(node->call_expr.callee, ctx));
   CHECK_OK(write_str(ctx->writer, "("));
@@ -511,7 +513,8 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     }
     first = false;
 
-    // For @dbg, cast the first argument (format string) from uint8_t* to const char*
+    // For @dbg, cast the first argument (format string) from uint8_t* to const
+    // char*
     if (is_dbg_call && arg_index == 0) {
       CHECK_OK(write_str(ctx->writer, "(const char*)"));
     }
@@ -730,15 +733,13 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     return TICK_OK;
   }
 
-  tick_builtin_type_t dst_type =
-      node->cast_expr.type->type_named.builtin_type;
+  tick_builtin_type_t dst_type = node->cast_expr.type->type_named.builtin_type;
 
   CHECK(dst_type != TICK_TYPE_UNKNOWN,
         "cast destination type not resolved - analysis pass missing?");
 
   // Get source type from the expression being cast
-  tick_builtin_type_t src_type =
-      get_expr_builtin_type(node->cast_expr.expr);
+  tick_builtin_type_t src_type = get_expr_builtin_type(node->cast_expr.expr);
 
   // Decision tree for cast code generation:
 
@@ -993,8 +994,7 @@ static tick_err_t codegen_builtin_call(tick_ast_node_t* node,
             node->builtin_call.type->kind == TICK_AST_TYPE_NAMED,
         "builtin call missing or invalid type");
 
-  tick_builtin_type_t type =
-      node->builtin_call.type->type_named.builtin_type;
+  tick_builtin_type_t type = node->builtin_call.type->type_named.builtin_type;
   CHECK(type != TICK_TYPE_UNKNOWN,
         "builtin call type not resolved - analysis pass missing?");
 
@@ -1069,9 +1069,11 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
         // Validate that value is simple (LITERAL or IDENTIFIER_EXPR)
         // This should be guaranteed by analysis pass decomposition
         CHECK(value->kind == TICK_AST_LITERAL ||
-              value->kind == TICK_AST_IDENTIFIER_EXPR,
-              "struct field initializer must be simple (LITERAL or IDENTIFIER_EXPR), "
-              "got %d - analysis pass should have decomposed this", value->kind);
+                  value->kind == TICK_AST_IDENTIFIER_EXPR,
+              "struct field initializer must be simple (LITERAL or "
+              "IDENTIFIER_EXPR), "
+              "got %d - analysis pass should have decomposed this",
+              value->kind);
 
         if (!first) {
           CHECK_OK(write_str(ctx->writer, ", "));
@@ -1080,8 +1082,7 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
         // Emit: .fieldname = value
         CHECK_OK(write_str(ctx->writer, "."));
-        CHECK_OK(
-            write_ident(ctx->writer, field->struct_init_field.field_name));
+        CHECK_OK(write_ident(ctx->writer, field->struct_init_field.field_name));
         CHECK_OK(write_str(ctx->writer, " = "));
         CHECK_OK(codegen_expr(value, ctx));
 
@@ -1104,9 +1105,11 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
         // Validate that element is simple (LITERAL or IDENTIFIER_EXPR)
         // This should be guaranteed by analysis pass decomposition
         CHECK(elem->kind == TICK_AST_LITERAL ||
-              elem->kind == TICK_AST_IDENTIFIER_EXPR,
-              "array element initializer must be simple (LITERAL or IDENTIFIER_EXPR), "
-              "got %d - analysis pass should have decomposed this", elem->kind);
+                  elem->kind == TICK_AST_IDENTIFIER_EXPR,
+              "array element initializer must be simple (LITERAL or "
+              "IDENTIFIER_EXPR), "
+              "got %d - analysis pass should have decomposed this",
+              elem->kind);
 
         if (!first) {
           CHECK_OK(write_str(ctx->writer, ", "));
@@ -1182,17 +1185,19 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
   // For static const string literals, we need special handling:
   // Instead of: static const uint8_t* __tmp1 = (const char*)(uint8_t[]){...};
   // We emit: static const uint8_t __tmp1[] = {...};
-  // The array decays to pointer naturally, avoiding the "not a compile-time constant" error
-  bool is_static_string = node->decl.quals.is_static &&
-                          node->decl.init &&
+  // The array decays to pointer naturally, avoiding the "not a compile-time
+  // constant" error
+  bool is_static_string = node->decl.quals.is_static && node->decl.init &&
                           node->decl.init->kind == TICK_AST_LITERAL &&
                           node->decl.init->literal.kind == TICK_LIT_STRING;
 
   // Emit type (for static strings, emit pointee type only)
   if (is_static_string) {
-    // String literals have type *u8, so we need to emit just u8 (the pointee type)
+    // String literals have type *u8, so we need to emit just u8 (the pointee
+    // type)
     tick_ast_node_t* type = node->decl.type;
-    CHECK(type && type->kind == TICK_AST_TYPE_POINTER, "static string should have pointer type");
+    CHECK(type && type->kind == TICK_AST_TYPE_POINTER,
+          "static string should have pointer type");
     CHECK_OK(codegen_type(type->type_pointer.pointee_type, ctx->writer));
   } else {
     CHECK_OK(codegen_type(node->decl.type, ctx->writer));
@@ -1212,9 +1217,8 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
   // Emit initializer if present and not undefined
   if (node->decl.init) {
     // Check if init is undefined literal
-    bool is_undefined =
-        (node->decl.init->kind == TICK_AST_LITERAL &&
-         node->decl.init->literal.kind == TICK_LIT_UNDEFINED);
+    bool is_undefined = (node->decl.init->kind == TICK_AST_LITERAL &&
+                         node->decl.init->literal.kind == TICK_LIT_UNDEFINED);
 
     if (!is_undefined) {
       CHECK_OK(write_str(ctx->writer, " = "));
@@ -1286,8 +1290,7 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   // Then block (strip outer braces, we add them)
   if (node->if_stmt.then_block->kind == TICK_AST_BLOCK_STMT) {
     CHECK_OK(write_str(ctx->writer, "{\n"));
-    tick_ast_node_t* stmt =
-        node->if_stmt.then_block->block_stmt.stmts;
+    tick_ast_node_t* stmt = node->if_stmt.then_block->block_stmt.stmts;
     while (stmt) {
       CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
       stmt = stmt->next;
@@ -1308,8 +1311,7 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
       CHECK_OK(codegen_stmt(node->if_stmt.else_block, ctx, 0));
     } else if (node->if_stmt.else_block->kind == TICK_AST_BLOCK_STMT) {
       CHECK_OK(write_str(ctx->writer, "{\n"));
-      tick_ast_node_t* stmt =
-          node->if_stmt.else_block->block_stmt.stmts;
+      tick_ast_node_t* stmt = node->if_stmt.else_block->block_stmt.stmts;
       while (stmt) {
         CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
         stmt = stmt->next;
@@ -1592,8 +1594,7 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
       CHECK(field->field.alignment->kind == TICK_AST_LITERAL,
             "field alignment must be literal (analysis didn't evaluate "
             "constant)");
-      uint64_t align_val =
-          field->field.alignment->literal.data.uint_value;
+      uint64_t align_val = field->field.alignment->literal.data.uint_value;
       CHECK_OK(write_fmt(w, " __attribute__((aligned(%llu)))",
                          (unsigned long long)align_val));
     }
@@ -1856,8 +1857,7 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
     }
 
     // Emit return type
-    CHECK_OK(
-        codegen_type(fn_type->type_function.return_type, ctx->writer));
+    CHECK_OK(codegen_type(fn_type->type_function.return_type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, " (*"));
     CHECK_OK(write_decl_name(ctx->writer, decl));
     CHECK_OK(write_str(ctx->writer, ")("));
@@ -1901,9 +1901,8 @@ finish_decl:
   // Emit initializer only if not extern and if present and not undefined
   if (!is_extern && decl->decl.init) {
     // Check if init is undefined literal
-    bool is_undefined =
-        (decl->decl.init->kind == TICK_AST_LITERAL &&
-         decl->decl.init->literal.kind == TICK_LIT_UNDEFINED);
+    bool is_undefined = (decl->decl.init->kind == TICK_AST_LITERAL &&
+                         decl->decl.init->literal.kind == TICK_LIT_UNDEFINED);
 
     if (!is_undefined) {
       CHECK_OK(write_str(ctx->writer, " = "));
@@ -1963,14 +1962,13 @@ tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
 
   // Single pass: Emit declarations in order
   // Lowering is responsible for inserting forward declarations and ordering
-  for (tick_ast_node_t* decl = module->module.decls; decl;
-       decl = decl->next) {
+  for (tick_ast_node_t* decl = module->module.decls; decl; decl = decl->next) {
     if (decl->kind != TICK_AST_DECL) {
       continue;
     }
 
-    DLOG("Emitting decl: %.*s (tmpid=%u)",
-         (int)decl->decl.name.sz, decl->decl.name.buf, decl->decl.tmpid);
+    DLOG("Emitting decl: %.*s (tmpid=%u)", (int)decl->decl.name.sz,
+         decl->decl.name.buf, decl->decl.tmpid);
 
     bool is_pub = decl->decl.quals.is_pub;
     bool is_extern = decl->decl.quals.is_extern;

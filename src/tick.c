@@ -1,4 +1,5 @@
 #include "tick.h"
+
 #include <string.h>
 
 // ============================================================================
@@ -588,11 +589,11 @@ bool tick_types_equal(tick_ast_node_t* t1, tick_ast_node_t* t2) {
 
     case TICK_AST_TYPE_POINTER:
       return tick_types_equal(t1->type_pointer.pointee_type,
-                             t2->type_pointer.pointee_type);
+                              t2->type_pointer.pointee_type);
 
     case TICK_AST_TYPE_ARRAY:
       return tick_types_equal(t1->type_array.element_type,
-                             t2->type_array.element_type);
+                              t2->type_array.element_type);
 
     default:
       return t1 == t2;

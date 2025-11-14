@@ -54,8 +54,7 @@ tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
   tick_ast_node_t* new_decls_tail = NULL;
 
   // First, emit forward declarations for all user-defined types
-  for (tick_ast_node_t* decl = module->module.decls; decl;
-       decl = decl->next) {
+  for (tick_ast_node_t* decl = module->module.decls; decl; decl = decl->next) {
     if (decl->kind == TICK_AST_DECL && decl->decl.init) {
       tick_ast_node_t* init = decl->decl.init;
 
@@ -68,7 +67,8 @@ tick_err_t tick_ast_lower(tick_ast_t* ast, tick_alloc_t alloc,
           // Copy the declaration but mark as forward
           *fwd_decl = *decl;
           fwd_decl->decl.quals.is_forward_decl = true;
-          fwd_decl->node_flags = TICK_NODE_FLAG_SYNTHETIC | TICK_NODE_FLAG_LOWERED;
+          fwd_decl->node_flags =
+              TICK_NODE_FLAG_SYNTHETIC | TICK_NODE_FLAG_LOWERED;
           fwd_decl->next = NULL;
 
           // Append forward declaration

@@ -44,7 +44,8 @@ typedef ptrdiff_t isz;
 #error "Unknown byte order"
 #endif
 #else
-#error "Cannot detect byte order - define TICK_LITTLE_ENDIAN or TICK_BIG_ENDIAN manually"
+#error \
+    "Cannot detect byte order - define TICK_LITTLE_ENDIAN or TICK_BIG_ENDIAN manually"
 #endif
 #endif
 
@@ -104,7 +105,7 @@ static inline u16 tick_betoh16(u16 x) { return tick_bswap16(x); }
 static inline u32 tick_betoh32(u32 x) { return tick_bswap32(x); }
 static inline u64 tick_betoh64(u64 x) { return tick_bswap64(x); }
 
-#else // TICK_BIG_ENDIAN
+#else  // TICK_BIG_ENDIAN
 
 // Host to little-endian (swap on big-endian)
 static inline u16 tick_htole16(u16 x) { return tick_bswap16(x); }
@@ -202,12 +203,12 @@ static inline u64 tick_betoh64(u64 x) { return x; }
 #define TICK_DNS_CLASS_IN 1  // Internet
 
 // DNS Header Flags
-#define TICK_DNS_FLAG_QR 0x8000      // Query/Response
-#define TICK_DNS_FLAG_AA 0x0400      // Authoritative Answer
-#define TICK_DNS_FLAG_TC 0x0200      // Truncated
-#define TICK_DNS_FLAG_RD 0x0100      // Recursion Desired
-#define TICK_DNS_FLAG_RA 0x0080      // Recursion Available
-#define TICK_DNS_OPCODE_QUERY 0x0000 // Standard query
+#define TICK_DNS_FLAG_QR 0x8000       // Query/Response
+#define TICK_DNS_FLAG_AA 0x0400       // Authoritative Answer
+#define TICK_DNS_FLAG_TC 0x0200       // Truncated
+#define TICK_DNS_FLAG_RD 0x0100       // Recursion Desired
+#define TICK_DNS_FLAG_RA 0x0080       // Recursion Available
+#define TICK_DNS_OPCODE_QUERY 0x0000  // Standard query
 
 // Well-known Ports
 #define TICK_PORT_DNS 53
@@ -248,29 +249,29 @@ typedef struct {
 // IPv4 header (RFC 791)
 typedef struct {
 #if TICK_LITTLE_ENDIAN
-  u8 ihl : 4;       // Internet Header Length (4-bit)
-  u8 version : 4;   // Version (4-bit)
+  u8 ihl : 4;      // Internet Header Length (4-bit)
+  u8 version : 4;  // Version (4-bit)
 #else
-  u8 version : 4;   // Version (4-bit)
-  u8 ihl : 4;       // Internet Header Length (4-bit)
+  u8 version : 4;  // Version (4-bit)
+  u8 ihl : 4;      // Internet Header Length (4-bit)
 #endif
-  u8 tos;           // Type of Service
-  u16 total_len;    // Total Length (network byte order)
-  u16 id;           // Identification (network byte order)
-  u16 frag_off;     // Fragment Offset (network byte order)
-  u8 ttl;           // Time to Live
-  u8 protocol;      // Protocol
-  u16 check;        // Header Checksum (network byte order)
-  tick_ipv4_addr_t src;   // Source Address
-  tick_ipv4_addr_t dst;   // Destination Address
+  u8 tos;                // Type of Service
+  u16 total_len;         // Total Length (network byte order)
+  u16 id;                // Identification (network byte order)
+  u16 frag_off;          // Fragment Offset (network byte order)
+  u8 ttl;                // Time to Live
+  u8 protocol;           // Protocol
+  u16 check;             // Header Checksum (network byte order)
+  tick_ipv4_addr_t src;  // Source Address
+  tick_ipv4_addr_t dst;  // Destination Address
 } __attribute__((packed)) tick_ipv4_hdr_t;
 
 // IPv4 socket address
 typedef struct {
-  u16 family;           // Address family (AF_INET = 2)
-  u16 port;             // Port number (network byte order)
-  tick_ipv4_addr_t addr;      // IPv4 address
-  u8 zero[8];           // Padding to match sockaddr size
+  u16 family;             // Address family (AF_INET = 2)
+  u16 port;               // Port number (network byte order)
+  tick_ipv4_addr_t addr;  // IPv4 address
+  u8 zero[8];             // Padding to match sockaddr size
 } __attribute__((packed)) tick_sockaddr_in_t;
 
 // ============================================================================
@@ -285,28 +286,28 @@ typedef struct {
 // IPv6 header (RFC 2460)
 typedef struct {
 #if TICK_LITTLE_ENDIAN
-  u32 flow_label : 20;  // Flow Label (20-bit)
-  u32 traffic_class : 8; // Traffic Class (8-bit)
-  u32 version : 4;      // Version (4-bit)
+  u32 flow_label : 20;    // Flow Label (20-bit)
+  u32 traffic_class : 8;  // Traffic Class (8-bit)
+  u32 version : 4;        // Version (4-bit)
 #else
-  u32 version : 4;      // Version (4-bit)
-  u32 traffic_class : 8; // Traffic Class (8-bit)
-  u32 flow_label : 20;  // Flow Label (20-bit)
+  u32 version : 4;        // Version (4-bit)
+  u32 traffic_class : 8;  // Traffic Class (8-bit)
+  u32 flow_label : 20;    // Flow Label (20-bit)
 #endif
-  u16 payload_len;      // Payload Length (network byte order)
-  u8 next_hdr;          // Next Header (protocol)
-  u8 hop_limit;         // Hop Limit
-  tick_ipv6_addr_t src;       // Source Address
-  tick_ipv6_addr_t dst;       // Destination Address
+  u16 payload_len;       // Payload Length (network byte order)
+  u8 next_hdr;           // Next Header (protocol)
+  u8 hop_limit;          // Hop Limit
+  tick_ipv6_addr_t src;  // Source Address
+  tick_ipv6_addr_t dst;  // Destination Address
 } __attribute__((packed)) tick_ipv6_hdr_t;
 
 // IPv6 socket address
 typedef struct {
-  u16 family;           // Address family (AF_INET6 = 10)
-  u16 port;             // Port number (network byte order)
-  u32 flowinfo;         // Flow information (network byte order)
-  tick_ipv6_addr_t addr;      // IPv6 address
-  u32 scope_id;         // Scope ID
+  u16 family;             // Address family (AF_INET6 = 10)
+  u16 port;               // Port number (network byte order)
+  u32 flowinfo;           // Flow information (network byte order)
+  tick_ipv6_addr_t addr;  // IPv6 address
+  u32 scope_id;           // Scope ID
 } __attribute__((packed)) tick_sockaddr_in6_t;
 
 // ============================================================================
@@ -315,15 +316,15 @@ typedef struct {
 
 // ARP packet (RFC 826)
 typedef struct {
-  u16 hw_type;          // Hardware type (network byte order)
-  u16 proto_type;       // Protocol type (network byte order)
-  u8 hw_addr_len;       // Hardware address length
-  u8 proto_addr_len;    // Protocol address length
-  u16 op;               // Operation code (network byte order)
-  tick_mac_addr_t sender_hw;    // Sender hardware address
-  tick_ipv4_addr_t sender_proto; // Sender protocol address
-  tick_mac_addr_t target_hw;    // Target hardware address
-  tick_ipv4_addr_t target_proto; // Target protocol address
+  u16 hw_type;                    // Hardware type (network byte order)
+  u16 proto_type;                 // Protocol type (network byte order)
+  u8 hw_addr_len;                 // Hardware address length
+  u8 proto_addr_len;              // Protocol address length
+  u16 op;                         // Operation code (network byte order)
+  tick_mac_addr_t sender_hw;      // Sender hardware address
+  tick_ipv4_addr_t sender_proto;  // Sender protocol address
+  tick_mac_addr_t target_hw;      // Target hardware address
+  tick_ipv4_addr_t target_proto;  // Target protocol address
 } __attribute__((packed)) tick_arp_pkt_t;
 
 // ============================================================================
@@ -332,34 +333,34 @@ typedef struct {
 
 // ICMPv4 header (RFC 792)
 typedef struct {
-  u8 type;              // ICMP type
-  u8 code;              // ICMP code
-  u16 checksum;         // Checksum (network byte order)
+  u8 type;       // ICMP type
+  u8 code;       // ICMP code
+  u16 checksum;  // Checksum (network byte order)
   union {
     struct {
-      u16 id;           // Identifier (network byte order)
-      u16 seq;          // Sequence number (network byte order)
+      u16 id;   // Identifier (network byte order)
+      u16 seq;  // Sequence number (network byte order)
     } echo;
-    u32 gateway;        // Gateway address (for redirect)
+    u32 gateway;  // Gateway address (for redirect)
     struct {
       u16 unused;
-      u16 mtu;          // Next-hop MTU (network byte order)
+      u16 mtu;  // Next-hop MTU (network byte order)
     } frag;
   } data;
 } __attribute__((packed)) tick_icmp_hdr_t;
 
 // ICMPv6 header (RFC 4443)
 typedef struct {
-  u8 type;              // ICMPv6 type
-  u8 code;              // ICMPv6 code
-  u16 checksum;         // Checksum (network byte order)
+  u8 type;       // ICMPv6 type
+  u8 code;       // ICMPv6 code
+  u16 checksum;  // Checksum (network byte order)
   union {
     struct {
-      u16 id;           // Identifier (network byte order)
-      u16 seq;          // Sequence number (network byte order)
+      u16 id;   // Identifier (network byte order)
+      u16 seq;  // Sequence number (network byte order)
     } echo;
-    u32 mtu;            // MTU (network byte order)
-    u32 pointer;        // Pointer (network byte order)
+    u32 mtu;      // MTU (network byte order)
+    u32 pointer;  // Pointer (network byte order)
   } data;
 } __attribute__((packed)) tick_icmpv6_hdr_t;
 
@@ -369,44 +370,44 @@ typedef struct {
 
 // ICMPv6 NDP Option (RFC 4861)
 typedef struct {
-  u8 type;              // Option type
-  u8 length;            // Length in units of 8 octets
+  u8 type;    // Option type
+  u8 length;  // Length in units of 8 octets
   // Followed by option-specific data
 } __attribute__((packed)) tick_icmpv6_ndp_opt_t;
 
 // ICMPv6 NDP Link-Layer Address Option
 typedef struct {
-  u8 type;              // Option type (1=source, 2=target)
-  u8 length;            // Length (1 for 6-byte MAC)
-  tick_mac_addr_t addr; // Link-layer address (MAC)
+  u8 type;               // Option type (1=source, 2=target)
+  u8 length;             // Length (1 for 6-byte MAC)
+  tick_mac_addr_t addr;  // Link-layer address (MAC)
 } __attribute__((packed)) tick_icmpv6_ndp_ll_addr_opt_t;
 
 // ICMPv6 Neighbor Solicitation (RFC 4861)
 typedef struct {
-  u8 type;              // Type (135)
-  u8 code;              // Code (0)
-  u16 checksum;         // Checksum (network byte order)
-  u32 reserved;         // Reserved (must be zero)
-  tick_ipv6_addr_t target;    // Target address
+  u8 type;                  // Type (135)
+  u8 code;                  // Code (0)
+  u16 checksum;             // Checksum (network byte order)
+  u32 reserved;             // Reserved (must be zero)
+  tick_ipv6_addr_t target;  // Target address
   // Followed by options (e.g., source link-layer address)
 } __attribute__((packed)) tick_icmpv6_neighbor_solicit_t;
 
 // ICMPv6 Neighbor Advertisement (RFC 4861)
 typedef struct {
-  u8 type;              // Type (136)
-  u8 code;              // Code (0)
-  u16 checksum;         // Checksum (network byte order)
-  u32 flags;            // Flags: Router(R), Solicited(S), Override(O)
-  tick_ipv6_addr_t target;    // Target address
+  u8 type;                  // Type (136)
+  u8 code;                  // Code (0)
+  u16 checksum;             // Checksum (network byte order)
+  u32 flags;                // Flags: Router(R), Solicited(S), Override(O)
+  tick_ipv6_addr_t target;  // Target address
   // Followed by options (e.g., target link-layer address)
 } __attribute__((packed)) tick_icmpv6_neighbor_advert_t;
 
 // ICMPv6 Router Solicitation (RFC 4861)
 typedef struct {
-  u8 type;              // Type (133)
-  u8 code;              // Code (0)
-  u16 checksum;         // Checksum (network byte order)
-  u32 reserved;         // Reserved (must be zero)
+  u8 type;       // Type (133)
+  u8 code;       // Code (0)
+  u16 checksum;  // Checksum (network byte order)
+  u32 reserved;  // Reserved (must be zero)
   // Followed by options (e.g., source link-layer address)
 } __attribute__((packed)) tick_icmpv6_router_solicit_t;
 
@@ -429,10 +430,10 @@ typedef struct {
 
 // UDP header (RFC 768)
 typedef struct {
-  u16 src_port;         // Source port (network byte order)
-  u16 dst_port;         // Destination port (network byte order)
-  u16 len;              // Length (network byte order)
-  u16 checksum;         // Checksum (network byte order)
+  u16 src_port;  // Source port (network byte order)
+  u16 dst_port;  // Destination port (network byte order)
+  u16 len;       // Length (network byte order)
+  u16 checksum;  // Checksum (network byte order)
 } __attribute__((packed)) tick_udp_hdr_t;
 
 // ============================================================================
@@ -441,30 +442,30 @@ typedef struct {
 
 // DNS header (RFC 1035)
 typedef struct {
-  u16 id;               // Identification (network byte order)
-  u16 flags;            // Flags (network byte order)
-  u16 qd_count;         // Question count (network byte order)
-  u16 an_count;         // Answer count (network byte order)
-  u16 ns_count;         // Authority count (network byte order)
-  u16 ar_count;         // Additional count (network byte order)
+  u16 id;        // Identification (network byte order)
+  u16 flags;     // Flags (network byte order)
+  u16 qd_count;  // Question count (network byte order)
+  u16 an_count;  // Answer count (network byte order)
+  u16 ns_count;  // Authority count (network byte order)
+  u16 ar_count;  // Additional count (network byte order)
 } __attribute__((packed)) tick_dns_hdr_t;
 
 // DNS question section (variable length due to name)
 typedef struct {
   // Note: Name field is variable length (DNS name format)
   // This struct represents only the fixed fields after the name
-  u16 type;             // Query type (network byte order)
-  u16 class;            // Query class (network byte order)
+  u16 type;   // Query type (network byte order)
+  u16 class;  // Query class (network byte order)
 } __attribute__((packed)) tick_dns_question_tail_t;
 
 // DNS resource record (variable length)
 typedef struct {
   // Note: Name field is variable length (DNS name format)
   // This struct represents only the fixed fields after the name
-  u16 type;             // Resource record type (network byte order)
-  u16 class;            // Resource record class (network byte order)
-  u32 ttl;              // Time to live (network byte order)
-  u16 rd_len;           // Resource data length (network byte order)
+  u16 type;    // Resource record type (network byte order)
+  u16 class;   // Resource record class (network byte order)
+  u32 ttl;     // Time to live (network byte order)
+  u16 rd_len;  // Resource data length (network byte order)
   // Followed by rd_len bytes of resource data
 } __attribute__((packed)) tick_dns_rr_tail_t;
 
@@ -474,31 +475,31 @@ typedef struct {
 
 // NTP timestamp (64-bit: 32-bit seconds, 32-bit fraction)
 typedef struct {
-  u32 seconds;          // Seconds since 1900-01-01 (network byte order)
-  u32 fraction;         // Fractional seconds (network byte order)
+  u32 seconds;   // Seconds since 1900-01-01 (network byte order)
+  u32 fraction;  // Fractional seconds (network byte order)
 } __attribute__((packed)) tick_ntp_timestamp_t;
 
 // NTP packet (RFC 5905)
 typedef struct {
 #if TICK_LITTLE_ENDIAN
-  u8 mode : 3;          // Mode (3-bit)
-  u8 version : 3;       // Version (3-bit)
-  u8 leap : 2;          // Leap Indicator (2-bit)
+  u8 mode : 3;     // Mode (3-bit)
+  u8 version : 3;  // Version (3-bit)
+  u8 leap : 2;     // Leap Indicator (2-bit)
 #else
-  u8 leap : 2;          // Leap Indicator (2-bit)
-  u8 version : 3;       // Version (3-bit)
-  u8 mode : 3;          // Mode (3-bit)
+  u8 leap : 2;     // Leap Indicator (2-bit)
+  u8 version : 3;  // Version (3-bit)
+  u8 mode : 3;     // Mode (3-bit)
 #endif
-  u8 stratum;           // Stratum level
-  u8 poll;              // Poll interval
-  i8 precision;         // Precision
-  u32 root_delay;       // Root delay (network byte order)
-  u32 root_dispersion;  // Root dispersion (network byte order)
-  u32 ref_id;           // Reference ID (network byte order)
-  tick_ntp_timestamp_t ref_time;       // Reference timestamp
-  tick_ntp_timestamp_t orig_time;      // Origin timestamp
-  tick_ntp_timestamp_t rx_time;        // Receive timestamp
-  tick_ntp_timestamp_t tx_time;        // Transmit timestamp
+  u8 stratum;                      // Stratum level
+  u8 poll;                         // Poll interval
+  i8 precision;                    // Precision
+  u32 root_delay;                  // Root delay (network byte order)
+  u32 root_dispersion;             // Root dispersion (network byte order)
+  u32 ref_id;                      // Reference ID (network byte order)
+  tick_ntp_timestamp_t ref_time;   // Reference timestamp
+  tick_ntp_timestamp_t orig_time;  // Origin timestamp
+  tick_ntp_timestamp_t rx_time;    // Receive timestamp
+  tick_ntp_timestamp_t tx_time;    // Transmit timestamp
 } __attribute__((packed)) tick_ntp_pkt_t;
 
 // ============================================================================
@@ -582,8 +583,8 @@ typedef struct {
 //   src_ip: Source IPv4 address
 //   dst_ip: Destination IPv4 address
 u16 tick_udp_checksum_ipv4(const tick_udp_hdr_t *udp_hdr, const void *payload,
-                            usz payload_len, tick_ipv4_addr_t src_ip,
-                            tick_ipv4_addr_t dst_ip);
+                           usz payload_len, tick_ipv4_addr_t src_ip,
+                           tick_ipv4_addr_t dst_ip);
 
 // UDP checksum for IPv6
 // Parameters:
@@ -593,8 +594,8 @@ u16 tick_udp_checksum_ipv4(const tick_udp_hdr_t *udp_hdr, const void *payload,
 //   src_ip: Source IPv6 address
 //   dst_ip: Destination IPv6 address
 u16 tick_udp_checksum_ipv6(const tick_udp_hdr_t *udp_hdr, const void *payload,
-                            usz payload_len, tick_ipv6_addr_t src_ip,
-                            tick_ipv6_addr_t dst_ip);
+                           usz payload_len, tick_ipv6_addr_t src_ip,
+                           tick_ipv6_addr_t dst_ip);
 
 // ICMP checksum
 // Calculates checksum for ICMP message (header + payload)
@@ -615,4 +616,4 @@ u16 tick_icmpv6_checksum(const tick_icmpv6_hdr_t *icmpv6_hdr,
                          const void *payload, usz payload_len,
                          tick_ipv6_addr_t src_ip, tick_ipv6_addr_t dst_ip);
 
-#endif // TICK_NET_H
+#endif  // TICK_NET_H

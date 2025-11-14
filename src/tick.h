@@ -1,9 +1,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-#include <stdio.h>  // fprintf
-#include <stdlib.h> // abort
+#include <stdio.h>   // fprintf
+#include <stdlib.h>  // abort
 
 #define PATH_MAX 2048
 
@@ -739,25 +738,28 @@ typedef struct tick_analyze_ctx_s tick_analyze_ctx_t;
 
 // Symbol table entry
 struct tick_symbol_s {
-  tick_buf_t name;           // Symbol name (key for hashmap)
-  tick_ast_node_t* decl;     // Pointer to DECL/PARAM node
-  tick_ast_node_t* type;     // Cached resolved type
+  tick_buf_t name;        // Symbol name (key for hashmap)
+  tick_ast_node_t* decl;  // Pointer to DECL/PARAM node
+  tick_ast_node_t* type;  // Cached resolved type
 };
 
 // Type table entry
 struct tick_type_entry_s {
-  tick_buf_t name;              // Type name (key for hashmap)
-  tick_ast_node_t* decl;        // Pointer to STRUCT_DECL/ENUM_DECL/UNION_DECL (NULL for builtins)
-  tick_builtin_type_t builtin_type;  // Resolved builtin type or TICK_TYPE_USER_DEFINED
-  tick_ast_node_t* parent_decl; // Back-pointer to parent DECL node
+  tick_buf_t name;  // Type name (key for hashmap)
+  tick_ast_node_t*
+      decl;  // Pointer to STRUCT_DECL/ENUM_DECL/UNION_DECL (NULL for builtins)
+  tick_builtin_type_t
+      builtin_type;  // Resolved builtin type or TICK_TYPE_USER_DEFINED
+  tick_ast_node_t* parent_decl;  // Back-pointer to parent DECL node
 };
 
 // Scope structure for symbol lookups
 struct tick_scope_s {
-  struct hashmap* symbols;      // Symbol hashmap for this scope
-  tick_scope_t* parent;         // Parent scope (NULL for module scope)
-  tick_alloc_t alloc;           // Allocator for scope lifetime
-  u32 next_tmpid;               // Next temporary ID for this scope (0=reserved for user vars, starts at 1)
+  struct hashmap* symbols;  // Symbol hashmap for this scope
+  tick_scope_t* parent;     // Parent scope (NULL for module scope)
+  tick_alloc_t alloc;       // Allocator for scope lifetime
+  u32 next_tmpid;  // Next temporary ID for this scope (0=reserved for user
+                   // vars, starts at 1)
 };
 
 // Work queue for lazy analysis (intrusive linked list using next_queued)
@@ -774,27 +776,30 @@ typedef struct {
 
 // Analysis context
 struct tick_analyze_ctx_s {
-  struct hashmap* types;         // Global type table (module-level)
-  tick_scope_t* current_scope;   // Current scope for lookups
-  tick_scope_t* module_scope;    // Root module scope
-  tick_ast_node_t* module;       // Pointer to MODULE node (ast->root)
+  struct hashmap* types;        // Global type table (module-level)
+  tick_scope_t* current_scope;  // Current scope for lookups
+  tick_scope_t* module_scope;   // Root module scope
+  tick_ast_node_t* module;      // Pointer to MODULE node (ast->root)
   tick_alloc_t alloc;
   tick_buf_t errbuf;
-  tick_work_queue_t work_queue;  // Queue for lazy analysis
+  tick_work_queue_t work_queue;         // Queue for lazy analysis
   tick_dependency_list_t pending_deps;  // Dependencies for current declaration
-  int scope_depth;               // Current scope depth (0=module, 1+=function/block)
-  int log_depth;                 // Current logging depth (for debug output indentation)
-  tick_ast_node_t* current_block;  // Current block for inserting temporaries (BLOCK_STMT)
-  tick_ast_node_t* current_stmt;   // Current statement being analyzed (for insertion point)
+  int scope_depth;  // Current scope depth (0=module, 1+=function/block)
+  int log_depth;    // Current logging depth (for debug output indentation)
+  tick_ast_node_t*
+      current_block;  // Current block for inserting temporaries (BLOCK_STMT)
+  tick_ast_node_t*
+      current_stmt;  // Current statement being analyzed (for insertion point)
 };
 
 // AST node metadata flags
 // These flags track the provenance and state of AST nodes explicitly,
 // eliminating brittle assumptions like "name.sz == 0" for synthetic nodes.
-#define TICK_NODE_FLAG_SYNTHETIC  (1 << 0)  // Compiler-generated, not from source
-#define TICK_NODE_FLAG_ANALYZED   (1 << 1)  // Analysis pass completed
-#define TICK_NODE_FLAG_LOWERED    (1 << 2)  // Lowering pass completed
-#define TICK_NODE_FLAG_TEMPORARY  (1 << 4)  // Compiler temporary variable
+#define TICK_NODE_FLAG_SYNTHETIC \
+  (1 << 0)                                // Compiler-generated, not from source
+#define TICK_NODE_FLAG_ANALYZED (1 << 1)  // Analysis pass completed
+#define TICK_NODE_FLAG_LOWERED (1 << 2)   // Lowering pass completed
+#define TICK_NODE_FLAG_TEMPORARY (1 << 4)  // Compiler temporary variable
 
 // AST node structure
 struct tick_ast_node_s {
@@ -827,10 +832,12 @@ struct tick_ast_node_s {
       tick_ast_node_t* type;
       tick_ast_node_t* init;
       tick_qualifier_flags_t quals;
-      u32 tmpid;  // 0=user-named, >0=unnamed temporary
-      u8 analysis_state;  // tick_analysis_state_t
-      tick_ast_node_t* next_queued;  // Intrusive linked list for work queue / dependency tracking
-      bool in_pending_deps;  // True if currently in pending_deps list (O(1) duplicate check)
+      u32 tmpid;                     // 0=user-named, >0=unnamed temporary
+      u8 analysis_state;             // tick_analysis_state_t
+      tick_ast_node_t* next_queued;  // Intrusive linked list for work queue /
+                                     // dependency tracking
+      bool in_pending_deps;  // True if currently in pending_deps list (O(1)
+                             // duplicate check)
     } decl;
     struct {
       tick_ast_node_t* params;
@@ -940,7 +947,8 @@ struct tick_ast_node_s {
       tick_buf_t name;
       tick_at_builtin_t
           at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
-      tick_symbol_t* symbol;  // Cached symbol lookup (NULL until first resolution)
+      tick_symbol_t*
+          symbol;  // Cached symbol lookup (NULL until first resolution)
     } identifier_expr;
     struct {
       tick_ast_node_t* call;   // Function call expression
@@ -1109,12 +1117,12 @@ tick_symbol_t* tick_scope_lookup_local(tick_scope_t* scope, tick_buf_t name);
 tick_err_t tick_types_insert(struct hashmap* types, tick_buf_t name,
                              tick_ast_node_t* decl,
                              tick_builtin_type_t builtin_type,
-                             tick_ast_node_t* parent_decl,
-                             tick_alloc_t alloc);
+                             tick_ast_node_t* parent_decl, tick_alloc_t alloc);
 tick_type_entry_t* tick_types_lookup(struct hashmap* types, tick_buf_t name);
 void tick_dependency_list_init(tick_dependency_list_t* list);
 void tick_dependency_list_clear(tick_dependency_list_t* list);
-void tick_dependency_list_add(tick_dependency_list_t* list, tick_ast_node_t* decl);
+void tick_dependency_list_add(tick_dependency_list_t* list,
+                              tick_ast_node_t* decl);
 void tick_analyze_ctx_init(tick_analyze_ctx_t* ctx, tick_alloc_t alloc,
                            tick_buf_t errbuf);
 void tick_analyze_ctx_destroy(tick_analyze_ctx_t* ctx);
