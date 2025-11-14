@@ -1,9 +1,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+#include <stdio.h>  // fprintf
+#include <stdlib.h> // abort
 
 #define PATH_MAX 2048
 
@@ -40,9 +40,13 @@
 #ifdef TICK_DEBUG
 #define DLOG(fmt, ...) fprintf(stderr, "[DEBUG] " fmt "\n", ##__VA_ARGS__)
 #else
-#define DLOG(fmt, ...) \
-  do {                 \
-  } while (0)
+#define DLOG(fmt, ...) (void)(0)
+#endif
+
+#ifdef TICK_DEBUG_PARSE
+#define PLOG DLOG
+#else
+#define PLOG(fmt, ...) (void)(0)
 #endif
 
 #define TICK_HELP "Usage: tick emitc <input.tick> -o <output>\n"
@@ -63,6 +67,23 @@ typedef enum {
   TICK_OK = 0,
   TICK_ERR = 1,
 } tick_err_t;
+
+typedef enum {
+  TICK_ANALYZE_OK = 0,
+  TICK_ANALYZE_ERR,
+  TICK_ANALYZE_ERR_UNKNOWN_TYPE,
+  TICK_ANALYZE_ERR_UNKNOWN_SYMBOL,
+  TICK_ANALYZE_ERR_DUPLICATE_NAME,
+  TICK_ANALYZE_ERR_TYPE_MISMATCH,
+  TICK_ANALYZE_ERR_CIRCULAR_DEPENDENCY,
+} tick_analyze_error_t;
+
+typedef enum {
+  TICK_ANALYSIS_STATE_NOT_STARTED = 0,
+  TICK_ANALYSIS_STATE_IN_PROGRESS = 1,
+  TICK_ANALYSIS_STATE_COMPLETED = 2,
+  TICK_ANALYSIS_STATE_FAILED = 3,
+} tick_analysis_state_t;
 
 typedef struct {
   u8* buf;
@@ -588,7 +609,6 @@ typedef enum {
   TICK_AST_ENUM_VALUE,
   TICK_AST_SWITCH_CASE,
   TICK_AST_STRUCT_INIT_FIELD,
-  TICK_AST_EXPORT_STMT,
 } tick_ast_node_kind_t;
 
 // AST node location
@@ -607,6 +627,7 @@ typedef struct {
   bool is_volatile;
   bool is_extern;        // true = extern declaration (no definition)
   bool is_forward_decl;  // true = forward decl only (set by lowering)
+  bool is_static;        // true = static storage duration (for temporaries)
 } tick_qualifier_flags_t;
 
 // Struct qualifiers
@@ -728,6 +749,7 @@ struct tick_type_entry_s {
   tick_buf_t name;              // Type name (key for hashmap)
   tick_ast_node_t* decl;        // Pointer to STRUCT_DECL/ENUM_DECL/UNION_DECL (NULL for builtins)
   tick_builtin_type_t builtin_type;  // Resolved builtin type or TICK_TYPE_USER_DEFINED
+  tick_ast_node_t* parent_decl; // Back-pointer to parent DECL node
 };
 
 // Scope structure for symbol lookups
@@ -735,15 +757,35 @@ struct tick_scope_s {
   struct hashmap* symbols;      // Symbol hashmap for this scope
   tick_scope_t* parent;         // Parent scope (NULL for module scope)
   tick_alloc_t alloc;           // Allocator for scope lifetime
+  u32 next_tmpid;               // Next temporary ID for this scope (0=reserved for user vars, starts at 1)
 };
+
+// Work queue for lazy analysis (intrusive linked list using next_queued)
+typedef struct {
+  tick_ast_node_t* head;
+  tick_ast_node_t* tail;
+} tick_work_queue_t;
+
+// Dependency list for analysis (intrusive linked list using next_queued)
+typedef struct {
+  tick_ast_node_t* head;
+  tick_ast_node_t* tail;
+} tick_dependency_list_t;
 
 // Analysis context
 struct tick_analyze_ctx_s {
   struct hashmap* types;         // Global type table (module-level)
   tick_scope_t* current_scope;   // Current scope for lookups
   tick_scope_t* module_scope;    // Root module scope
+  tick_ast_node_t* module;       // Pointer to MODULE node (ast->root)
   tick_alloc_t alloc;
   tick_buf_t errbuf;
+  tick_work_queue_t work_queue;  // Queue for lazy analysis
+  tick_dependency_list_t pending_deps;  // Dependencies for current declaration
+  int scope_depth;               // Current scope depth (0=module, 1+=function/block)
+  int log_depth;                 // Current logging depth (for debug output indentation)
+  tick_ast_node_t* current_block;  // Current block for inserting temporaries (BLOCK_STMT)
+  tick_ast_node_t* current_stmt;   // Current statement being analyzed (for insertion point)
 };
 
 // AST node structure
@@ -777,6 +819,9 @@ struct tick_ast_node_s {
       tick_ast_node_t* init;
       tick_qualifier_flags_t quals;
       u32 tmpid;  // 0=user-named, >0=unnamed temporary
+      u8 analysis_state;  // tick_analysis_state_t
+      tick_ast_node_t* next_queued;  // Intrusive linked list for work queue / dependency tracking
+      bool in_pending_deps;  // True if currently in pending_deps list (O(1) duplicate check)
     } decl;
     struct {
       tick_ast_node_t* params;
@@ -859,6 +904,7 @@ struct tick_ast_node_s {
       tick_ast_node_t* object;
       tick_buf_t field_name;
       bool is_arrow;
+      tick_ast_node_t* resolved_type;  // Filled by analysis pass
     } field_access_expr;
     struct {
       tick_ast_node_t* array;
@@ -962,7 +1008,7 @@ struct tick_ast_node_s {
     struct {
       tick_buf_t name;
     } export_stmt;
-  } data;
+  };
 };
 
 typedef struct {
@@ -1031,13 +1077,20 @@ tick_symbol_t* tick_scope_lookup_local(tick_scope_t* scope, tick_buf_t name);
 tick_err_t tick_types_insert(struct hashmap* types, tick_buf_t name,
                              tick_ast_node_t* decl,
                              tick_builtin_type_t builtin_type,
+                             tick_ast_node_t* parent_decl,
                              tick_alloc_t alloc);
 tick_type_entry_t* tick_types_lookup(struct hashmap* types, tick_buf_t name);
+void tick_dependency_list_init(tick_dependency_list_t* list);
+void tick_dependency_list_clear(tick_dependency_list_t* list);
+void tick_dependency_list_add(tick_dependency_list_t* list, tick_ast_node_t* decl);
 void tick_analyze_ctx_init(tick_analyze_ctx_t* ctx, tick_alloc_t alloc,
                            tick_buf_t errbuf);
 void tick_analyze_ctx_destroy(tick_analyze_ctx_t* ctx);
 void tick_scope_push(tick_analyze_ctx_t* ctx);
 void tick_scope_pop(tick_analyze_ctx_t* ctx);
+void tick_work_queue_enqueue(tick_work_queue_t* queue, tick_ast_node_t* decl);
+tick_ast_node_t* tick_work_queue_dequeue(tick_work_queue_t* queue);
+bool tick_work_queue_empty(const tick_work_queue_t* queue);
 
 // Output functions
 tick_err_t tick_output_format_name(tick_buf_t output_path,

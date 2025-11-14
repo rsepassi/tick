@@ -1,0 +1,5 @@
+let Point = struct { x: i32, y: i32 };
+let compute = fn () i32 { return 42; };
+
+# Should fail: complex expression in module-level initializer
+pub let p = Point @ { x: compute(), y: 2 };

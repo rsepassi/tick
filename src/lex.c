@@ -1,4 +1,5 @@
 #include "tick.h"
+#include <string.h>
 
 // Helper macros
 #define IS_DIGIT(c) ((c) >= '0' && (c) <= '9')

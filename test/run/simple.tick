@@ -1,0 +1,10 @@
+pub let test = fn () i32 {
+  let a: i32 = 5;
+  let b: i32 = 3;
+  let result = a + b;
+  @dbg("%d\n", result);
+  if result == 8 {
+    return 0;  # Success
+  }
+  return 1;  # Failure
+};

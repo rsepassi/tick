@@ -1,0 +1,1 @@
+ERROR: 5:9: module-level variable 'p' cannot have complex initializer expression

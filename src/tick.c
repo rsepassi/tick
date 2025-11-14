@@ -1,4 +1,5 @@
 #include "tick.h"
+#include <string.h>
 
 // ============================================================================
 // Driver functions
@@ -322,7 +323,7 @@ void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc,
   // Allocate Lemon parser
   parse->lemon_parser = ParseAlloc(malloc);
 
-#ifdef TICK_DEBUG
+#ifdef TICK_DEBUG_PARSE
   // Enable parser tracing in debug mode
   ParseTrace(stderr, "[parser] ");
 #endif
@@ -382,8 +383,6 @@ const char* tick_ast_kind_str(tick_ast_node_kind_t kind) {
       return "IDENTIFIER_EXPR";
     case TICK_AST_TYPE_NAMED:
       return "TYPE_NAMED";
-    case TICK_AST_EXPORT_STMT:
-      return "EXPORT_STMT";
     default:
       return "UNKNOWN";
   }

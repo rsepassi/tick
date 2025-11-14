@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <string.h>
 
 #include "tick.h"
 #include "tick_runtime_embedded.h"
@@ -79,19 +80,19 @@ static tick_err_t write_ident(tick_writer_t* w, tick_buf_t name) {
 // extern: no prefix (links to external C symbol)
 // pub: no prefix (exported for C code to use)
 static tick_err_t write_decl_name(tick_writer_t* w, tick_ast_node_t* decl) {
-  if (decl->data.decl.tmpid == 0) {
+  if (decl->decl.tmpid == 0) {
     // User-named variable
-    bool is_extern = decl->data.decl.quals.is_extern;
-    bool is_pub = decl->data.decl.quals.is_pub;
+    bool is_extern = decl->decl.quals.is_extern;
+    bool is_pub = decl->decl.quals.is_pub;
 
     // Skip prefix for extern and pub declarations so they can link with C code
     if (!is_extern && !is_pub) {
       CHECK_OK(write_str(w, "__u_"));
     }
-    return write_ident(w, decl->data.decl.name);
+    return write_ident(w, decl->decl.name);
   } else {
     // Compiler-generated temporary
-    return write_fmt(w, "__tmp%u", decl->data.decl.tmpid);
+    return write_fmt(w, "__tmp%u", decl->decl.tmpid);
   }
 }
 
@@ -101,13 +102,12 @@ static tick_err_t write_array_suffix(tick_writer_t* w, tick_ast_node_t* type) {
 
   if (type->kind == TICK_AST_TYPE_ARRAY) {
     // Emit array size
-    if (type->data.type_array.size) {
-      CHECK(type->data.type_array.size->kind == TICK_AST_LITERAL,
+    if (type->type_array.size) {
+      CHECK(type->type_array.size->kind == TICK_AST_LITERAL,
             "array size must be literal (no VLAs)");
       CHECK_OK(write_str(w, "["));
       CHECK_OK(write_fmt(w, "%llu",
-                         (unsigned long long)type->data.type_array.size->data
-                             .literal.data.uint_value));
+                         (unsigned long long)type->type_array.size->literal.data.uint_value));
       CHECK_OK(write_str(w, "]"));
     }
   }
@@ -226,7 +226,7 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
   switch (type->kind) {
     case TICK_AST_TYPE_NAMED: {
       // Map builtin types to C types using enum
-      switch (type->data.type_named.builtin_type) {
+      switch (type->type_named.builtin_type) {
         case TICK_TYPE_I8:
           return write_str(w, "int8_t");
         case TICK_TYPE_I16:
@@ -254,8 +254,11 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
         case TICK_TYPE_USER_DEFINED:
           // User-defined types - emit with __u_ prefix to match typedef
           CHECK_OK(write_str(w, "__u_"));
-          return write_ident(w, type->data.type_named.name);
+          return write_ident(w, type->type_named.name);
         case TICK_TYPE_UNKNOWN:
+          DLOG("Type not resolved: %.*s (line %zu:%zu)",
+               (int)type->type_named.name.sz, type->type_named.name.buf,
+               type->loc.line, type->loc.col);
           CHECK(0, "type not resolved - analysis pass missing?");
         default:
           CHECK(0, "unknown builtin type");
@@ -266,7 +269,7 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
       // Special case: pointer to function type
       // In Tick: *fn(params) return_type
       // In C: return_type (*)(params)
-      tick_ast_node_t* pointee = type->data.type_pointer.pointee_type;
+      tick_ast_node_t* pointee = type->type_pointer.pointee_type;
       if (pointee && pointee->kind == TICK_AST_TYPE_FUNCTION) {
         // Don't add extra *, the function type handling already includes it
         return codegen_type(pointee, w);
@@ -279,7 +282,7 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
     case TICK_AST_TYPE_ARRAY: {
       // For arrays, only emit the element type
       // The array brackets need to go after the name in C syntax
-      return codegen_type(type->data.type_array.element_type, w);
+      return codegen_type(type->type_array.element_type, w);
     }
 
     case TICK_AST_TYPE_FUNCTION: {
@@ -287,11 +290,11 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
       // It must be converted to a function pointer by wrapping in TYPE_POINTER
       // or used in a function declaration context
       // For now, we'll treat bare function types as function pointers
-      CHECK_OK(codegen_type(type->data.type_function.return_type, w));
+      CHECK_OK(codegen_type(type->type_function.return_type, w));
       CHECK_OK(write_str(w, " (*)("));
 
       // Emit parameter types
-      tick_ast_node_t* param = type->data.type_function.params;
+      tick_ast_node_t* param = type->type_function.params;
       // In C, empty parameter list should be (void) not ()
       if (!param) {
         CHECK_OK(write_str(w, "void"));
@@ -302,7 +305,7 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
             CHECK_OK(write_str(w, ", "));
           }
           first = false;
-          CHECK_OK(codegen_type(param->data.param.type, w));
+          CHECK_OK(codegen_type(param->param.type, w));
           param = param->next;
         }
       }
@@ -336,23 +339,23 @@ static const char* get_builtin_function_name(tick_builtin_t builtin,
                                              tick_builtin_type_t type);
 
 static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
-  switch (node->data.literal.kind) {
+  switch (node->literal.kind) {
     case TICK_LIT_UINT:
       return write_fmt(ctx->writer, "%llu",
-                       (unsigned long long)node->data.literal.data.uint_value);
+                       (unsigned long long)node->literal.data.uint_value);
 
     case TICK_LIT_INT:
       return write_fmt(ctx->writer, "%lld",
-                       (long long)node->data.literal.data.int_value);
+                       (long long)node->literal.data.int_value);
 
     case TICK_LIT_BOOL:
       return write_str(ctx->writer,
-                       node->data.literal.data.bool_value ? "true" : "false");
+                       node->literal.data.bool_value ? "true" : "false");
 
     case TICK_LIT_STRING: {
       // Emit as const char* cast of u8 array: (const char*)(uint8_t[]){byte1,
       // byte2, ..., 0}
-      tick_buf_t str = node->data.literal.data.string_value;
+      tick_buf_t str = node->literal.data.string_value;
       CHECK_OK(write_str(ctx->writer, "(const char*)(uint8_t[]){"));
 
       for (usz i = 0; i < str.sz; i++) {
@@ -384,9 +387,9 @@ static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 static tick_err_t codegen_identifier(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
   // Check if this is an AT builtin
-  if (node->data.identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
+  if (node->identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
     // Emit runtime function name based on builtin enum
-    switch (node->data.identifier_expr.at_builtin) {
+    switch (node->identifier_expr.at_builtin) {
       case TICK_AT_BUILTIN_DBG:
         return write_str(ctx->writer, "tick_debug_log");
       default:
@@ -394,23 +397,44 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
     }
   }
 
-  // User-written identifiers get __u_ prefix
-  // TODO: This should check if the identifier refers to an extern/pub
-  // declaration For now, we'll prefix all identifiers except when they're known
-  // to be extern/pub A proper solution would require a symbol table lookup
-  CHECK_OK(write_str(ctx->writer, "__u_"));
-  return write_ident(ctx->writer, node->data.identifier_expr.name);
+  // Check if identifier refers to a pub or extern declaration or a temporary
+  // Symbol table lookup is cached by analysis pass
+  bool skip_prefix = false;
+  if (node->identifier_expr.symbol && node->identifier_expr.symbol->decl) {
+    tick_ast_node_t* sym_node = node->identifier_expr.symbol->decl;
+
+    // Check if this is a compiler-generated temporary
+    if (sym_node->kind == TICK_AST_DECL && sym_node->decl.tmpid > 0) {
+      // Emit __tmpN for temporaries
+      return write_fmt(ctx->writer, "__tmp%u", sym_node->decl.tmpid);
+    }
+
+    // Skip __u_ prefix for pub and extern declarations so they can link with C code
+    if (sym_node->kind == TICK_AST_DECL) {
+      bool is_extern = sym_node->decl.quals.is_extern;
+      bool is_pub = sym_node->decl.quals.is_pub;
+      skip_prefix = is_extern || is_pub;
+    }
+    // PARAM nodes and other kinds always get __u_ prefix
+  }
+  // If symbol not found, default to adding __u_ prefix
+
+  if (!skip_prefix) {
+    CHECK_OK(write_str(ctx->writer, "__u_"));
+  }
+
+  return write_ident(ctx->writer, node->identifier_expr.name);
 }
 
 static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
                                       codegen_ctx_t* ctx) {
   // Check if this is an arithmetic/shift operation that needs a builtin call
-  tick_ast_node_t* resolved_type = node->data.binary_expr.resolved_type;
+  tick_ast_node_t* resolved_type = node->binary_expr.resolved_type;
 
   if (resolved_type && resolved_type->kind == TICK_AST_TYPE_NAMED) {
-    tick_builtin_type_t type = resolved_type->data.type_named.builtin_type;
+    tick_builtin_type_t type = resolved_type->type_named.builtin_type;
     tick_builtin_t builtin =
-        map_binop_to_builtin(node->data.binary_expr.op, type);
+        map_binop_to_builtin(node->binary_expr.op, type);
 
     if (builtin != 0) {
       // Emit as builtin function call
@@ -419,9 +443,9 @@ static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
 
       CHECK_OK(write_str(ctx->writer, func_name));
       CHECK_OK(write_str(ctx->writer, "("));
-      CHECK_OK(codegen_expr(node->data.binary_expr.left, ctx));
+      CHECK_OK(codegen_expr(node->binary_expr.left, ctx));
       CHECK_OK(write_str(ctx->writer, ", "));
-      CHECK_OK(codegen_expr(node->data.binary_expr.right, ctx));
+      CHECK_OK(codegen_expr(node->binary_expr.right, ctx));
       CHECK_OK(write_str(ctx->writer, ")"));
       return TICK_OK;
     }
@@ -429,22 +453,22 @@ static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
 
   // For unsigned wrapping operations or non-arithmetic operations,
   // emit direct C operator (comparisons, logical, bitwise)
-  CHECK_OK(codegen_expr(node->data.binary_expr.left, ctx));
+  CHECK_OK(codegen_expr(node->binary_expr.left, ctx));
   CHECK_OK(write_str(ctx->writer, " "));
-  CHECK_OK(write_str(ctx->writer, binop_to_c(node->data.binary_expr.op)));
+  CHECK_OK(write_str(ctx->writer, binop_to_c(node->binary_expr.op)));
   CHECK_OK(write_str(ctx->writer, " "));
-  CHECK_OK(codegen_expr(node->data.binary_expr.right, ctx));
+  CHECK_OK(codegen_expr(node->binary_expr.right, ctx));
   return TICK_OK;
 }
 
 static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
   // Check if this is negation with a signed type (needs checked_neg builtin)
-  if (node->data.unary_expr.op == UNOP_NEG) {
-    tick_ast_node_t* resolved_type = node->data.unary_expr.resolved_type;
+  if (node->unary_expr.op == UNOP_NEG) {
+    tick_ast_node_t* resolved_type = node->unary_expr.resolved_type;
 
     if (resolved_type && resolved_type->kind == TICK_AST_TYPE_NAMED) {
-      tick_builtin_type_t type = resolved_type->data.type_named.builtin_type;
+      tick_builtin_type_t type = resolved_type->type_named.builtin_type;
       bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
 
       if (is_signed) {
@@ -455,7 +479,7 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
 
         CHECK_OK(write_str(ctx->writer, func_name));
         CHECK_OK(write_str(ctx->writer, "("));
-        CHECK_OK(codegen_expr(node->data.unary_expr.operand, ctx));
+        CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
         CHECK_OK(write_str(ctx->writer, ")"));
         return TICK_OK;
       }
@@ -463,25 +487,38 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
   }
 
   // For other unary operations, emit direct C operator
-  CHECK_OK(write_str(ctx->writer, unop_to_c(node->data.unary_expr.op)));
-  CHECK_OK(codegen_expr(node->data.unary_expr.operand, ctx));
+  CHECK_OK(write_str(ctx->writer, unop_to_c(node->unary_expr.op)));
+  CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
   return TICK_OK;
 }
 
 static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_expr(node->data.call_expr.callee, ctx));
+  // Check if this is a @dbg call (tick_debug_log)
+  bool is_dbg_call = node->call_expr.callee &&
+                     node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR &&
+                     node->call_expr.callee->identifier_expr.at_builtin == TICK_AT_BUILTIN_DBG;
+
+  CHECK_OK(codegen_expr(node->call_expr.callee, ctx));
   CHECK_OK(write_str(ctx->writer, "("));
 
   // Arguments are already in correct order (reversed by analysis pass)
-  tick_ast_node_t* arg = node->data.call_expr.args;
+  tick_ast_node_t* arg = node->call_expr.args;
   bool first = true;
+  int arg_index = 0;
   while (arg) {
     if (!first) {
       CHECK_OK(write_str(ctx->writer, ", "));
     }
     first = false;
+
+    // For @dbg, cast the first argument (format string) from uint8_t* to const char*
+    if (is_dbg_call && arg_index == 0) {
+      CHECK_OK(write_str(ctx->writer, "(const char*)"));
+    }
+
     CHECK_OK(codegen_expr(arg, ctx));
     arg = arg->next;
+    arg_index++;
   }
 
   CHECK_OK(write_str(ctx->writer, ")"));
@@ -490,18 +527,18 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
 static tick_err_t codegen_field_access(tick_ast_node_t* node,
                                        codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_expr(node->data.field_access_expr.object, ctx));
-  const char* op = node->data.field_access_expr.is_arrow ? "->" : ".";
+  CHECK_OK(codegen_expr(node->field_access_expr.object, ctx));
+  const char* op = node->field_access_expr.is_arrow ? "->" : ".";
   CHECK_OK(write_str(ctx->writer, op));
-  CHECK_OK(write_ident(ctx->writer, node->data.field_access_expr.field_name));
+  CHECK_OK(write_ident(ctx->writer, node->field_access_expr.field_name));
   return TICK_OK;
 }
 
 static tick_err_t codegen_index_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_expr(node->data.index_expr.array, ctx));
+  CHECK_OK(codegen_expr(node->index_expr.array, ctx));
   CHECK_OK(write_str(ctx->writer, "["));
-  CHECK_OK(codegen_expr(node->data.index_expr.index, ctx));
+  CHECK_OK(codegen_expr(node->index_expr.index, ctx));
   CHECK_OK(write_str(ctx->writer, "]"));
   return TICK_OK;
 }
@@ -651,25 +688,23 @@ static tick_builtin_type_t get_expr_builtin_type(tick_ast_node_t* expr) {
 
   switch (expr->kind) {
     case TICK_AST_BINARY_EXPR:
-      if (expr->data.binary_expr.resolved_type &&
-          expr->data.binary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->data.binary_expr.resolved_type->data.type_named
-            .builtin_type;
+      if (expr->binary_expr.resolved_type &&
+          expr->binary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
+        return expr->binary_expr.resolved_type->type_named.builtin_type;
       }
       break;
 
     case TICK_AST_UNARY_EXPR:
-      if (expr->data.unary_expr.resolved_type &&
-          expr->data.unary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->data.unary_expr.resolved_type->data.type_named
-            .builtin_type;
+      if (expr->unary_expr.resolved_type &&
+          expr->unary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
+        return expr->unary_expr.resolved_type->type_named.builtin_type;
       }
       break;
 
     case TICK_AST_CAST_EXPR:
-      if (expr->data.cast_expr.resolved_type &&
-          expr->data.cast_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->data.cast_expr.resolved_type->data.type_named.builtin_type;
+      if (expr->cast_expr.resolved_type &&
+          expr->cast_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
+        return expr->cast_expr.resolved_type->type_named.builtin_type;
       }
       break;
 
@@ -685,25 +720,25 @@ static tick_builtin_type_t get_expr_builtin_type(tick_ast_node_t* expr) {
 
 static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   // Get destination type (must be resolved by analysis pass)
-  if (!node->data.cast_expr.type ||
-      node->data.cast_expr.type->kind != TICK_AST_TYPE_NAMED) {
+  if (!node->cast_expr.type ||
+      node->cast_expr.type->kind != TICK_AST_TYPE_NAMED) {
     // Non-builtin type (pointer, struct, etc.) - emit bare C cast
     CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->data.cast_expr.type, ctx->writer));
+    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->data.cast_expr.expr, ctx));
+    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
     return TICK_OK;
   }
 
   tick_builtin_type_t dst_type =
-      node->data.cast_expr.type->data.type_named.builtin_type;
+      node->cast_expr.type->type_named.builtin_type;
 
   CHECK(dst_type != TICK_TYPE_UNKNOWN,
         "cast destination type not resolved - analysis pass missing?");
 
   // Get source type from the expression being cast
   tick_builtin_type_t src_type =
-      get_expr_builtin_type(node->data.cast_expr.expr);
+      get_expr_builtin_type(node->cast_expr.expr);
 
   // Decision tree for cast code generation:
 
@@ -712,9 +747,9 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   //    we can't determine if checked cast is needed - emit bare C cast
   if (src_type == TICK_TYPE_UNKNOWN) {
     CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->data.cast_expr.type, ctx->writer));
+    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->data.cast_expr.expr, ctx));
+    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
     return TICK_OK;
   }
 
@@ -723,18 +758,18 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   if (!is_numeric_builtin_type(src_type) ||
       !is_numeric_builtin_type(dst_type)) {
     CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->data.cast_expr.type, ctx->writer));
+    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->data.cast_expr.expr, ctx));
+    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
     return TICK_OK;
   }
 
   // 3. If it's a widening cast (always safe), emit bare C cast
   if (is_widening_cast(src_type, dst_type)) {
     CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->data.cast_expr.type, ctx->writer));
+    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->data.cast_expr.expr, ctx));
+    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
     return TICK_OK;
   }
 
@@ -745,7 +780,7 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   // Emit: tick_checked_cast_src_dst(expr)
   CHECK_OK(write_str(ctx->writer, cast_func));
   CHECK_OK(write_str(ctx->writer, "("));
-  CHECK_OK(codegen_expr(node->data.cast_expr.expr, ctx));
+  CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
   CHECK_OK(write_str(ctx->writer, ")"));
 
   return TICK_OK;
@@ -950,28 +985,28 @@ static const char* get_builtin_function_name(tick_builtin_t builtin,
 static tick_err_t codegen_builtin_call(tick_ast_node_t* node,
                                        codegen_ctx_t* ctx) {
   // Special handling for CHECKED_CAST - needs both source and dest type
-  CHECK(node->data.builtin_call.builtin != TICK_BUILTIN_CHECKED_CAST,
+  CHECK(node->builtin_call.builtin != TICK_BUILTIN_CHECKED_CAST,
         "checked cast not yet implemented");
 
   // Get the builtin type
-  CHECK(node->data.builtin_call.type &&
-            node->data.builtin_call.type->kind == TICK_AST_TYPE_NAMED,
+  CHECK(node->builtin_call.type &&
+            node->builtin_call.type->kind == TICK_AST_TYPE_NAMED,
         "builtin call missing or invalid type");
 
   tick_builtin_type_t type =
-      node->data.builtin_call.type->data.type_named.builtin_type;
+      node->builtin_call.type->type_named.builtin_type;
   CHECK(type != TICK_TYPE_UNKNOWN,
         "builtin call type not resolved - analysis pass missing?");
 
   const char* func_name =
-      get_builtin_function_name(node->data.builtin_call.builtin, type);
+      get_builtin_function_name(node->builtin_call.builtin, type);
   CHECK(func_name, "unknown builtin or type for builtin call");
 
   // Emit function call
   CHECK_OK(write_str(ctx->writer, func_name));
   CHECK_OK(write_str(ctx->writer, "("));
 
-  tick_ast_node_t* arg = node->data.builtin_call.args;
+  tick_ast_node_t* arg = node->builtin_call.args;
   bool first = true;
   while (arg) {
     if (!first) {
@@ -1020,16 +1055,23 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       // decomposed complex expressions)
 
       CHECK_OK(write_str(ctx->writer, "("));
-      CHECK_OK(codegen_type(expr->data.struct_init_expr.type, ctx->writer));
+      CHECK_OK(codegen_type(expr->struct_init_expr.type, ctx->writer));
       CHECK_OK(write_str(ctx->writer, ") { "));
 
-      tick_ast_node_t* field = expr->data.struct_init_expr.fields;
+      tick_ast_node_t* field = expr->struct_init_expr.fields;
       bool first = true;
       while (field) {
         CHECK(field->kind == TICK_AST_STRUCT_INIT_FIELD,
               "expected STRUCT_INIT_FIELD in struct initializer");
 
-        tick_ast_node_t* value = field->data.struct_init_field.value;
+        tick_ast_node_t* value = field->struct_init_field.value;
+
+        // Validate that value is simple (LITERAL or IDENTIFIER_EXPR)
+        // This should be guaranteed by analysis pass decomposition
+        CHECK(value->kind == TICK_AST_LITERAL ||
+              value->kind == TICK_AST_IDENTIFIER_EXPR,
+              "struct field initializer must be simple (LITERAL or IDENTIFIER_EXPR), "
+              "got %d - analysis pass should have decomposed this", value->kind);
 
         if (!first) {
           CHECK_OK(write_str(ctx->writer, ", "));
@@ -1039,7 +1081,7 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
         // Emit: .fieldname = value
         CHECK_OK(write_str(ctx->writer, "."));
         CHECK_OK(
-            write_ident(ctx->writer, field->data.struct_init_field.field_name));
+            write_ident(ctx->writer, field->struct_init_field.field_name));
         CHECK_OK(write_str(ctx->writer, " = "));
         CHECK_OK(codegen_expr(value, ctx));
 
@@ -1056,9 +1098,16 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       CHECK_OK(write_str(ctx->writer, "{ "));
 
       // Iterate elements in source order
-      tick_ast_node_t* elem = expr->data.array_init_expr.elements;
+      tick_ast_node_t* elem = expr->array_init_expr.elements;
       bool first = true;
       while (elem) {
+        // Validate that element is simple (LITERAL or IDENTIFIER_EXPR)
+        // This should be guaranteed by analysis pass decomposition
+        CHECK(elem->kind == TICK_AST_LITERAL ||
+              elem->kind == TICK_AST_IDENTIFIER_EXPR,
+              "array element initializer must be simple (LITERAL or IDENTIFIER_EXPR), "
+              "got %d - analysis pass should have decomposed this", elem->kind);
+
         if (!first) {
           CHECK_OK(write_str(ctx->writer, ", "));
         }
@@ -1089,7 +1138,7 @@ static tick_err_t codegen_block_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "{\n"));
 
-  tick_ast_node_t* stmt = node->data.block_stmt.stmts;
+  tick_ast_node_t* stmt = node->block_stmt.stmts;
   while (stmt) {
     CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
     stmt = stmt->next;
@@ -1105,9 +1154,9 @@ static tick_err_t codegen_return_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "return"));
-  if (node->data.return_stmt.value) {
+  if (node->return_stmt.value) {
     CHECK_OK(write_str(ctx->writer, " "));
-    CHECK_OK(codegen_expr(node->data.return_stmt.value, ctx));
+    CHECK_OK(codegen_expr(node->return_stmt.value, ctx));
   }
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
@@ -1120,29 +1169,75 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
 
+  // Emit static qualifier if present (for temporaries)
+  if (node->decl.quals.is_static) {
+    CHECK_OK(write_str(ctx->writer, "static const "));
+  }
+
   // Emit volatile qualifier if present
-  if (node->data.decl.quals.is_volatile) {
+  if (node->decl.quals.is_volatile) {
     CHECK_OK(write_str(ctx->writer, "volatile "));
   }
 
-  // Emit type
-  CHECK_OK(codegen_type(node->data.decl.type, ctx->writer));
+  // For static const string literals, we need special handling:
+  // Instead of: static const uint8_t* __tmp1 = (const char*)(uint8_t[]){...};
+  // We emit: static const uint8_t __tmp1[] = {...};
+  // The array decays to pointer naturally, avoiding the "not a compile-time constant" error
+  bool is_static_string = node->decl.quals.is_static &&
+                          node->decl.init &&
+                          node->decl.init->kind == TICK_AST_LITERAL &&
+                          node->decl.init->literal.kind == TICK_LIT_STRING;
+
+  // Emit type (for static strings, emit pointee type only)
+  if (is_static_string) {
+    // String literals have type *u8, so we need to emit just u8 (the pointee type)
+    tick_ast_node_t* type = node->decl.type;
+    CHECK(type && type->kind == TICK_AST_TYPE_POINTER, "static string should have pointer type");
+    CHECK_OK(codegen_type(type->type_pointer.pointee_type, ctx->writer));
+  } else {
+    CHECK_OK(codegen_type(node->decl.type, ctx->writer));
+  }
   CHECK_OK(write_str(ctx->writer, " "));
 
   // Emit name (with appropriate prefix based on tmpid)
   CHECK_OK(write_decl_name(ctx->writer, node));
-  CHECK_OK(write_array_suffix(ctx->writer, node->data.decl.type));
+
+  if (is_static_string) {
+    // Emit array suffix for static strings
+    CHECK_OK(write_str(ctx->writer, "[]"));
+  } else {
+    CHECK_OK(write_array_suffix(ctx->writer, node->decl.type));
+  }
 
   // Emit initializer if present and not undefined
-  if (node->data.decl.init) {
+  if (node->decl.init) {
     // Check if init is undefined literal
     bool is_undefined =
-        (node->data.decl.init->kind == TICK_AST_LITERAL &&
-         node->data.decl.init->data.literal.kind == TICK_LIT_UNDEFINED);
+        (node->decl.init->kind == TICK_AST_LITERAL &&
+         node->decl.init->literal.kind == TICK_LIT_UNDEFINED);
 
     if (!is_undefined) {
       CHECK_OK(write_str(ctx->writer, " = "));
-      CHECK_OK(codegen_expr(node->data.decl.init, ctx));
+
+      if (is_static_string) {
+        // For static const string temporaries, emit as u8 array without cast
+        // This makes it a compile-time constant
+        tick_buf_t str = node->decl.init->literal.data.string_value;
+        CHECK_OK(write_str(ctx->writer, "{"));
+        for (usz i = 0; i < str.sz; i++) {
+          if (i > 0) {
+            CHECK_OK(write_str(ctx->writer, ", "));
+          }
+          CHECK_OK(write_fmt(ctx->writer, "%u", (unsigned int)str.buf[i]));
+        }
+        // Add null terminator
+        if (str.sz > 0) {
+          CHECK_OK(write_str(ctx->writer, ", "));
+        }
+        CHECK_OK(write_str(ctx->writer, "0}"));
+      } else {
+        CHECK_OK(codegen_expr(node->decl.init, ctx));
+      }
     }
   }
 
@@ -1154,9 +1249,9 @@ static tick_err_t codegen_assign_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
                                       int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
-  CHECK_OK(codegen_expr(node->data.assign_stmt.lhs, ctx));
+  CHECK_OK(codegen_expr(node->assign_stmt.lhs, ctx));
   CHECK_OK(write_str(ctx->writer, " = "));
-  CHECK_OK(codegen_expr(node->data.assign_stmt.rhs, ctx));
+  CHECK_OK(codegen_expr(node->assign_stmt.rhs, ctx));
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
@@ -1166,7 +1261,7 @@ static tick_err_t codegen_unused_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "TICK_UNUSED("));
-  CHECK_OK(codegen_expr(node->data.unused_stmt.expr, ctx));
+  CHECK_OK(codegen_expr(node->unused_stmt.expr, ctx));
   CHECK_OK(write_str(ctx->writer, ");\n"));
   return TICK_OK;
 }
@@ -1175,7 +1270,7 @@ static tick_err_t codegen_expr_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
                                     int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
-  CHECK_OK(codegen_expr(node->data.expr_stmt.expr, ctx));
+  CHECK_OK(codegen_expr(node->expr_stmt.expr, ctx));
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
@@ -1185,14 +1280,14 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "if ("));
-  CHECK_OK(codegen_expr(node->data.if_stmt.condition, ctx));
+  CHECK_OK(codegen_expr(node->if_stmt.condition, ctx));
   CHECK_OK(write_str(ctx->writer, ") "));
 
   // Then block (strip outer braces, we add them)
-  if (node->data.if_stmt.then_block->kind == TICK_AST_BLOCK_STMT) {
+  if (node->if_stmt.then_block->kind == TICK_AST_BLOCK_STMT) {
     CHECK_OK(write_str(ctx->writer, "{\n"));
     tick_ast_node_t* stmt =
-        node->data.if_stmt.then_block->data.block_stmt.stmts;
+        node->if_stmt.then_block->block_stmt.stmts;
     while (stmt) {
       CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
       stmt = stmt->next;
@@ -1201,20 +1296,20 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
     CHECK_OK(write_str(ctx->writer, "}"));
   } else {
     CHECK_OK(write_str(ctx->writer, "\n"));
-    CHECK_OK(codegen_stmt(node->data.if_stmt.then_block, ctx, indent + 1));
+    CHECK_OK(codegen_stmt(node->if_stmt.then_block, ctx, indent + 1));
     CHECK_OK(write_indent(ctx->writer, indent));
   }
 
   // Else block if present
-  if (node->data.if_stmt.else_block) {
+  if (node->if_stmt.else_block) {
     CHECK_OK(write_str(ctx->writer, " else "));
-    if (node->data.if_stmt.else_block->kind == TICK_AST_IF_STMT) {
+    if (node->if_stmt.else_block->kind == TICK_AST_IF_STMT) {
       // else if - no braces
-      CHECK_OK(codegen_stmt(node->data.if_stmt.else_block, ctx, 0));
-    } else if (node->data.if_stmt.else_block->kind == TICK_AST_BLOCK_STMT) {
+      CHECK_OK(codegen_stmt(node->if_stmt.else_block, ctx, 0));
+    } else if (node->if_stmt.else_block->kind == TICK_AST_BLOCK_STMT) {
       CHECK_OK(write_str(ctx->writer, "{\n"));
       tick_ast_node_t* stmt =
-          node->data.if_stmt.else_block->data.block_stmt.stmts;
+          node->if_stmt.else_block->block_stmt.stmts;
       while (stmt) {
         CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
         stmt = stmt->next;
@@ -1223,7 +1318,7 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
       CHECK_OK(write_str(ctx->writer, "}\n"));
     } else {
       CHECK_OK(write_str(ctx->writer, "\n"));
-      CHECK_OK(codegen_stmt(node->data.if_stmt.else_block, ctx, indent + 1));
+      CHECK_OK(codegen_stmt(node->if_stmt.else_block, ctx, indent + 1));
     }
   } else {
     CHECK_OK(write_str(ctx->writer, "\n"));
@@ -1253,7 +1348,7 @@ static tick_err_t codegen_goto_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "goto "));
-  CHECK_OK(write_ident(ctx->writer, node->data.goto_stmt.label));
+  CHECK_OK(write_ident(ctx->writer, node->goto_stmt.label));
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
@@ -1262,7 +1357,7 @@ static tick_err_t codegen_label_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
                                      int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
-  CHECK_OK(write_ident(ctx->writer, node->data.label_stmt.label));
+  CHECK_OK(write_ident(ctx->writer, node->label_stmt.label));
   CHECK_OK(write_str(ctx->writer, ":\n"));
   return TICK_OK;
 }
@@ -1272,8 +1367,8 @@ static tick_err_t codegen_for_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
 
   // Emit init statement before the loop (if present)
-  if (node->data.for_stmt.init_stmt) {
-    CHECK_OK(codegen_stmt(node->data.for_stmt.init_stmt, ctx, indent));
+  if (node->for_stmt.init_stmt) {
+    CHECK_OK(codegen_stmt(node->for_stmt.init_stmt, ctx, indent));
   }
 
   // All for loops become while (1)
@@ -1281,31 +1376,31 @@ static tick_err_t codegen_for_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_str(ctx->writer, "while (1) {\n"));
 
   // Emit condition check as if (!condition) break; (if present)
-  if (node->data.for_stmt.condition) {
+  if (node->for_stmt.condition) {
     CHECK_OK(write_indent(ctx->writer, indent + 1));
     CHECK_OK(write_str(ctx->writer, "if (!("));
-    CHECK_OK(codegen_expr(node->data.for_stmt.condition, ctx));
+    CHECK_OK(codegen_expr(node->for_stmt.condition, ctx));
     CHECK_OK(write_str(ctx->writer, ")) break;\n"));
   }
 
   // Emit loop body
-  if (node->data.for_stmt.body) {
-    if (node->data.for_stmt.body->kind == TICK_AST_BLOCK_STMT) {
+  if (node->for_stmt.body) {
+    if (node->for_stmt.body->kind == TICK_AST_BLOCK_STMT) {
       // Emit statements directly without extra braces
-      tick_ast_node_t* stmt = node->data.for_stmt.body->data.block_stmt.stmts;
+      tick_ast_node_t* stmt = node->for_stmt.body->block_stmt.stmts;
       while (stmt) {
         CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
         stmt = stmt->next;
       }
     } else {
       // Single statement body
-      CHECK_OK(codegen_stmt(node->data.for_stmt.body, ctx, indent + 1));
+      CHECK_OK(codegen_stmt(node->for_stmt.body, ctx, indent + 1));
     }
   }
 
   // Emit step statement at end of loop (if present)
-  if (node->data.for_stmt.step_stmt) {
-    CHECK_OK(codegen_stmt(node->data.for_stmt.step_stmt, ctx, indent + 1));
+  if (node->for_stmt.step_stmt) {
+    CHECK_OK(codegen_stmt(node->for_stmt.step_stmt, ctx, indent + 1));
   }
 
   // Close while loop
@@ -1320,19 +1415,19 @@ static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "switch ("));
-  CHECK_OK(codegen_expr(node->data.switch_stmt.value, ctx));
+  CHECK_OK(codegen_expr(node->switch_stmt.value, ctx));
   CHECK_OK(write_str(ctx->writer, ") {\n"));
 
   // Iterate through cases
-  tick_ast_node_t* case_node = node->data.switch_stmt.cases;
+  tick_ast_node_t* case_node = node->switch_stmt.cases;
   while (case_node) {
-    if (case_node->data.switch_case.values == NULL) {
+    if (case_node->switch_case.values == NULL) {
       // Default case
       CHECK_OK(write_indent(ctx->writer, indent + 1));
       CHECK_OK(write_str(ctx->writer, "default:\n"));
     } else {
       // Regular case with values
-      tick_ast_node_t* value = case_node->data.switch_case.values;
+      tick_ast_node_t* value = case_node->switch_case.values;
       while (value) {
         CHECK_OK(write_indent(ctx->writer, indent + 1));
         CHECK_OK(write_str(ctx->writer, "case "));
@@ -1347,7 +1442,7 @@ static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
     CHECK_OK(write_str(ctx->writer, "{\n"));
 
     // Emit case statements
-    tick_ast_node_t* stmt = case_node->data.switch_case.stmts;
+    tick_ast_node_t* stmt = case_node->switch_case.stmts;
     while (stmt) {
       CHECK_OK(codegen_stmt(stmt, ctx, indent + 2));
       stmt = stmt->next;
@@ -1407,7 +1502,7 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
     case TICK_AST_DECL:
       // Declaration as statement (let/var)
       return codegen_let_or_var_stmt(stmt, ctx, indent,
-                                     stmt->data.decl.quals.is_var);
+                                     stmt->decl.quals.is_var);
 
     // High-level statements that must be lowered before codegen
     case TICK_AST_DEFER_STMT:
@@ -1443,7 +1538,7 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
 // Emit struct declaration to header or C file
 static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
                                       bool full_definition) {
-  tick_ast_node_t* struct_node = decl->data.decl.init;
+  tick_ast_node_t* struct_node = decl->decl.init;
   CHECK(struct_node && struct_node->kind == TICK_AST_STRUCT_DECL,
         "expected STRUCT_DECL");
 
@@ -1451,10 +1546,10 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
     // Forward declaration
     CHECK_OK(write_str(w, "typedef struct "));
     CHECK_OK(write_str(w, "__u_"));
-    CHECK_OK(write_ident(w, decl->data.decl.name));
+    CHECK_OK(write_ident(w, decl->decl.name));
     CHECK_OK(write_str(w, " "));
     CHECK_OK(write_str(w, "__u_"));
-    CHECK_OK(write_ident(w, decl->data.decl.name));
+    CHECK_OK(write_ident(w, decl->decl.name));
     CHECK_OK(write_str(w, ";\n"));
     return TICK_OK;
   }
@@ -1464,41 +1559,41 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
   CHECK_OK(write_str(w, "struct "));
 
   // Handle packed attribute
-  if (struct_node->data.struct_decl.is_packed) {
+  if (struct_node->struct_decl.is_packed) {
     CHECK_OK(write_str(w, "__attribute__((packed)) "));
   }
 
   // Handle struct-level alignment
-  if (struct_node->data.struct_decl.alignment) {
-    CHECK(struct_node->data.struct_decl.alignment->kind == TICK_AST_LITERAL,
+  if (struct_node->struct_decl.alignment) {
+    CHECK(struct_node->struct_decl.alignment->kind == TICK_AST_LITERAL,
           "alignment must be literal (analysis didn't evaluate constant)");
     uint64_t align_val =
-        struct_node->data.struct_decl.alignment->data.literal.data.uint_value;
+        struct_node->struct_decl.alignment->literal.data.uint_value;
     CHECK_OK(write_fmt(w, "__attribute__((aligned(%llu))) ",
                        (unsigned long long)align_val));
   }
 
   CHECK_OK(write_str(w, "__u_"));
-  CHECK_OK(write_ident(w, decl->data.decl.name));
+  CHECK_OK(write_ident(w, decl->decl.name));
   CHECK_OK(write_str(w, " {\n"));
 
   // Emit fields in source order
-  tick_ast_node_t* field = struct_node->data.struct_decl.fields;
+  tick_ast_node_t* field = struct_node->struct_decl.fields;
   while (field) {
     CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in struct");
 
     CHECK_OK(write_str(w, "  "));
-    CHECK_OK(codegen_type(field->data.field.type, w));
+    CHECK_OK(codegen_type(field->field.type, w));
     CHECK_OK(write_str(w, " "));
-    CHECK_OK(write_ident(w, field->data.field.name));
+    CHECK_OK(write_ident(w, field->field.name));
 
     // Handle per-field alignment
-    if (field->data.field.alignment) {
-      CHECK(field->data.field.alignment->kind == TICK_AST_LITERAL,
+    if (field->field.alignment) {
+      CHECK(field->field.alignment->kind == TICK_AST_LITERAL,
             "field alignment must be literal (analysis didn't evaluate "
             "constant)");
       uint64_t align_val =
-          field->data.field.alignment->data.literal.data.uint_value;
+          field->field.alignment->literal.data.uint_value;
       CHECK_OK(write_fmt(w, " __attribute__((aligned(%llu)))",
                          (unsigned long long)align_val));
     }
@@ -1514,7 +1609,7 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
 
 // Emit enum declaration to header or C file
 static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
-  tick_ast_node_t* enum_node = decl->data.decl.init;
+  tick_ast_node_t* enum_node = decl->decl.init;
   CHECK(enum_node && enum_node->kind == TICK_AST_ENUM_DECL,
         "expected ENUM_DECL");
 
@@ -1522,7 +1617,7 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
   CHECK_OK(write_str(w, "typedef enum {\n"));
 
   // Emit values (already in correct order from lowering pass)
-  tick_ast_node_t* value = enum_node->data.enum_decl.values;
+  tick_ast_node_t* value = enum_node->enum_decl.values;
   bool first = true;
   while (value) {
     CHECK(value->kind == TICK_AST_ENUM_VALUE,
@@ -1535,16 +1630,16 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
 
     CHECK_OK(write_str(w, "  "));
     CHECK_OK(write_str(w, "__u_"));
-    CHECK_OK(write_ident(w, decl->data.decl.name));
+    CHECK_OK(write_ident(w, decl->decl.name));
     CHECK_OK(write_str(w, "_"));
-    CHECK_OK(write_ident(w, value->data.enum_value.name));
+    CHECK_OK(write_ident(w, value->enum_value.name));
 
     // Value must be a literal (analysis calculated auto-increment)
-    if (value->data.enum_value.value) {
-      CHECK(value->data.enum_value.value->kind == TICK_AST_LITERAL,
+    if (value->enum_value.value) {
+      CHECK(value->enum_value.value->kind == TICK_AST_LITERAL,
             "enum value must be literal (analysis didn't calculate "
             "auto-increment)");
-      uint64_t val = value->data.enum_value.value->data.literal.data.uint_value;
+      uint64_t val = value->enum_value.value->literal.data.uint_value;
       CHECK_OK(write_fmt(w, " = %llu", (unsigned long long)val));
     } else {
       CHECK(0, "enum value is NULL (analysis didn't calculate auto-increment)");
@@ -1557,7 +1652,7 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
 
   // Cast to underlying type
   CHECK_OK(write_str(w, "__u_"));
-  CHECK_OK(write_ident(w, decl->data.decl.name));
+  CHECK_OK(write_ident(w, decl->decl.name));
   CHECK_OK(write_str(w, ";\n\n"));
 
   return TICK_OK;
@@ -1566,22 +1661,22 @@ static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
 // Emit union declaration to header or C file
 static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
                                      bool full_definition) {
-  tick_ast_node_t* union_node = decl->data.decl.init;
+  tick_ast_node_t* union_node = decl->decl.init;
   CHECK(union_node && union_node->kind == TICK_AST_UNION_DECL,
         "expected UNION_DECL");
 
   // Unions must have explicit tag type (lowering generates it if auto)
-  CHECK(union_node->data.union_decl.tag_type != NULL,
+  CHECK(union_node->union_decl.tag_type != NULL,
         "union has NULL tag_type (lowering didn't generate tag enum)");
 
   if (!full_definition) {
     // Forward declaration
     CHECK_OK(write_str(w, "typedef struct "));
     CHECK_OK(write_str(w, "__u_"));
-    CHECK_OK(write_ident(w, decl->data.decl.name));
+    CHECK_OK(write_ident(w, decl->decl.name));
     CHECK_OK(write_str(w, " "));
     CHECK_OK(write_str(w, "__u_"));
-    CHECK_OK(write_ident(w, decl->data.decl.name));
+    CHECK_OK(write_ident(w, decl->decl.name));
     CHECK_OK(write_str(w, ";\n"));
     return TICK_OK;
   }
@@ -1591,36 +1686,36 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
   CHECK_OK(write_str(w, "struct "));
 
   // Handle alignment
-  if (union_node->data.union_decl.alignment) {
-    CHECK(union_node->data.union_decl.alignment->kind == TICK_AST_LITERAL,
+  if (union_node->union_decl.alignment) {
+    CHECK(union_node->union_decl.alignment->kind == TICK_AST_LITERAL,
           "alignment must be literal (analysis didn't evaluate constant)");
     uint64_t align_val =
-        union_node->data.union_decl.alignment->data.literal.data.uint_value;
+        union_node->union_decl.alignment->literal.data.uint_value;
     CHECK_OK(write_fmt(w, "__attribute__((aligned(%llu))) ",
                        (unsigned long long)align_val));
   }
 
   CHECK_OK(write_str(w, "__u_"));
-  CHECK_OK(write_ident(w, decl->data.decl.name));
+  CHECK_OK(write_ident(w, decl->decl.name));
   CHECK_OK(write_str(w, " {\n"));
 
   // Emit tag field
   CHECK_OK(write_str(w, "  "));
-  CHECK_OK(codegen_type(union_node->data.union_decl.tag_type, w));
+  CHECK_OK(codegen_type(union_node->union_decl.tag_type, w));
   CHECK_OK(write_str(w, " tag;\n"));
 
   // Emit data union
   CHECK_OK(write_str(w, "  union {\n"));
 
   // Emit fields in source order
-  tick_ast_node_t* field = union_node->data.union_decl.fields;
+  tick_ast_node_t* field = union_node->union_decl.fields;
   while (field) {
     CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in union");
 
     CHECK_OK(write_str(w, "    "));
-    CHECK_OK(codegen_type(field->data.field.type, w));
+    CHECK_OK(codegen_type(field->field.type, w));
     CHECK_OK(write_str(w, " "));
-    CHECK_OK(write_ident(w, field->data.field.name));
+    CHECK_OK(write_ident(w, field->field.name));
     CHECK_OK(write_str(w, ";\n"));
 
     field = field->next;
@@ -1639,10 +1734,10 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
 static tick_err_t codegen_function_signature(tick_ast_node_t* decl,
                                              codegen_ctx_t* ctx,
                                              bool include_param_names) {
-  tick_ast_node_t* func = decl->data.decl.init;
+  tick_ast_node_t* func = decl->decl.init;
 
   // Return type
-  CHECK_OK(codegen_type(func->data.function.return_type, ctx->writer));
+  CHECK_OK(codegen_type(func->function.return_type, ctx->writer));
   CHECK_OK(write_str(ctx->writer, " "));
 
   // Function name (with __u_ prefix)
@@ -1650,7 +1745,7 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl,
 
   // Parameters in source order
   CHECK_OK(write_str(ctx->writer, "("));
-  tick_ast_node_t* param = func->data.function.params;
+  tick_ast_node_t* param = func->function.params;
 
   // In C, empty parameter list should be (void) not ()
   if (!param) {
@@ -1663,14 +1758,14 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl,
       }
       first = false;
 
-      CHECK_OK(codegen_type(param->data.param.type, ctx->writer));
+      CHECK_OK(codegen_type(param->param.type, ctx->writer));
 
       // Include parameter names only in implementation
       if (include_param_names) {
         CHECK_OK(write_str(ctx->writer, " "));
         // Parameter names get __u_ prefix
         CHECK_OK(write_str(ctx->writer, "__u_"));
-        CHECK_OK(write_ident(ctx->writer, param->data.param.name));
+        CHECK_OK(write_ident(ctx->writer, param->param.name));
       }
 
       param = param->next;
@@ -1691,7 +1786,7 @@ static tick_err_t codegen_function_decl_h(tick_ast_node_t* decl,
 
 static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
                                           codegen_ctx_t* ctx) {
-  tick_ast_node_t* func = decl->data.decl.init;
+  tick_ast_node_t* func = decl->decl.init;
 
   // Emit #line directive for function start
   CHECK_OK(write_line_directive(ctx, decl->loc.line));
@@ -1702,10 +1797,10 @@ static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
   CHECK_OK(write_str(ctx->writer, " "));
 
   // Function body
-  if (func->data.function.body) {
-    CHECK(func->data.function.body->kind == TICK_AST_BLOCK_STMT,
+  if (func->function.body) {
+    CHECK(func->function.body->kind == TICK_AST_BLOCK_STMT,
           "function body is not a block statement");
-    CHECK_OK(codegen_block_stmt(func->data.function.body, ctx, 0));
+    CHECK_OK(codegen_block_stmt(func->function.body, ctx, 0));
   } else {
     CHECK_OK(write_str(ctx->writer, ";\n"));
   }
@@ -1721,18 +1816,18 @@ static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
 static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
                                        codegen_ctx_t* ctx) {
   // Emit extern declaration in header
-  bool is_volatile = decl->data.decl.quals.is_volatile;
-  bool is_extern = decl->data.decl.quals.is_extern;
+  bool is_volatile = decl->decl.quals.is_volatile;
+  bool is_extern = decl->decl.quals.is_extern;
   UNUSED(is_extern);  // Both extern and non-extern emit the same in header
 
   CHECK_OK(write_str(ctx->writer, "extern "));
   if (is_volatile) {
     CHECK_OK(write_str(ctx->writer, "volatile "));
   }
-  CHECK_OK(codegen_type(decl->data.decl.type, ctx->writer));
+  CHECK_OK(codegen_type(decl->decl.type, ctx->writer));
   CHECK_OK(write_str(ctx->writer, " "));
   CHECK_OK(write_decl_name(ctx->writer, decl));
-  CHECK_OK(write_array_suffix(ctx->writer, decl->data.decl.type));
+  CHECK_OK(write_array_suffix(ctx->writer, decl->decl.type));
   CHECK_OK(write_str(ctx->writer, ";\n"));
 
   return TICK_OK;
@@ -1740,18 +1835,18 @@ static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
 
 static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
                                        codegen_ctx_t* ctx) {
-  bool is_volatile = decl->data.decl.quals.is_volatile;
-  bool is_extern = decl->data.decl.quals.is_extern;
-  tick_ast_node_t* type = decl->data.decl.type;
+  bool is_volatile = decl->decl.quals.is_volatile;
+  bool is_extern = decl->decl.quals.is_extern;
+  tick_ast_node_t* type = decl->decl.type;
 
   CHECK_OK(write_line_directive(ctx, decl->loc.line));
 
   // Special case: function pointer (pointer to function type)
   // In C: return_type (*name)(params)
   if (type && type->kind == TICK_AST_TYPE_POINTER &&
-      type->data.type_pointer.pointee_type &&
-      type->data.type_pointer.pointee_type->kind == TICK_AST_TYPE_FUNCTION) {
-    tick_ast_node_t* fn_type = type->data.type_pointer.pointee_type;
+      type->type_pointer.pointee_type &&
+      type->type_pointer.pointee_type->kind == TICK_AST_TYPE_FUNCTION) {
+    tick_ast_node_t* fn_type = type->type_pointer.pointee_type;
 
     if (is_extern) {
       CHECK_OK(write_str(ctx->writer, "extern "));
@@ -1762,13 +1857,13 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
 
     // Emit return type
     CHECK_OK(
-        codegen_type(fn_type->data.type_function.return_type, ctx->writer));
+        codegen_type(fn_type->type_function.return_type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, " (*"));
     CHECK_OK(write_decl_name(ctx->writer, decl));
     CHECK_OK(write_str(ctx->writer, ")("));
 
     // Emit parameter types
-    tick_ast_node_t* param = fn_type->data.type_function.params;
+    tick_ast_node_t* param = fn_type->type_function.params;
     // In C, empty parameter list should be (void) not ()
     if (!param) {
       CHECK_OK(write_str(ctx->writer, "void"));
@@ -1779,7 +1874,7 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
           CHECK_OK(write_str(ctx->writer, ", "));
         }
         first = false;
-        CHECK_OK(codegen_type(param->data.param.type, ctx->writer));
+        CHECK_OK(codegen_type(param->param.type, ctx->writer));
         param = param->next;
       }
     }
@@ -1804,15 +1899,15 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
 finish_decl:
 
   // Emit initializer only if not extern and if present and not undefined
-  if (!is_extern && decl->data.decl.init) {
+  if (!is_extern && decl->decl.init) {
     // Check if init is undefined literal
     bool is_undefined =
-        (decl->data.decl.init->kind == TICK_AST_LITERAL &&
-         decl->data.decl.init->data.literal.kind == TICK_LIT_UNDEFINED);
+        (decl->decl.init->kind == TICK_AST_LITERAL &&
+         decl->decl.init->literal.kind == TICK_LIT_UNDEFINED);
 
     if (!is_undefined) {
       CHECK_OK(write_str(ctx->writer, " = "));
-      CHECK_OK(codegen_expr(decl->data.decl.init, ctx));
+      CHECK_OK(codegen_expr(decl->decl.init, ctx));
     }
   }
 
@@ -1868,23 +1963,26 @@ tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
 
   // Single pass: Emit declarations in order
   // Lowering is responsible for inserting forward declarations and ordering
-  for (tick_ast_node_t* decl = module->data.module.decls; decl;
+  for (tick_ast_node_t* decl = module->module.decls; decl;
        decl = decl->next) {
     if (decl->kind != TICK_AST_DECL) {
       continue;
     }
 
-    bool is_pub = decl->data.decl.quals.is_pub;
-    bool is_extern = decl->data.decl.quals.is_extern;
-    bool is_forward = decl->data.decl.quals.is_forward_decl;
+    DLOG("Emitting decl: %.*s (tmpid=%u)",
+         (int)decl->decl.name.sz, decl->decl.name.buf, decl->decl.tmpid);
+
+    bool is_pub = decl->decl.quals.is_pub;
+    bool is_extern = decl->decl.quals.is_extern;
+    bool is_forward = decl->decl.quals.is_forward_decl;
 
     // Skip declarations without init unless they're extern
-    if (!decl->data.decl.init && !is_extern) {
+    if (!decl->decl.init && !is_extern) {
       continue;
     }
 
     tick_ast_node_kind_t init_kind =
-        decl->data.decl.init ? decl->data.decl.init->kind : TICK_AST_DECL;
+        decl->decl.init ? decl->decl.init->kind : TICK_AST_DECL;
 
     switch (init_kind) {
       case TICK_AST_STRUCT_DECL:

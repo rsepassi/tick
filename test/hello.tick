@@ -3,6 +3,7 @@ pub let add = fn (a: i32, b: i32) i32 {
 };
 
 pub let main = fn (argc: i32, argv: **u8) i32 {
-  @dbg("|hello world argc=%d argv[0]=%s|\n", argc, argv[0]);
+  let res = add(2, argc);
+  @dbg("|hello world res=%d argc=%d argv[0]=%s|\n", res, argc, argv[0]);
   return 0;
 };

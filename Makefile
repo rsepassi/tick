@@ -2,6 +2,8 @@
 
 # Build configuration
 RELEASE ?= 0
+DEBUG_PARSE ?= 0
+DEBUG_ANALYZE ?= 0
 
 # Build directory
 BUILD_DIR := build
@@ -22,7 +24,17 @@ else
 	CFLAGS += -O2
 endif
 
-.PHONY: all grammar clean format test tree compile-lib compile-exe runtime
+# Debug parse flag
+ifeq ($(DEBUG_PARSE),1)
+	CFLAGS += -DTICK_DEBUG_PARSE
+endif
+
+# Debug analyze flag
+ifeq ($(DEBUG_ANALYZE),1)
+	CFLAGS += -DTICK_DEBUG_ANALYZE
+endif
+
+.PHONY: all grammar clean format test runtime compile-lib compile-exe
 COMPILER := $(BUILD_DIR)/tick
 all: $(COMPILER)
 
@@ -195,12 +207,13 @@ clean:
 format:
 	clang-format -i -style=google $(SRCS) $(HDRS)
 
-tree:
-	@tree -I vibe -I vendor
+test:
+	@echo "Running Tick tests..."
+	$(MAKE) compile-exe SRC=test/hello.tick DEBUG_ANALYZE=1
+	./build/out/hello foo bar
 
-test: $(COMPILER)
-	@mkdir -p $(BUILD_DIR)/gen
-	@echo "Testing hello.tick..."
-	./build/tick emitc test/hello.tick -o build/gen/hello
-	@echo "Testing grammar.tick..."
-	./build/tick emitc test/grammar.tick -o build/gen/grammar
+tests: $(COMPILER) runtime
+	@echo "Running Tick test suite..."
+	COMPILER=$(COMPILER) BUILD_DIR=$(BUILD_DIR) CC=$(CC) AR=$(AR) LD=$(LD) \
+		STD_LIB=$(STD_LIB) PLATFORM_LIB=$(PLATFORM_LIB) \
+		./script/run-tests.sh
