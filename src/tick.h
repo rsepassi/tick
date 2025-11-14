@@ -723,6 +723,7 @@ typedef enum {
 typedef enum {
   TICK_AT_BUILTIN_UNKNOWN,  // Not yet resolved or invalid
   TICK_AT_BUILTIN_DBG,      // @dbg - debug log
+  TICK_AT_BUILTIN_PANIC,    // @panic - panic with message
 } tick_at_builtin_t;
 
 // ============================================================================

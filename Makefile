@@ -34,7 +34,7 @@ ifeq ($(DEBUG_ANALYZE),1)
 	CFLAGS += -DTICK_DEBUG_ANALYZE
 endif
 
-.PHONY: all grammar clean format test runtime compile-lib compile-exe
+.PHONY: all grammar clean format tests runtime compile-lib compile-exe
 COMPILER := $(BUILD_DIR)/tick
 all: $(COMPILER)
 
@@ -207,13 +207,8 @@ clean:
 format:
 	clang-format -i -style=google $(SRCS) $(HDRS)
 
-test:
-	@echo "Running Tick tests..."
-	$(MAKE) compile-exe SRC=test/hello.tick DEBUG_ANALYZE=1
-	./build/out/hello foo bar
-
 tests: $(COMPILER) runtime
 	@echo "Running Tick test suite..."
 	COMPILER=$(COMPILER) BUILD_DIR=$(BUILD_DIR) CC=$(CC) AR=$(AR) LD=$(LD) \
-		STD_LIB=$(STD_LIB) PLATFORM_LIB=$(PLATFORM_LIB) \
+		STD_LIB=$(STD_LIB) PLATFORM_LIB=$(PLATFORM_LIB) TEST=$(TEST) \
 		./script/run-tests.sh

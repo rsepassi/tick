@@ -665,6 +665,12 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
 // Complex Helper Functions (require forward declarations)
 // ============================================================================
 
+// Check if an analysis error has occurred
+// Returns true if the error buffer contains an error message
+static inline bool analyze_has_error(tick_analyze_ctx_t* ctx) {
+  return ctx->errbuf.buf[0] != '\0';
+}
+
 // Resolve a named type via type table lookup
 // Optionally tracks dependencies for user-defined types
 static void resolve_named_type(tick_ast_node_t* type_node,
@@ -1125,10 +1131,19 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
         if (expr->identifier_expr.name.sz == 4 &&
             memcmp(expr->identifier_expr.name.buf, "@dbg", 4) == 0) {
           expr->identifier_expr.at_builtin = TICK_AT_BUILTIN_DBG;
+          // Builtins don't have a type - return NULL
+          // The call expression handler will determine the return type
+          return NULL;
+        } else if (expr->identifier_expr.name.sz == 6 &&
+                   memcmp(expr->identifier_expr.name.buf, "@panic", 6) == 0) {
+          expr->identifier_expr.at_builtin = TICK_AT_BUILTIN_PANIC;
+          // Builtins don't have a type - return NULL
+          // The call expression handler will determine the return type
+          return NULL;
         } else {
           // Unknown builtin
           snprintf((char*)ctx->errbuf.buf, ctx->errbuf.sz,
-                   "%zu:%zu: unknown builtin '%.*s'\n", expr->loc.line,
+                   "%zu:%zu: unknown builtin '%.*s'", expr->loc.line,
                    expr->loc.col, (int)expr->identifier_expr.name.sz,
                    expr->identifier_expr.name.buf);
           return NULL;
@@ -1246,11 +1261,19 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
         // @builtins - explicitly return void
         // Check if it's a known @builtin
         if (expr->call_expr.callee &&
-            expr->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR &&
-            expr->call_expr.callee->identifier_expr.at_builtin ==
-                TICK_AT_BUILTIN_DBG) {
-          result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
-          ALOG_EXIT("-> void (@dbg)");
+            expr->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
+          tick_at_builtin_t builtin =
+              expr->call_expr.callee->identifier_expr.at_builtin;
+          if (builtin == TICK_AT_BUILTIN_DBG) {
+            result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
+            ALOG_EXIT("-> void (@dbg)");
+          } else if (builtin == TICK_AT_BUILTIN_PANIC) {
+            result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
+            ALOG_EXIT("-> void (@panic)");
+          } else {
+            // Unknown callee - this should not happen
+            CHECK(0, "call expression has non-function callee type");
+          }
         } else {
           // Unknown callee - this should not happen
           CHECK(0, "call expression has non-function callee type");
@@ -1598,6 +1621,9 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       // Don't decompose here - analyze_expr handles it internally
       if (stmt->return_stmt.value) {
         analyze_expr(stmt->return_stmt.value, ctx);
+        if (analyze_has_error(ctx)) {
+          return TICK_ANALYZE_ERR;
+        }
       }
       return TICK_ANALYZE_OK;
     }
@@ -1611,11 +1637,19 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       // analyze_expr handles decomposition internally
       if (stmt->decl.type == NULL && stmt->decl.init) {
         tick_ast_node_t* inferred_type = analyze_expr(stmt->decl.init, ctx);
+        if (analyze_has_error(ctx)) {
+          ALOG_EXIT("FAILED");
+          return TICK_ANALYZE_ERR;
+        }
         stmt->decl.type = inferred_type;
         ALOG("inferred: %s", tick_type_str(inferred_type));
       } else if (stmt->decl.init) {
         // Type is explicit, analyze initializer separately
         analyze_expr(stmt->decl.init, ctx);
+        if (analyze_has_error(ctx)) {
+          ALOG_EXIT("FAILED");
+          return TICK_ANALYZE_ERR;
+        }
       }
 
       // Analyze declaration type (in case it has dependencies)
@@ -1637,7 +1671,13 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       // Don't decompose here - analyze_expr handles it internally
       // Analyze both sides
       tick_ast_node_t* lhs_type = analyze_expr(stmt->assign_stmt.lhs, ctx);
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
       tick_ast_node_t* rhs_type = analyze_expr(stmt->assign_stmt.rhs, ctx);
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
 
       // Type compatibility checking (for future enhancement)
       // TODO: Add type compatibility validation between lhs_type and rhs_type
@@ -1650,12 +1690,18 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
     case TICK_AST_EXPR_STMT: {
       // Don't decompose here - analyze_expr handles it internally
       analyze_expr(stmt->expr_stmt.expr, ctx);
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
       return TICK_ANALYZE_OK;
     }
 
     case TICK_AST_IF_STMT: {
       // Don't decompose here - analyze_expr handles it internally
       analyze_expr(stmt->if_stmt.condition, ctx);
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
 
       // Analyze then and else blocks
       tick_analyze_error_t err = analyze_stmt(stmt->if_stmt.then_block, ctx);
@@ -2235,6 +2281,11 @@ static tick_analyze_error_t analyze_decl_with_init(tick_ast_node_t* decl,
       // If type is NULL, infer from initializer
       if (decl->decl.type == NULL) {
         tick_ast_node_t* inferred_type = analyze_expr(init, ctx);
+        // Check if analyze_expr failed
+        if (analyze_has_error(ctx)) {
+          ALOG_EXIT("FAILED");
+          return TICK_ANALYZE_ERR;
+        }
         decl->decl.type = inferred_type;
         ALOG("inferred: %s", tick_type_str(inferred_type));
       } else {
@@ -2244,6 +2295,11 @@ static tick_analyze_error_t analyze_decl_with_init(tick_ast_node_t* decl,
           return err;
         }
         analyze_expr(init, ctx);
+        // Check if analyze_expr failed
+        if (analyze_has_error(ctx)) {
+          ALOG_EXIT("FAILED");
+          return TICK_ANALYZE_ERR;
+        }
       }
 
       ALOG_EXIT("%.*s: %s = %s", (int)decl->decl.name.sz, decl->decl.name.buf,

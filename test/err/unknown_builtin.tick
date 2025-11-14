@@ -1,0 +1,5 @@
+pub let main = fn (argc: i32, argv: **u8) i32 {
+  # Should fail: @foo is not a known builtin
+  @foo("test");
+  return 0;
+};

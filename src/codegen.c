@@ -393,6 +393,8 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
     switch (node->identifier_expr.at_builtin) {
       case TICK_AT_BUILTIN_DBG:
         return write_str(ctx->writer, "tick_debug_log");
+      case TICK_AT_BUILTIN_PANIC:
+        return write_str(ctx->writer, "tick_panic");
       default:
         CHECK(0, "unknown AT builtin enum value");
     }
@@ -493,12 +495,25 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
   return TICK_OK;
 }
 
+// Check if a builtin needs its first argument (format string) cast to const
+// char*
+static bool builtin_needs_format_cast(tick_at_builtin_t builtin) {
+  switch (builtin) {
+    case TICK_AT_BUILTIN_DBG:
+    case TICK_AT_BUILTIN_PANIC:
+      return true;
+    default:
+      return false;
+  }
+}
+
 static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
-  // Check if this is a @dbg call (tick_debug_log)
-  bool is_dbg_call =
-      node->call_expr.callee &&
-      node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR &&
-      node->call_expr.callee->identifier_expr.at_builtin == TICK_AT_BUILTIN_DBG;
+  // Check if this is a builtin call
+  tick_at_builtin_t builtin = TICK_AT_BUILTIN_UNKNOWN;
+  if (node->call_expr.callee &&
+      node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
+    builtin = node->call_expr.callee->identifier_expr.at_builtin;
+  }
 
   CHECK_OK(codegen_expr(node->call_expr.callee, ctx));
   CHECK_OK(write_str(ctx->writer, "("));
@@ -513,9 +528,9 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     }
     first = false;
 
-    // For @dbg, cast the first argument (format string) from uint8_t* to const
-    // char*
-    if (is_dbg_call && arg_index == 0) {
+    // For builtins with format strings, cast the first argument from uint8_t*
+    // to const char*
+    if (builtin_needs_format_cast(builtin) && arg_index == 0) {
       CHECK_OK(write_str(ctx->writer, "(const char*)"));
     }
 

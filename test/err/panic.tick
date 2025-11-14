@@ -1,0 +1,5 @@
+pub let test = fn () i32 {
+  # Demonstrate @panic builtin - terminates with error message
+  @panic("This is a test panic! The @panic builtin works correctly.");
+  return 0;  # Never reached
+};
