@@ -1,0 +1,29 @@
+=== If/Else Tests ===
+Simple if: x > 5
+If-else: x >= 5
+Else-if chain: Grade is B
+Nested if: both positive
+Boolean condition: valid
+Boolean negation: not invalid
+Early returns: -1, 0, 1
+
+=== For Loop Tests ===
+Infinite loop with break: count=4
+Condition loop: n=5
+Full for loop sum(0..9): 45
+Nested loops final product: 9
+For loop with continue (odd sum): 25
+For loop with break: 51
+
+=== Switch Tests ===
+Switch day type: 2
+Switch with default: -1
+Switch single case: 100
+
+=== Complex Nesting Tests ===
+Loop containing switch: 11
+Switch containing loop: 10
+Nested loop with inner break: 20
+Complex nested conditions: passed
+
+=== All Control Flow Tests Passed ===

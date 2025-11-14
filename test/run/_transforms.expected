@@ -1,0 +1,17 @@
+=== Advanced Transform Features Test ===
+NOTE: This test is a placeholder.
+The following features are NOT YET IMPLEMENTED:
+  - defer statements
+  - errdefer statements
+  - try/catch error handling
+  - async/await coroutines
+  - suspend/resume statements
+  - Optional types (?T)
+  - Error unions (!T or E!T)
+  - Slices ([]T)
+  - for-switch loops
+  - continue-switch statements
+
+Uncomment sections in _transforms.tick as features are implemented.
+
+=== Placeholder Test Passed ===

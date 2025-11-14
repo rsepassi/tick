@@ -1,0 +1,236 @@
+# Comprehensive test for advanced language features requiring lowering/transforms
+#
+# NOTE: Most features in this test are NOT YET IMPLEMENTED.
+# This test is a placeholder for future implementation.
+# As features are implemented, uncomment the relevant sections.
+#
+# The following features require implementation in the lowering pass:
+# - defer statements
+# - errdefer statements
+# - try/catch error handling
+# - async/await coroutines
+# - suspend/resume statements
+# - Optionals (?T) and unwrapping
+# - Error unions (!T or E!T)
+# - Slices ([]T)
+# - for-switch loops
+# - continue-switch statements
+
+# ============================================================================
+# Defer Statements (NOT IMPLEMENTED)
+# ============================================================================
+# Defer executes a statement when the current scope exits
+# Lowering must transform defer into goto/label cleanup pattern
+#
+# Example (commented out until implemented):
+# let test_defer = fn () i32 {
+#   var cleanup_count: i32 = 0;
+#   {
+#     defer cleanup_count = cleanup_count + 1;
+#     defer cleanup_count = cleanup_count + 1;
+#     @dbg("Inside block\n");
+#   }
+#   # Both defers should have executed (LIFO order)
+#   @dbg("Defer count: %d\n", cleanup_count);  # Should be 2
+#   return 0;
+# };
+
+# ============================================================================
+# Errdefer Statements (NOT IMPLEMENTED)
+# ============================================================================
+# Errdefer executes only if function returns an error
+# Requires error union types and lowering to conditional cleanup
+#
+# Example (commented out until implemented):
+# let test_errdefer = fn () !i32 {
+#   var resource: *void = null;
+#   errdefer {
+#     # Cleanup only if error occurs
+#     if resource != null {
+#       @dbg("Cleaning up resource\n");
+#     }
+#   }
+#   # Simulate error condition
+#   return error.Failed;
+# };
+
+# ============================================================================
+# Try/Catch Error Handling (NOT IMPLEMENTED)
+# ============================================================================
+# Try/catch for error handling
+# Requires error union types and lowering to error checking with goto/label
+#
+# Example (commented out until implemented):
+# let might_fail = fn (should_fail: bool) !i32 {
+#   if should_fail {
+#     return error.Failed;
+#   }
+#   return 42;
+# };
+#
+# let test_try_catch = fn () i32 {
+#   let result = try might_fail(false) catch |err| {
+#     @dbg("Caught error\n");
+#     return -1;
+#   };
+#   @dbg("Success: %d\n", result);
+#   return 0;
+# };
+
+# ============================================================================
+# Async/Await Coroutines (NOT IMPLEMENTED)
+# ============================================================================
+# Async expressions and await for coroutines
+# Requires state machine transformation in lowering pass
+#
+# Example (commented out until implemented):
+# let async_task = fn () i32 {
+#   @dbg("Task started\n");
+#   suspend;
+#   @dbg("Task resumed\n");
+#   return 42;
+# };
+#
+# let test_async = fn () i32 {
+#   let frame = async async_task();
+#   @dbg("Frame created\n");
+#   resume frame;
+#   @dbg("Task completed\n");
+#   return 0;
+# };
+
+# ============================================================================
+# Optionals (NOT IMPLEMENTED)
+# ============================================================================
+# Optional types (?T) for values that may or may not exist
+# Requires lowering to tagged union or nullable pointer
+#
+# Example (commented out until implemented):
+# let find_value = fn (arr: []i32, target: i32) ?i32 {
+#   for var i: usz = 0; i < arr.len; i = i + 1 {
+#     if arr[i] == target {
+#       return arr[i];
+#     }
+#   }
+#   return null;
+# };
+#
+# let test_optional = fn () i32 {
+#   let arr: [5]i32 = [i32]@ { 10, 20, 30, 40, 50 };
+#   let found = find_value(arr[0..], 30);
+#   if found != null {
+#     @dbg("Found: %d\n", found.?);  # Unwrap with .?
+#   } else {
+#     @dbg("Not found\n");
+#   }
+#   return 0;
+# };
+
+# ============================================================================
+# Error Unions (NOT IMPLEMENTED)
+# ============================================================================
+# Error union types (!T or E!T) for error handling
+# Requires lowering to tagged union
+#
+# Example (commented out until implemented):
+# enum MyError {
+#   OutOfBounds,
+#   InvalidInput,
+# }
+#
+# let safe_divide = fn (a: i32, b: i32) MyError!i32 {
+#   if b == 0 {
+#     return error.InvalidInput;
+#   }
+#   return a / b;
+# };
+#
+# let test_error_union = fn () i32 {
+#   let result = safe_divide(10, 2) catch |err| {
+#     @dbg("Error: %d\n", err);
+#     return -1;
+#   };
+#   @dbg("Result: %d\n", result);
+#   return 0;
+# };
+
+# ============================================================================
+# Slices (NOT IMPLEMENTED)
+# ============================================================================
+# Slice types ([]T) for dynamic arrays with runtime length
+# Requires lowering to struct { ptr: *T, len: usz }
+#
+# Example (commented out until implemented):
+# let sum_slice = fn (numbers: []i32) i32 {
+#   var total: i32 = 0;
+#   for var i: usz = 0; i < numbers.len; i = i + 1 {
+#     total = total + numbers[i];
+#   }
+#   return total;
+# };
+#
+# let test_slices = fn () i32 {
+#   let arr: [5]i32 = [i32]@ { 1, 2, 3, 4, 5 };
+#   let slice: []i32 = arr[1..4];  # [2, 3, 4]
+#   let sum: i32 = sum_slice(slice);
+#   @dbg("Slice sum: %d\n", sum);
+#   return 0;
+# };
+
+# ============================================================================
+# For-Switch Loops (NOT IMPLEMENTED)
+# ============================================================================
+# For-switch combines iteration with pattern matching
+# Requires lowering to loop/switch combination
+#
+# Example (commented out until implemented):
+# enum Token {
+#   Number,
+#   Operator,
+#   End,
+# }
+#
+# let test_for_switch = fn () i32 {
+#   let tokens: [5]Token = [Token]@ { Token.Number, Token.Operator,
+#                                      Token.Number, Token.End, Token.Number };
+#   for switch tokens[i] {
+#     Token.Number {
+#       @dbg("Got number\n");
+#     }
+#     Token.Operator {
+#       @dbg("Got operator\n");
+#     }
+#     Token.End {
+#       @dbg("Got end, breaking\n");
+#       break;
+#     }
+#   }
+#   return 0;
+# };
+
+# ============================================================================
+# Current Placeholder Test
+# ============================================================================
+# This test currently does nothing, since none of the above features are implemented.
+# As features are implemented, move the relevant test code from comments above
+# into this test function and update the expected output.
+
+pub let test = fn () i32 {
+  @dbg("=== Advanced Transform Features Test ===\n");
+  @dbg("NOTE: This test is a placeholder.\n");
+  @dbg("The following features are NOT YET IMPLEMENTED:\n");
+  @dbg("  - defer statements\n");
+  @dbg("  - errdefer statements\n");
+  @dbg("  - try/catch error handling\n");
+  @dbg("  - async/await coroutines\n");
+  @dbg("  - suspend/resume statements\n");
+  @dbg("  - Optional types (?T)\n");
+  @dbg("  - Error unions (!T or E!T)\n");
+  @dbg("  - Slices ([]T)\n");
+  @dbg("  - for-switch loops\n");
+  @dbg("  - continue-switch statements\n");
+  @dbg("\n");
+  @dbg("Uncomment sections in _transforms.tick as features are implemented.\n");
+  @dbg("\n=== Placeholder Test Passed ===\n");
+  return 0;
+};

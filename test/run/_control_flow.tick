@@ -1,0 +1,265 @@
+# Comprehensive test for control flow: if/else, for loops, switch, break, continue
+
+# Helper function to test early return
+let check_value = fn (val: i32) i32 {
+  if val < 0 {
+    return -1;
+  }
+  if val == 0 {
+    return 0;
+  }
+  return 1;
+};
+
+# Helper function for switch testing
+let get_day_name = fn (day: i32) i32 {
+  # Returns a code for the day (0-6 for valid, -1 for invalid)
+  if day >= 0 {
+    if day <= 6 {
+      return day;
+    }
+  }
+  return -1;
+};
+
+pub let test = fn () i32 {
+  # ============================================================================
+  # If/Else Tests
+  # ============================================================================
+  @dbg("=== If/Else Tests ===\n");
+
+  # Simple if
+  let x: i32 = 10;
+  if x > 5 {
+    @dbg("Simple if: x > 5\n");
+  }
+
+  # If-else
+  if x < 5 {
+    @dbg("ERROR: should not reach here\n");
+  } else {
+    @dbg("If-else: x >= 5\n");
+  }
+
+  # Else-if chain
+  let score: i32 = 85;
+  if score >= 90 {
+    @dbg("ERROR: Grade should not be A\n");
+  } else {
+    if score >= 80 {
+      @dbg("Else-if chain: Grade is B\n");
+    } else {
+      if score >= 70 {
+        @dbg("ERROR: Grade should not be C\n");
+      } else {
+        @dbg("ERROR: Grade should not be D/F\n");
+      }
+    }
+  }
+
+  # Nested if statements
+  let a: i32 = 5;
+  let b: i32 = 10;
+  if a > 0 {
+    if b > 0 {
+      @dbg("Nested if: both positive\n");
+    }
+  }
+
+  # Boolean conditions
+  let is_valid: bool = true;
+  if is_valid {
+    @dbg("Boolean condition: valid\n");
+  }
+
+  if !is_valid {
+    @dbg("ERROR: should not reach here\n");
+  } else {
+    @dbg("Boolean negation: not invalid\n");
+  }
+
+  # Early return tests
+  let result1: i32 = check_value(-5);
+  let result2: i32 = check_value(0);
+  let result3: i32 = check_value(10);
+  @dbg("Early returns: %d, %d, %d\n", result1, result2, result3);
+
+  # ============================================================================
+  # For Loop Tests
+  # ============================================================================
+  @dbg("\n=== For Loop Tests ===\n");
+
+  # Infinite loop with break
+  var count: i32 = 0;
+  for {
+    count = count + 1;
+    if count > 3 {
+      break;
+    }
+  }
+  @dbg("Infinite loop with break: count=%d\n", count);
+
+  # Condition-only loop
+  var n: i32 = 0;
+  for n < 5 {
+    n = n + 1;
+  }
+  @dbg("Condition loop: n=%d\n", n);
+
+  # Full for loop (init; condition; step)
+  var sum: i32 = 0;
+  for var i: i32 = 0; i < 10; i = i + 1 {
+    sum = sum + i;
+  }
+  @dbg("Full for loop sum(0..9): %d\n", sum);
+
+  # Nested for loops
+  var product: i32 = 0;
+  for var i: i32 = 1; i <= 3; i = i + 1 {
+    for var j: i32 = 1; j <= 3; j = j + 1 {
+      product = i * j;
+    }
+  }
+  @dbg("Nested loops final product: %d\n", product);
+
+  # For loop with continue
+  var odd_sum: i32 = 0;
+  for var i: i32 = 0; i < 10; i = i + 1 {
+    if i % 2 == 0 {
+      continue;  # Skip even numbers
+    }
+    odd_sum = odd_sum + i;
+  }
+  @dbg("For loop with continue (odd sum): %d\n", odd_sum);
+
+  # For loop with break
+  var first_large: i32 = 0;
+  for var i: i32 = 0; i < 100; i = i + 1 {
+    if i > 50 {
+      first_large = i;
+      break;
+    }
+  }
+  @dbg("For loop with break: %d\n", first_large);
+
+  # ============================================================================
+  # Switch Statement Tests
+  # ============================================================================
+  @dbg("\n=== Switch Tests ===\n");
+
+  # Basic switch with multiple cases
+  let day: i32 = 3;
+  var day_type: i32 = 0;
+  switch day {
+    case 0 {
+      day_type = 1;  # Weekend
+    }
+    case 1, 2, 3, 4, 5 {
+      day_type = 2;  # Weekday
+    }
+    case 6 {
+      day_type = 1;  # Weekend
+    }
+    default {
+      day_type = 0;  # Invalid
+    }
+  }
+  @dbg("Switch day type: %d\n", day_type);
+
+  # Switch with default
+  let unknown: i32 = 99;
+  var handled: i32 = 0;
+  switch unknown {
+    case 1 {
+      handled = 1;
+    }
+    case 2 {
+      handled = 2;
+    }
+    default {
+      handled = -1;
+    }
+  }
+  @dbg("Switch with default: %d\n", handled);
+
+  # Switch with single case
+  let single: i32 = 5;
+  var single_result: i32 = 0;
+  switch single {
+    case 5 {
+      single_result = 100;
+    }
+    default {
+      single_result = 0;
+    }
+  }
+  @dbg("Switch single case: %d\n", single_result);
+
+  # ============================================================================
+  # Complex Nesting Tests
+  # ============================================================================
+  @dbg("\n=== Complex Nesting Tests ===\n");
+
+  # Loop containing switch
+  var loop_switch_sum: i32 = 0;
+  for var i: i32 = 0; i < 5; i = i + 1 {
+    switch i {
+      case 0, 1 {
+        loop_switch_sum = loop_switch_sum + 1;
+      }
+      case 2, 3 {
+        loop_switch_sum = loop_switch_sum + 2;
+      }
+      default {
+        loop_switch_sum = loop_switch_sum + 5;
+      }
+    }
+  }
+  @dbg("Loop containing switch: %d\n", loop_switch_sum);
+
+  # Switch containing loop
+  let mode: i32 = 2;
+  var switch_loop_result: i32 = 0;
+  switch mode {
+    case 1 {
+      for var i: i32 = 0; i < 3; i = i + 1 {
+        switch_loop_result = switch_loop_result + 1;
+      }
+    }
+    case 2 {
+      for var i: i32 = 0; i < 5; i = i + 1 {
+        switch_loop_result = switch_loop_result + 2;
+      }
+    }
+    default {
+      switch_loop_result = 0;
+    }
+  }
+  @dbg("Switch containing loop: %d\n", switch_loop_result);
+
+  # Nested loops with break from inner
+  var outer_count: i32 = 0;
+  for var i: i32 = 0; i < 5; i = i + 1 {
+    for var j: i32 = 0; j < 10; j = j + 1 {
+      outer_count = outer_count + 1;
+      if j > 2 {
+        break;  # Break only from inner loop
+      }
+    }
+  }
+  @dbg("Nested loop with inner break: %d\n", outer_count);
+
+  # Complex condition testing
+  let p: i32 = 10;
+  let q: i32 = 20;
+  if p > 5 {
+    if q > 15 {
+      if p < q {
+        @dbg("Complex nested conditions: passed\n");
+      }
+    }
+  }
+
+  @dbg("\n=== All Control Flow Tests Passed ===\n");
+  return 0;
+};

@@ -1,0 +1,219 @@
+# Comprehensive test for data structures: structs, enums, unions, arrays, pointers
+
+# ============================================================================
+# Enums
+# ============================================================================
+
+# Basic enum with auto-increment
+let Color = enum(u32) {
+  Red,
+  Green,
+  Blue,
+};
+
+# Enum with explicit values
+let Status = enum(i32) {
+  Idle = 0,
+  Running = 10,
+  Paused = 20,
+  Stopped,  # Should be 21
+};
+
+# Enum with underlying type
+let Priority = enum(u8) {
+  Low = 1,
+  Medium = 5,
+  High = 10,
+};
+
+# ============================================================================
+# Structs
+# ============================================================================
+
+# Simple struct
+let Point = struct {
+  x: i32,
+  y: i32,
+};
+
+# Struct with different types
+let Person = struct {
+  age: u32,
+  height: i64,
+  active: bool,
+};
+
+# Nested struct
+let Rectangle = struct {
+  top_left: Point,
+  bottom_right: Point,
+};
+
+# Struct with pointers
+let Node = struct {
+  value: i32,
+  next: *Node,
+};
+
+# Packed struct
+let PackedData = struct packed {
+  a: u8,
+  b: u16,
+  c: u32,
+};
+
+# Aligned struct
+let AlignedData = struct align(16) {
+  x: i64,
+  y: i64,
+};
+
+# ============================================================================
+# Unions
+# ============================================================================
+
+# Tagged union
+let Value = union {
+  int_val: i32,
+  uint_val: u64,
+  bool_val: bool,
+};
+
+# ============================================================================
+# Arrays
+# ============================================================================
+
+# Test arrays of various types
+let ArrayContainer = struct {
+  ints: [4]i32,
+  bytes: [8]u8,
+};
+
+# ============================================================================
+# Test Function
+# ============================================================================
+
+pub let test = fn () i32 {
+  # Test enums
+  @dbg("=== Enum Tests ===\n");
+  let red: Color = Color.Red;
+  let green: Color = Color.Green;
+  let blue: Color = Color.Blue;
+  @dbg("Color.Red=%d Color.Green=%d Color.Blue=%d\n", red, green, blue);
+
+  let idle: Status = Status.Idle;
+  let running: Status = Status.Running;
+  let stopped: Status = Status.Stopped;
+  @dbg("Status.Idle=%d Status.Running=%d Status.Stopped=%d\n", idle, running, stopped);
+
+  let low: Priority = Priority.Low;
+  let high: Priority = Priority.High;
+  @dbg("Priority.Low=%u Priority.High=%u\n", low, high);
+
+  # Test simple struct
+  @dbg("\n=== Struct Tests ===\n");
+  let p1: Point = Point @ { x: 10, y: 20 };
+  @dbg("Point: x=%d y=%d\n", p1.x, p1.y);
+
+  # Test struct with different types
+  let person: Person = Person @ {
+    age: 30,
+    height: 175,
+    active: true,
+  };
+  @dbg("Person: age=%u height=%lld active=%d\n", person.age, person.height, person.active);
+
+  # Test nested struct
+  let rect: Rectangle = Rectangle @ {
+    top_left: Point @ { x: 0, y: 0 },
+    bottom_right: Point @ { x: 100, y: 100 },
+  };
+  @dbg("Rectangle: top_left=(%d,%d) bottom_right=(%d,%d)\n",
+       rect.top_left.x, rect.top_left.y,
+       rect.bottom_right.x, rect.bottom_right.y);
+
+  # Test struct field updates (using var)
+  var p2: Point = Point @ { x: 5, y: 10 };
+  p2.x = 15;
+  p2.y = 25;
+  @dbg("Modified point: x=%d y=%d\n", p2.x, p2.y);
+
+  # Test packed struct
+  let pkd: PackedData = PackedData @ {
+    a: 255,
+    b: 65535,
+    c: 4294967295,
+  };
+  @dbg("PackedData: a=%u b=%u c=%u\n", pkd.a, pkd.b, pkd.c);
+
+  # Test aligned struct
+  let aligned: AlignedData = AlignedData @ {
+    x: 123456789,
+    y: 987654321,
+  };
+  @dbg("AlignedData: x=%lld y=%lld\n", aligned.x, aligned.y);
+
+  # Test pointers
+  @dbg("\n=== Pointer Tests ===\n");
+  var p3: Point = Point @ { x: 100, y: 200 };
+  let p_ptr: *Point = &p3;
+  @dbg("Pointer to point: x=%d y=%d\n", (*p_ptr).x, (*p_ptr).y);
+
+  # Modify through pointer
+  (*p_ptr).x = 111;
+  (*p_ptr).y = 222;
+  @dbg("Modified via pointer: x=%d y=%d\n", p3.x, p3.y);
+
+  # Test pointer to pointer
+  var val: i32 = 42;
+  let ptr1: *i32 = &val;
+  let ptr2: **i32 = &ptr1;
+  @dbg("Double pointer value: %d\n", **ptr2);
+
+  # Test struct with pointer (linked list node)
+  var node1: Node = Node @ { value: 10, next: 0 };
+  var node2: Node = Node @ { value: 20, next: &node1 };
+  @dbg("Node2 value: %d, next value: %d\n", node2.value, (*node2.next).value);
+
+  # Test arrays
+  @dbg("\n=== Array Tests ===\n");
+  let arr: [5]i32 = [10, 20, 30, 40, 50];
+  @dbg("Array[0]=%d Array[2]=%d Array[4]=%d\n", arr[0], arr[2], arr[4]);
+
+  # Array of different type
+  let bytes: [4]u8 = [0, 1, 2, 3];
+  @dbg("Bytes: [0]=%u [1]=%u [2]=%u [3]=%u\n", bytes[0], bytes[1], bytes[2], bytes[3]);
+
+  # Modify array element
+  var arr2: [3]i32 = [1, 2, 3];
+  arr2[1] = 99;
+  @dbg("Modified array: [0]=%d [1]=%d [2]=%d\n", arr2[0], arr2[1], arr2[2]);
+
+  # Struct containing arrays
+  let container: ArrayContainer = ArrayContainer @ {
+    ints: [100, 200, 300, 400],
+    bytes: [10, 20, 30, 40, 50, 60, 70, 80],
+  };
+  @dbg("Container ints[0]=%d ints[3]=%d\n", container.ints[0], container.ints[3]);
+  @dbg("Container bytes[0]=%u bytes[7]=%u\n", container.bytes[0], container.bytes[7]);
+
+  # Pointer to array
+  var arr3: [3]i32 = [7, 8, 9];
+  let arr_ptr: *[3]i32 = &arr3;
+  @dbg("Array via pointer: [0]=%d [1]=%d [2]=%d\n",
+       (*arr_ptr)[0], (*arr_ptr)[1], (*arr_ptr)[2]);
+
+  # Test union (tagged)
+  @dbg("\n=== Union Tests ===\n");
+  let val_int: Value = Value @ { int_val: -42 };
+  @dbg("Union int_val: %d\n", val_int.int_val);
+
+  let val_uint: Value = Value @ { uint_val: 12345 };
+  @dbg("Union uint_val: %llu\n", val_uint.uint_val);
+
+  let val_bool: Value = Value @ { bool_val: true };
+  @dbg("Union bool_val: %d\n", val_bool.bool_val);
+
+  @dbg("\n=== All Data Structure Tests Passed ===\n");
+  return 0;
+};

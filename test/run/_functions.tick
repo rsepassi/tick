@@ -1,0 +1,251 @@
+# Comprehensive test for functions: declarations, parameters, returns, recursion, function pointers
+
+# ============================================================================
+# Basic Function Declarations
+# ============================================================================
+
+# Function with no parameters, returns i32
+let get_answer = fn () i32 {
+  return 42;
+};
+
+# Function with single parameter
+let double = fn (x: i32) i32 {
+  return x * 2;
+};
+
+# Function with multiple parameters
+let add = fn (a: i32, b: i32) i32 {
+  return a + b;
+};
+
+# Function with different parameter types
+let compute = fn (x: i32, y: u64, flag: bool) i64 {
+  if flag {
+    return (x as i64) + (y as i64);
+  }
+  return (x as i64) - (y as i64);
+};
+
+# Function returning void (no return value)
+let print_value = fn (val: i32) void {
+  @dbg("Value: %d\n", val);
+};
+
+# Function returning bool
+let is_positive = fn (x: i32) bool {
+  return x > 0;
+};
+
+# Function with early returns
+let classify = fn (x: i32) i32 {
+  if x < 0 {
+    return -1;
+  }
+  if x == 0 {
+    return 0;
+  }
+  return 1;
+};
+
+# ============================================================================
+# Recursion
+# ============================================================================
+
+# Direct recursion: factorial
+let factorial = fn (n: i32) i32 {
+  if n <= 1 {
+    return 1;
+  }
+  return n * factorial(n - 1);
+};
+
+# Direct recursion: fibonacci
+let fibonacci = fn (n: i32) i32 {
+  if n <= 1 {
+    return n;
+  }
+  return fibonacci(n - 1) + fibonacci(n - 2);
+};
+
+# Direct recursion: sum from 1 to n
+let sum_to_n = fn (n: i32) i32 {
+  if n <= 0 {
+    return 0;
+  }
+  return n + sum_to_n(n - 1);
+};
+
+# ============================================================================
+# Mutual Recursion
+# ============================================================================
+
+# Forward declaration for mutual recursion
+extern let is_odd = fn (n: i32) bool;
+
+let is_even = fn (n: i32) bool {
+  if n == 0 {
+    return true;
+  }
+  if n == 1 {
+    return false;
+  }
+  return is_odd(n - 1);
+};
+
+let is_odd = fn (n: i32) bool {
+  if n == 0 {
+    return false;
+  }
+  if n == 1 {
+    return true;
+  }
+  return is_even(n - 1);
+};
+
+# ============================================================================
+# Function Pointers
+# ============================================================================
+
+# Binary operation function type
+let apply_op = fn (a: i32, b: i32, op: *fn(i32, i32) i32) i32 {
+  return op(a, b);
+};
+
+let multiply = fn (a: i32, b: i32) i32 {
+  return a * b;
+};
+
+let subtract = fn (a: i32, b: i32) i32 {
+  return a - b;
+};
+
+# Unary operation function type
+let apply_unary = fn (x: i32, f: *fn(i32) i32) i32 {
+  return f(x);
+};
+
+let square = fn (x: i32) i32 {
+  return x * x;
+};
+
+let negate = fn (x: i32) i32 {
+  return -x;
+};
+
+# ============================================================================
+# Complex Function Calls
+# ============================================================================
+
+# Nested function calls
+let process = fn (x: i32) i32 {
+  return double(double(x));
+};
+
+# Function call in expression
+let compute_sum = fn (a: i32, b: i32, c: i32) i32 {
+  return add(add(a, b), c);
+};
+
+# ============================================================================
+# Test Function
+# ============================================================================
+
+pub let test = fn () i32 {
+  @dbg("=== Basic Function Tests ===\n");
+
+  # No parameters
+  let answer: i32 = get_answer();
+  @dbg("get_answer() = %d\n", answer);
+
+  # Single parameter
+  let doubled: i32 = double(21);
+  @dbg("double(21) = %d\n", doubled);
+
+  # Multiple parameters
+  let sum: i32 = add(10, 32);
+  @dbg("add(10, 32) = %d\n", sum);
+
+  # Different parameter types
+  let result1: i64 = compute(10, 20, true);
+  let result2: i64 = compute(50, 30, false);
+  @dbg("compute(10, 20, true) = %lld\n", result1);
+  @dbg("compute(50, 30, false) = %lld\n", result2);
+
+  # Void return
+  print_value(100);
+
+  # Bool return
+  let pos: bool = is_positive(5);
+  let neg: bool = is_positive(-5);
+  @dbg("is_positive(5) = %d, is_positive(-5) = %d\n", pos, neg);
+
+  # Early returns
+  let c1: i32 = classify(-10);
+  let c2: i32 = classify(0);
+  let c3: i32 = classify(10);
+  @dbg("classify: -10→%d, 0→%d, 10→%d\n", c1, c2, c3);
+
+  @dbg("\n=== Recursion Tests ===\n");
+
+  # Factorial
+  let fact5: i32 = factorial(5);
+  let fact7: i32 = factorial(7);
+  @dbg("factorial(5) = %d\n", fact5);
+  @dbg("factorial(7) = %d\n", fact7);
+
+  # Fibonacci
+  let fib6: i32 = fibonacci(6);
+  let fib8: i32 = fibonacci(8);
+  @dbg("fibonacci(6) = %d\n", fib6);
+  @dbg("fibonacci(8) = %d\n", fib8);
+
+  # Sum to n
+  let sum10: i32 = sum_to_n(10);
+  @dbg("sum_to_n(10) = %d\n", sum10);
+
+  @dbg("\n=== Mutual Recursion Tests ===\n");
+
+  # Even/odd testing
+  let even4: bool = is_even(4);
+  let odd4: bool = is_odd(4);
+  let even7: bool = is_even(7);
+  let odd7: bool = is_odd(7);
+  @dbg("is_even(4) = %d, is_odd(4) = %d\n", even4, odd4);
+  @dbg("is_even(7) = %d, is_odd(7) = %d\n", even7, odd7);
+
+  @dbg("\n=== Function Pointer Tests ===\n");
+
+  # Binary operations through function pointers
+  let prod: i32 = apply_op(6, 7, &multiply);
+  let diff: i32 = apply_op(20, 8, &subtract);
+  let sum_fp: i32 = apply_op(15, 25, &add);
+  @dbg("apply_op(6, 7, multiply) = %d\n", prod);
+  @dbg("apply_op(20, 8, subtract) = %d\n", diff);
+  @dbg("apply_op(15, 25, add) = %d\n", sum_fp);
+
+  # Unary operations through function pointers
+  let sq: i32 = apply_unary(9, &square);
+  let neg_val: i32 = apply_unary(42, &negate);
+  let dbl: i32 = apply_unary(11, &double);
+  @dbg("apply_unary(9, square) = %d\n", sq);
+  @dbg("apply_unary(42, negate) = %d\n", neg_val);
+  @dbg("apply_unary(11, double) = %d\n", dbl);
+
+  @dbg("\n=== Complex Call Tests ===\n");
+
+  # Nested calls
+  let proc: i32 = process(5);
+  @dbg("process(5) = double(double(5)) = %d\n", proc);
+
+  # Chained calls
+  let total: i32 = compute_sum(10, 20, 30);
+  @dbg("compute_sum(10, 20, 30) = %d\n", total);
+
+  # Function call in complex expression
+  let complex: i32 = add(factorial(3), fibonacci(5)) * 2;
+  @dbg("(factorial(3) + fibonacci(5)) * 2 = %d\n", complex);
+
+  @dbg("\n=== All Function Tests Passed ===\n");
+  return 0;
+};

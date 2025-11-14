@@ -1,0 +1,34 @@
+=== Enum Tests ===
+Color.Red=0 Color.Green=1 Color.Blue=2
+Status.Idle=0 Status.Running=10 Status.Stopped=21
+Priority.Low=1 Priority.High=10
+
+=== Struct Tests ===
+Point: x=10 y=20
+Person: age=30 height=175 active=1
+Rectangle: top_left=(0,0) bottom_right=(100,100)
+Modified point: x=15 y=25
+PackedData: a=255 b=65535 c=4294967295
+AlignedData: x=123456789 y=987654321
+
+=== Pointer Tests ===
+Pointer to point: x=100 y=200
+Modified via pointer: x=111 y=222
+Double pointer value: 42
+Null pointer check: passed
+Node2 value: 20, next value: 10
+
+=== Array Tests ===
+Array[0]=10 Array[2]=30 Array[4]=50
+Bytes: [0]=0 [1]=1 [2]=2 [3]=3
+Modified array: [0]=1 [1]=99 [2]=3
+Container ints[0]=100 ints[3]=400
+Container bytes[0]=10 bytes[7]=80
+Array via pointer: [0]=7 [1]=8 [2]=9
+
+=== Union Tests ===
+Union int_val: -42
+Union uint_val: 12345
+Union bool_val: 1
+
+=== All Data Structure Tests Passed ===

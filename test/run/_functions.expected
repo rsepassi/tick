@@ -1,0 +1,35 @@
+=== Basic Function Tests ===
+get_answer() = 42
+double(21) = 42
+add(10, 32) = 42
+compute(10, 20, true) = 30
+compute(50, 30, false) = 20
+Value: 100
+is_positive(5) = 1, is_positive(-5) = 0
+classify: -10→-1, 0→0, 10→1
+
+=== Recursion Tests ===
+factorial(5) = 120
+factorial(7) = 5040
+fibonacci(6) = 8
+fibonacci(8) = 21
+sum_to_n(10) = 55
+
+=== Mutual Recursion Tests ===
+is_even(4) = 1, is_odd(4) = 0
+is_even(7) = 0, is_odd(7) = 1
+
+=== Function Pointer Tests ===
+apply_op(6, 7, multiply) = 42
+apply_op(20, 8, subtract) = 12
+apply_op(15, 25, add) = 40
+apply_unary(9, square) = 81
+apply_unary(42, negate) = -42
+apply_unary(11, double) = 22
+
+=== Complex Call Tests ===
+process(5) = double(double(5)) = 20
+compute_sum(10, 20, 30) = 60
+(factorial(3) + fibonacci(5)) * 2 = 22
+
+=== All Function Tests Passed ===

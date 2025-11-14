@@ -33,9 +33,9 @@ if [ -n "$SINGLE_TEST" ]; then
         ERR_TESTS="$SINGLE_TEST"
     fi
 else
-    # Run all tests
-    RUN_TESTS=$(find test/run -name '*.tick' | sort)
-    ERR_TESTS=$(find test/err -name '*.tick' | sort)
+    # Run all tests (excluding those starting with underscore)
+    RUN_TESTS=$(find test/run -name '*.tick' ! -name '_*' | sort)
+    ERR_TESTS=$(find test/err -name '*.tick' ! -name '_*' | sort)
 fi
 
 for test_file in $RUN_TESTS; do
