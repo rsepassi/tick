@@ -499,6 +499,8 @@ static tick_err_t reduce_to_literal(tick_ast_node_t** expr,
 // - LITERAL: integer/bool literals (NOT strings - they need static const
 // variables)
 // - IDENTIFIER_EXPR: variable references
+// - STRUCT_INIT_EXPR: struct initializers (valid in C compound literals)
+// - ARRAY_INIT_EXPR: array initializers (valid in C array initialization)
 static bool is_simple_expr(tick_ast_node_t* expr) {
   if (!expr) return true;  // NULL is considered simple
 
@@ -508,7 +510,40 @@ static bool is_simple_expr(tick_ast_node_t* expr) {
     return expr->literal.kind != TICK_LIT_STRING;
   }
 
-  return expr->kind == TICK_AST_IDENTIFIER_EXPR;
+  if (expr->kind == TICK_AST_IDENTIFIER_EXPR) {
+    return true;
+  }
+
+  // Struct and array initializers are simple (valid in C)
+  if (expr->kind == TICK_AST_STRUCT_INIT_EXPR ||
+      expr->kind == TICK_AST_ARRAY_INIT_EXPR) {
+    return true;
+  }
+
+  // Dereference of simple expression is simple - keeps lvalues intact
+  // e.g., (*ptr).field or (*ptr)[index] should not decompose the *ptr part
+  if (expr->kind == TICK_AST_UNARY_EXPR &&
+      expr->unary_expr.op == UNOP_DEREF &&
+      is_simple_expr(expr->unary_expr.operand)) {
+    return true;
+  }
+
+  // Field access of simple expression is simple - keeps lvalues intact
+  // e.g., container.field.subfield should not decompose intermediate accesses
+  if (expr->kind == TICK_AST_FIELD_ACCESS_EXPR &&
+      is_simple_expr(expr->field_access_expr.object)) {
+    return true;
+  }
+
+  // Index of simple expressions is simple - keeps lvalues intact
+  // e.g., arr[0] or arr[i] where arr is simple
+  if (expr->kind == TICK_AST_INDEX_EXPR &&
+      is_simple_expr(expr->index_expr.array) &&
+      is_simple_expr(expr->index_expr.index)) {
+    return true;
+  }
+
+  return false;
 }
 
 // Check if an entire initializer expression tree is simple
@@ -526,15 +561,14 @@ static bool is_initializer_simple(tick_ast_node_t* expr) {
 
     case TICK_AST_STRUCT_INIT_EXPR:
       // Struct initializers are allowed if all field values are simple
+      // (including nested struct/array initializers)
       for (tick_ast_node_t* field = expr->struct_init_expr.fields; field;
            field = field->next) {
         if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
-          // Field values must be LITERAL or IDENTIFIER_EXPR only, not nested
-          // initializers
           tick_ast_node_t* value = field->struct_init_field.value;
           if (!value) continue;
-          if (value->kind != TICK_AST_LITERAL &&
-              value->kind != TICK_AST_IDENTIFIER_EXPR) {
+          // Recursively check if the value is simple
+          if (!is_initializer_simple(value)) {
             return false;
           }
         }
@@ -542,12 +576,12 @@ static bool is_initializer_simple(tick_ast_node_t* expr) {
       return true;
 
     case TICK_AST_ARRAY_INIT_EXPR:
-      // Array initializers are allowed if all elements are simple (LITERAL or
-      // IDENTIFIER_EXPR)
+      // Array initializers are allowed if all elements are simple
+      // (including nested struct/array initializers)
       for (tick_ast_node_t* elem = expr->array_init_expr.elements; elem;
            elem = elem->next) {
-        if (elem->kind != TICK_AST_LITERAL &&
-            elem->kind != TICK_AST_IDENTIFIER_EXPR) {
+        // Recursively check if the element is simple
+        if (!is_initializer_simple(elem)) {
           return false;
         }
       }
@@ -782,6 +816,13 @@ static tick_ast_node_t* decompose_to_simple(tick_ast_node_t* expr,
   tick_analyze_error_t type_err = analyze_type(expr_type, ctx);
   if (type_err != TICK_ANALYZE_OK) {
     ALOG("  cannot decompose: type analysis failed");
+    return expr;
+  }
+
+  // Don't decompose array types - arrays can't be copied in C
+  // Keep them inline (e.g., container.ints should stay as field access)
+  if (expr_type->kind == TICK_AST_TYPE_ARRAY) {
+    ALOG("  cannot decompose: array type (arrays can't be copied in C)");
     return expr;
   }
 
@@ -1358,9 +1399,30 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       // Decompose complex object expressions
       DECOMPOSE_FIELD(expr, field_access_expr.object);
 
-      // Analyze object to get its type
-      tick_ast_node_t* object_type =
-          analyze_expr(expr->field_access_expr.object, ctx);
+      // Check if object is a type name (for enum value access like Color.Red)
+      tick_ast_node_t* object_type = NULL;
+
+      if (expr->field_access_expr.object &&
+          expr->field_access_expr.object->kind == TICK_AST_IDENTIFIER_EXPR) {
+        // Try to look up as a type name first
+        tick_buf_t obj_name = expr->field_access_expr.object->identifier_expr.name;
+        tick_type_entry_t* type_entry = tick_types_lookup(ctx->types, obj_name);
+
+        if (type_entry) {
+          // Object is a type name - create a TYPE_NAMED node for it
+          object_type = alloc_user_type_node(ctx->alloc, obj_name);
+          if (object_type) {
+            object_type->type_named.type_entry = type_entry;
+            object_type->type_named.builtin_type = type_entry->builtin_type;
+            ALOG("object is type name: %.*s", (int)obj_name.sz, obj_name.buf);
+          }
+        }
+      }
+
+      if (!object_type) {
+        // Not a type name, analyze as expression
+        object_type = analyze_expr(expr->field_access_expr.object, ctx);
+      }
 
       tick_ast_node_t* result_type = NULL;
 
@@ -1503,6 +1565,7 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
                     0) {
               // Found the field!
               result_type = field->field.type;
+              expr->field_access_expr.is_union_field = true;  // Mark as union field
               ALOG("found field: %.*s -> %s", (int)field_name.sz,
                    field_name.buf, tick_type_str(result_type));
 
@@ -1541,12 +1604,21 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
                 memcmp(value->enum_value.name.buf, field_name.buf,
                        field_name.sz) == 0) {
               // Found the enum value!
-              // For enum value access, return the enum type itself
+              // Transform field access node to ENUM_VALUE node
+              expr->kind = TICK_AST_ENUM_VALUE;
+              expr->enum_value.parent_decl = type_decl;
+              expr->enum_value.name = field_name;
+              expr->enum_value.value = value->enum_value.value;
+
               result_type = type_decl->decl.type;
               found = true;
-              ALOG("found enum value: %.*s -> %s", (int)field_name.sz,
-                   field_name.buf, tick_type_str(result_type));
-              break;
+              ALOG("transformed enum field access %.*s.%.*s -> ENUM_VALUE",
+                   (int)type_decl->decl.name.sz, type_decl->decl.name.buf,
+                   (int)field_name.sz, field_name.buf);
+
+              // Return early since we transformed the node
+              ALOG_EXIT("-> %s", tick_type_str(result_type));
+              return result_type;
             }
           }
 
@@ -1752,6 +1824,9 @@ static tick_analyze_error_t analyze_enum_decl(tick_ast_node_t* decl,
   for (tick_ast_node_t* value_node = enum_node->enum_decl.values; value_node;
        value_node = value_node->next) {
     if (value_node->kind != TICK_AST_ENUM_VALUE) continue;
+
+    // Set parent pointer so enum values can self-describe for codegen
+    value_node->enum_value.parent_decl = decl;
 
     if (value_node->enum_value.value == NULL) {
       // Auto-increment: create a literal node with current_value

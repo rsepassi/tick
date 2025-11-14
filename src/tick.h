@@ -921,6 +921,7 @@ struct tick_ast_node_s {
       tick_ast_node_t* object;
       tick_buf_t field_name;
       bool is_arrow;
+      bool is_union_field;  // true if accessing union field (needs .data prefix)
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
     } field_access_expr;
     struct {
@@ -1013,7 +1014,8 @@ struct tick_ast_node_s {
     } field;
     struct {
       tick_buf_t name;
-      tick_ast_node_t* value;  // NULL for auto-increment
+      tick_ast_node_t* value;        // NULL for auto-increment
+      tick_ast_node_t* parent_decl;  // Points to DECL containing this enum
     } enum_value;
     struct {
       tick_ast_node_t* values;  // NULL for default case
@@ -1023,9 +1025,6 @@ struct tick_ast_node_s {
       tick_buf_t field_name;
       tick_ast_node_t* value;
     } struct_init_field;
-    struct {
-      tick_buf_t name;
-    } export_stmt;
   };
 };
 

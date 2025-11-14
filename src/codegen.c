@@ -545,16 +545,49 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
 static tick_err_t codegen_field_access(tick_ast_node_t* node,
                                        codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_expr(node->field_access_expr.object, ctx));
-  const char* op = node->field_access_expr.is_arrow ? "->" : ".";
-  CHECK_OK(write_str(ctx->writer, op));
+  // Check if object is an explicit dereference: (*ptr).field
+  // In C, we should emit this as ptr->field to avoid precedence issues
+  tick_ast_node_t* object = node->field_access_expr.object;
+  bool is_explicit_deref = object && object->kind == TICK_AST_UNARY_EXPR &&
+                           object->unary_expr.op == UNOP_DEREF;
+
+  if (is_explicit_deref) {
+    // Emit operand of dereference (the pointer)
+    CHECK_OK(codegen_expr(object->unary_expr.operand, ctx));
+    CHECK_OK(write_str(ctx->writer, "->"));
+  } else {
+    // Emit object.field or object->field
+    CHECK_OK(codegen_expr(object, ctx));
+    const char* op = node->field_access_expr.is_arrow ? "->" : ".";
+    CHECK_OK(write_str(ctx->writer, op));
+  }
+
+  // Handle union field access: prepend "data."
+  if (node->field_access_expr.is_union_field) {
+    CHECK_OK(write_str(ctx->writer, "data."));
+  }
+
   CHECK_OK(write_ident(ctx->writer, node->field_access_expr.field_name));
   return TICK_OK;
 }
 
 static tick_err_t codegen_index_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
-  CHECK_OK(codegen_expr(node->index_expr.array, ctx));
+  // Check if array is an explicit dereference: (*ptr)[index]
+  // In C, we need parens to avoid precedence issues: *ptr[index] means *(ptr[index])
+  tick_ast_node_t* array = node->index_expr.array;
+  bool is_explicit_deref = array && array->kind == TICK_AST_UNARY_EXPR &&
+                           array->unary_expr.op == UNOP_DEREF;
+
+  if (is_explicit_deref) {
+    // Emit with parens: (*operand)[index]
+    CHECK_OK(write_str(ctx->writer, "(*"));
+    CHECK_OK(codegen_expr(array->unary_expr.operand, ctx));
+    CHECK_OK(write_str(ctx->writer, ")"));
+  } else {
+    CHECK_OK(codegen_expr(array, ctx));
+  }
+
   CHECK_OK(write_str(ctx->writer, "["));
   CHECK_OK(codegen_expr(node->index_expr.index, ctx));
   CHECK_OK(write_str(ctx->writer, "]"));
@@ -1059,6 +1092,18 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
     case TICK_AST_CAST_EXPR:
       return codegen_cast_expr(expr, ctx);
 
+    case TICK_AST_ENUM_VALUE: {
+      // Enum value reference: emit __u_EnumName_ValueName
+      CHECK(expr->enum_value.parent_decl &&
+                expr->enum_value.parent_decl->kind == TICK_AST_DECL,
+            "enum value must have parent decl");
+      CHECK_OK(write_str(ctx->writer, "__u_"));
+      CHECK_OK(write_ident(ctx->writer, expr->enum_value.parent_decl->decl.name));
+      CHECK_OK(write_str(ctx->writer, "_"));
+      CHECK_OK(write_ident(ctx->writer, expr->enum_value.name));
+      return TICK_OK;
+    }
+
     // High-level expressions that must be lowered before codegen
     case TICK_AST_ASYNC_EXPR:
       CHECK(0,
@@ -1066,8 +1111,21 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
     case TICK_AST_STRUCT_INIT_EXPR: {
       // Emit: (TypeName) { .field1 = val1, .field2 = val2 }
+      // For unions: (UnionType) { .data.field1 = val1 }
       // Requires: All field values must be LITERAL or IDENTIFIER_EXPR (lowering
       // decomposed complex expressions)
+
+      // Check if this is a union type by looking at the type entry
+      bool is_union_init = false;
+      if (expr->struct_init_expr.type &&
+          expr->struct_init_expr.type->kind == TICK_AST_TYPE_NAMED &&
+          expr->struct_init_expr.type->type_named.type_entry) {
+        tick_type_entry_t* entry =
+            expr->struct_init_expr.type->type_named.type_entry;
+        if (entry->decl && entry->decl->kind == TICK_AST_UNION_DECL) {
+          is_union_init = true;
+        }
+      }
 
       CHECK_OK(write_str(ctx->writer, "("));
       CHECK_OK(codegen_type(expr->struct_init_expr.type, ctx->writer));
@@ -1081,12 +1139,15 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
         tick_ast_node_t* value = field->struct_init_field.value;
 
-        // Validate that value is simple (LITERAL or IDENTIFIER_EXPR)
-        // This should be guaranteed by analysis pass decomposition
+        // Validate that value is simple (LITERAL, IDENTIFIER_EXPR, or nested
+        // STRUCT_INIT_EXPR/ARRAY_INIT_EXPR which are valid in C compound
+        // literals)
         CHECK(value->kind == TICK_AST_LITERAL ||
-                  value->kind == TICK_AST_IDENTIFIER_EXPR,
-              "struct field initializer must be simple (LITERAL or "
-              "IDENTIFIER_EXPR), "
+                  value->kind == TICK_AST_IDENTIFIER_EXPR ||
+                  value->kind == TICK_AST_STRUCT_INIT_EXPR ||
+                  value->kind == TICK_AST_ARRAY_INIT_EXPR,
+              "struct field initializer must be simple (LITERAL, "
+              "IDENTIFIER_EXPR, STRUCT_INIT_EXPR, or ARRAY_INIT_EXPR), "
               "got %d - analysis pass should have decomposed this",
               value->kind);
 
@@ -1095,8 +1156,11 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
         }
         first = false;
 
-        // Emit: .fieldname = value
+        // Emit: .fieldname = value (or .data.fieldname for unions)
         CHECK_OK(write_str(ctx->writer, "."));
+        if (is_union_init) {
+          CHECK_OK(write_str(ctx->writer, "data."));
+        }
         CHECK_OK(write_ident(ctx->writer, field->struct_init_field.field_name));
         CHECK_OK(write_str(ctx->writer, " = "));
         CHECK_OK(codegen_expr(value, ctx));
@@ -1117,12 +1181,15 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       tick_ast_node_t* elem = expr->array_init_expr.elements;
       bool first = true;
       while (elem) {
-        // Validate that element is simple (LITERAL or IDENTIFIER_EXPR)
-        // This should be guaranteed by analysis pass decomposition
+        // Validate that element is simple (LITERAL, IDENTIFIER_EXPR, or nested
+        // STRUCT_INIT_EXPR/ARRAY_INIT_EXPR which are valid in C array
+        // initializers)
         CHECK(elem->kind == TICK_AST_LITERAL ||
-                  elem->kind == TICK_AST_IDENTIFIER_EXPR,
-              "array element initializer must be simple (LITERAL or "
-              "IDENTIFIER_EXPR), "
+                  elem->kind == TICK_AST_IDENTIFIER_EXPR ||
+                  elem->kind == TICK_AST_STRUCT_INIT_EXPR ||
+                  elem->kind == TICK_AST_ARRAY_INIT_EXPR,
+              "array element initializer must be simple (LITERAL, "
+              "IDENTIFIER_EXPR, STRUCT_INIT_EXPR, or ARRAY_INIT_EXPR), "
               "got %d - analysis pass should have decomposed this",
               elem->kind);
 
@@ -1206,6 +1273,14 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
                           node->decl.init->kind == TICK_AST_LITERAL &&
                           node->decl.init->literal.kind == TICK_LIT_STRING;
 
+  // Check if this is a pointer-to-array type: *[N]T
+  // In C this requires special syntax: T (*name)[N]
+  bool is_ptr_to_array = node->decl.type &&
+                         node->decl.type->kind == TICK_AST_TYPE_POINTER &&
+                         node->decl.type->type_pointer.pointee_type &&
+                         node->decl.type->type_pointer.pointee_type->kind ==
+                             TICK_AST_TYPE_ARRAY;
+
   // Emit type (for static strings, emit pointee type only)
   if (is_static_string) {
     // String literals have type *u8, so we need to emit just u8 (the pointee
@@ -1214,17 +1289,32 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
     CHECK(type && type->kind == TICK_AST_TYPE_POINTER,
           "static string should have pointer type");
     CHECK_OK(codegen_type(type->type_pointer.pointee_type, ctx->writer));
+  } else if (is_ptr_to_array) {
+    // For pointer-to-array, emit the element type
+    tick_ast_node_t* array_type = node->decl.type->type_pointer.pointee_type;
+    CHECK_OK(codegen_type(array_type->type_array.element_type, ctx->writer));
   } else {
     CHECK_OK(codegen_type(node->decl.type, ctx->writer));
   }
   CHECK_OK(write_str(ctx->writer, " "));
 
   // Emit name (with appropriate prefix based on tmpid)
-  CHECK_OK(write_decl_name(ctx->writer, node));
+  if (is_ptr_to_array) {
+    // For pointer-to-array: T (*name)[N]
+    CHECK_OK(write_str(ctx->writer, "(*"));
+    CHECK_OK(write_decl_name(ctx->writer, node));
+    CHECK_OK(write_str(ctx->writer, ")"));
+  } else {
+    CHECK_OK(write_decl_name(ctx->writer, node));
+  }
 
   if (is_static_string) {
     // Emit array suffix for static strings
     CHECK_OK(write_str(ctx->writer, "[]"));
+  } else if (is_ptr_to_array) {
+    // For pointer-to-array, emit the array dimensions
+    tick_ast_node_t* array_type = node->decl.type->type_pointer.pointee_type;
+    CHECK_OK(write_array_suffix(ctx->writer, array_type));
   } else {
     CHECK_OK(write_array_suffix(ctx->writer, node->decl.type));
   }
@@ -1603,6 +1693,8 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
     CHECK_OK(codegen_type(field->field.type, w));
     CHECK_OK(write_str(w, " "));
     CHECK_OK(write_ident(w, field->field.name));
+    // Emit array dimensions after field name (C syntax requires it)
+    CHECK_OK(write_array_suffix(w, field->field.type));
 
     // Handle per-field alignment
     if (field->field.alignment) {
@@ -1981,9 +2073,6 @@ tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
     if (decl->kind != TICK_AST_DECL) {
       continue;
     }
-
-    DLOG("Emitting decl: %.*s (tmpid=%u)", (int)decl->decl.name.sz,
-         decl->decl.name.buf, decl->decl.tmpid);
 
     bool is_pub = decl->decl.quals.is_pub;
     bool is_extern = decl->decl.quals.is_extern;

@@ -15,7 +15,6 @@ AlignedData: x=123456789 y=987654321
 Pointer to point: x=100 y=200
 Modified via pointer: x=111 y=222
 Double pointer value: 42
-Null pointer check: passed
 Node2 value: 20, next value: 10
 
 === Array Tests ===

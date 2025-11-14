@@ -157,11 +157,11 @@ pub let test = fn () i32 {
   @dbg("\n=== Pointer Tests ===\n");
   var p3: Point = Point @ { x: 100, y: 200 };
   let p_ptr: *Point = &p3;
-  @dbg("Pointer to point: x=%d y=%d\n", (*p_ptr).x, (*p_ptr).y);
+  @dbg("Pointer to point: x=%d y=%d\n", p_ptr.x, p_ptr.y);
 
   # Modify through pointer
   (*p_ptr).x = 111;
-  (*p_ptr).y = 222;
+  p_ptr.y = 222;
   @dbg("Modified via pointer: x=%d y=%d\n", p3.x, p3.y);
 
   # Test pointer to pointer
