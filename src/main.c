@@ -84,9 +84,8 @@ int main(int argc, char** argv) {
     COMPILE_ERR();
   }
 
-  // analyze, typecheck, lower
+  // analyze, typecheck
   if (tick_ast_analyze(&root, parse.alloc, errbuf) != TICK_OK) COMPILE_ERR();
-  if (tick_ast_lower(&root, parse.alloc, errbuf) != TICK_OK) COMPILE_ERR();
 
 #undef COMPILE_ERR
 

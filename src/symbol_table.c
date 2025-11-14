@@ -370,6 +370,9 @@ void tick_analyze_ctx_init(tick_analyze_ctx_t* ctx, tick_alloc_t alloc,
   // Initialize dependency list
   tick_dependency_list_init(&ctx->pending_deps);
 
+  // Initialize forward declarations list
+  tick_dependency_list_init(&ctx->forward_decls);
+
   // Create module scope
   ctx->module_scope = tick_scope_create(NULL, alloc);
   ctx->current_scope = ctx->module_scope;

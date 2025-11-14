@@ -522,8 +522,10 @@ static bool is_simple_expr(tick_ast_node_t* expr) {
 
   // Dereference of simple expression is simple - keeps lvalues intact
   // e.g., (*ptr).field or (*ptr)[index] should not decompose the *ptr part
+  // Address-of simple expression is also simple - needed for lvalue decomposition
+  // e.g., &x.y should not decompose when used as temp init
   if (expr->kind == TICK_AST_UNARY_EXPR &&
-      expr->unary_expr.op == UNOP_DEREF &&
+      (expr->unary_expr.op == UNOP_DEREF || expr->unary_expr.op == UNOP_ADDR) &&
       is_simple_expr(expr->unary_expr.operand)) {
     return true;
   }
@@ -827,19 +829,8 @@ static tick_ast_node_t* decompose_to_simple(tick_ast_node_t* expr,
   }
 
   // Allocate a new temporary ID from the function-level scope
-  // Walk up the scope chain to find the function scope (first scope whose
-  // parent is module) This ensures all temporaries in a function have unique
-  // IDs across all blocks
-  tick_scope_t* func_scope = ctx->current_scope;
-  while (func_scope && func_scope->parent && func_scope->parent->parent) {
-    func_scope = func_scope->parent;
-  }
-  // func_scope is now either the module scope or the function scope
-  if (func_scope && func_scope->parent == NULL) {
-    // We're at module scope, shouldn't happen in function context
-    func_scope = ctx->current_scope;
-  }
-  u32 tmpid = func_scope->next_tmpid++;
+  // This ensures all temporaries in a function have unique IDs across all blocks
+  u32 tmpid = ctx->function_scope->next_tmpid++;
 
   // Create a temporary declaration: let __tmpN: <type> = <expr>;
   tick_ast_node_t* temp_decl =
@@ -859,6 +850,466 @@ static tick_ast_node_t* decompose_to_simple(tick_ast_node_t* expr,
 
   ALOG("  decomposed to __tmp%u", tmpid);
   return temp_ident;
+}
+
+// ============================================================================
+// Object Initialization Decomposition (Phase 1)
+// ============================================================================
+
+// Forward declarations for mutual recursion
+static void flatten_struct_init(tick_ast_node_t* base_lvalue,
+                                 tick_ast_node_t* init_expr,
+                                 tick_analyze_ctx_t* ctx);
+
+// ============================================================================
+// Lvalue Decomposition (Phase 2)
+// ============================================================================
+
+// Helper: Check if an lvalue is simple (doesn't need pointer decomposition)
+static bool is_simple_lvalue(tick_ast_node_t* expr) {
+  // Simple lvalues are just identifiers
+  return expr && expr->kind == TICK_AST_IDENTIFIER_EXPR;
+}
+
+// Helper: Create a unary expression node (for address-of and dereference)
+static tick_ast_node_t* create_unary_node(tick_alloc_t alloc,
+                                           tick_unop_t op,
+                                           tick_ast_node_t* operand,
+                                           tick_ast_loc_t loc) {
+  tick_ast_node_t* node;
+  ALLOC_AST_NODE(alloc, node);
+  node->kind = TICK_AST_UNARY_EXPR;
+  node->unary_expr.op = op;
+  node->unary_expr.operand = operand;
+  node->unary_expr.resolved_type = NULL;  // Will be filled during analysis
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  node->loc = loc;
+  return node;
+}
+
+// Helper: Create a pointer type node
+static tick_ast_node_t* create_pointer_type_node(tick_alloc_t alloc,
+                                                  tick_ast_node_t* pointee_type) {
+  tick_ast_node_t* node;
+  ALLOC_AST_NODE(alloc, node);
+  node->kind = TICK_AST_TYPE_POINTER;
+  node->type_pointer.pointee_type = pointee_type;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  node->loc = (tick_ast_loc_t){0};
+  return node;
+}
+
+// Helper: Create address-of expression for lvalue
+// Handles: &x, &obj.field, &arr[i], &*ptr (optimizes to just ptr)
+static tick_ast_node_t* create_address_of_lvalue(tick_ast_node_t* lvalue,
+                                                  tick_alloc_t alloc) {
+  // Special case: &(*ptr) → ptr (cancel out)
+  if (lvalue->kind == TICK_AST_UNARY_EXPR &&
+      lvalue->unary_expr.op == UNOP_DEREF) {
+    return lvalue->unary_expr.operand;
+  }
+
+  // General case: create address-of unary expression
+  return create_unary_node(alloc, UNOP_ADDR, lvalue, lvalue->loc);
+}
+
+// Helper: Create a field access node
+static tick_ast_node_t* create_field_access_node(tick_alloc_t alloc,
+                                                   tick_ast_node_t* object,
+                                                   tick_buf_t field_name,
+                                                   tick_ast_loc_t loc) {
+  tick_ast_node_t* node;
+  ALLOC_AST_NODE(alloc, node);
+  node->kind = TICK_AST_FIELD_ACCESS_EXPR;
+  node->field_access_expr.object = object;
+  node->field_access_expr.field_name = field_name;
+  node->field_access_expr.is_arrow = false;
+  node->field_access_expr.is_union_field = false;
+  node->field_access_expr.resolved_type = NULL;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  node->loc = loc;
+  return node;
+}
+
+// Helper: Create an index expression node
+static tick_ast_node_t* create_index_node(tick_alloc_t alloc,
+                                           tick_ast_node_t* array,
+                                           tick_ast_node_t* index,
+                                           tick_ast_loc_t loc) {
+  tick_ast_node_t* node;
+  ALLOC_AST_NODE(alloc, node);
+  node->kind = TICK_AST_INDEX_EXPR;
+  node->index_expr.array = array;
+  node->index_expr.index = index;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  node->loc = loc;
+  return node;
+}
+
+// Helper: Create an assignment statement node
+static tick_ast_node_t* create_assign_stmt_node(tick_alloc_t alloc,
+                                                 tick_ast_node_t* lhs,
+                                                 tick_ast_node_t* rhs,
+                                                 tick_ast_loc_t loc) {
+  tick_ast_node_t* node;
+  ALLOC_AST_NODE(alloc, node);
+  node->kind = TICK_AST_ASSIGN_STMT;
+  node->assign_stmt.lhs = lhs;
+  node->assign_stmt.rhs = rhs;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  node->loc = loc;
+  node->next = NULL;
+  node->prev = NULL;
+  return node;
+}
+
+// Recursively flatten array initializers into index assignments
+static void flatten_array_init(tick_ast_node_t* base_lvalue,
+                                tick_ast_node_t* init_expr,
+                                tick_analyze_ctx_t* ctx) {
+  ALOG("  flattening array init");
+
+  tick_ast_node_t* elem = init_expr->array_init_expr.elements;
+  int index = 0;
+  while (elem) {
+    // Create index expression: base[index]
+    tick_ast_node_t* index_lit = alloc_literal_node(ctx->alloc, index);
+    tick_ast_node_t* index_lvalue = create_index_node(
+        ctx->alloc, base_lvalue, index_lit, elem->loc);
+
+    // Check if element is a nested struct/array initializer
+    if (elem->kind == TICK_AST_STRUCT_INIT_EXPR) {
+      // Recursive: flatten nested struct
+      flatten_struct_init(index_lvalue, elem, ctx);
+    } else if (elem->kind == TICK_AST_ARRAY_INIT_EXPR) {
+      // Recursive: flatten nested array
+      flatten_array_init(index_lvalue, elem, ctx);
+    } else {
+      // Leaf: create assignment
+      tick_ast_node_t* assign = create_assign_stmt_node(
+          ctx->alloc, index_lvalue, elem, elem->loc);
+      insert_temp_in_block(ctx, assign);
+      // Analyze the assignment immediately so lvalue decomposition happens
+      // Save and restore current_stmt so temps get inserted in the right place
+      tick_ast_node_t* saved_stmt = ctx->current_stmt;
+      ctx->current_stmt = assign;
+      analyze_stmt(assign, ctx);
+      ctx->current_stmt = saved_stmt;
+    }
+
+    elem = elem->next;
+    index++;
+  }
+}
+
+// Recursively flatten nested struct initializers into field assignments
+static void flatten_struct_init(tick_ast_node_t* base_lvalue,
+                                 tick_ast_node_t* init_expr,
+                                 tick_analyze_ctx_t* ctx) {
+  ALOG("  flattening struct init");
+
+  tick_ast_node_t* field = init_expr->struct_init_expr.fields;
+  while (field) {
+    CHECK(field->kind == TICK_AST_STRUCT_INIT_FIELD,
+          "expected STRUCT_INIT_FIELD");
+
+    // Create field access: base.field_name
+    tick_ast_node_t* field_lvalue = create_field_access_node(
+        ctx->alloc, base_lvalue, field->struct_init_field.field_name,
+        field->loc);
+
+    tick_ast_node_t* field_value = field->struct_init_field.value;
+
+    // Check if value is a nested struct/array initializer
+    if (field_value->kind == TICK_AST_STRUCT_INIT_EXPR) {
+      // Recursive: flatten nested struct
+      flatten_struct_init(field_lvalue, field_value, ctx);
+    } else if (field_value->kind == TICK_AST_ARRAY_INIT_EXPR) {
+      // Flatten nested array init
+      flatten_array_init(field_lvalue, field_value, ctx);
+    } else {
+      // Leaf: create assignment
+      tick_ast_node_t* assign = create_assign_stmt_node(
+          ctx->alloc, field_lvalue, field_value, field->loc);
+      insert_temp_in_block(ctx, assign);
+      // Analyze the assignment immediately so lvalue decomposition happens
+      // Save and restore current_stmt so temps get inserted in the right place
+      tick_ast_node_t* saved_stmt = ctx->current_stmt;
+      ctx->current_stmt = assign;
+      analyze_stmt(assign, ctx);
+      ctx->current_stmt = saved_stmt;
+    }
+
+    field = field->next;
+  }
+}
+
+// Decompose struct initializer to declaration + field assignments
+static tick_ast_node_t* decompose_struct_init(tick_ast_node_t* init_expr,
+                                               tick_analyze_ctx_t* ctx) {
+  // Skip if module-level (must stay compile-time constant)
+  if (ctx->scope_depth == 0) {
+    ALOG("  keeping struct init at module level");
+    return init_expr;
+  }
+
+  // Can only decompose if we have a current block
+  if (!ctx->current_block) {
+    ALOG("  cannot decompose: no current_block");
+    return init_expr;
+  }
+
+  ALOG_ENTER("decomposing struct init");
+
+  // Get the type of the struct being initialized
+  tick_ast_node_t* struct_type = init_expr->struct_init_expr.type;
+  if (!struct_type) {
+    ALOG_EXIT("FAILED: no type");
+    return init_expr;
+  }
+
+  // Allocate temporary ID
+  u32 tmpid = ctx->function_scope->next_tmpid++;
+
+  // Create temp declaration with undefined init
+  tick_ast_node_t* temp_decl =
+      create_temp_decl(ctx->alloc, tmpid, struct_type, NULL);
+  if (!temp_decl) {
+    ALOG_EXIT("FAILED: allocation failed");
+    return init_expr;
+  }
+
+  // Insert the temporary declaration
+  insert_temp_in_block(ctx, temp_decl);
+
+  // Create identifier referencing the temp
+  tick_ast_node_t* temp_ident = create_temp_identifier(ctx->alloc, temp_decl);
+  if (!temp_ident) {
+    ALOG_EXIT("FAILED: allocation failed");
+    return init_expr;
+  }
+
+  // Generate field assignments
+  flatten_struct_init(temp_ident, init_expr, ctx);
+
+  ALOG_EXIT("decomposed to __tmp%u", tmpid);
+  return temp_ident;
+}
+
+// Decompose array initializer to declaration + index assignments
+static tick_ast_node_t* decompose_array_init(tick_ast_node_t* init_expr,
+                                              tick_analyze_ctx_t* ctx) {
+  // Skip if module-level
+  if (ctx->scope_depth == 0) {
+    ALOG("  keeping array init at module level");
+    return init_expr;
+  }
+
+  // Can only decompose if we have a current block
+  if (!ctx->current_block) {
+    ALOG("  cannot decompose: no current_block");
+    return init_expr;
+  }
+
+  ALOG_ENTER("decomposing array init");
+
+  // Array init needs type from context (parent declaration)
+  // For now, we don't have access to the parent type, so we can't decompose
+  // This will be handled when we have full context from the declaration
+  // For the initial implementation, keep array inits as-is
+  ALOG_EXIT("array init decomposition needs parent type context");
+  return init_expr;
+}
+
+// Multi-step lvalue decomposition: transforms complex lvalues into pointer temporaries
+// Example: container.field[index].subfield
+//   → let __tmp0 = &container.field;
+//     let __tmp1 = &(*__tmp0)[index];
+//     let __tmp2 = &(*__tmp1).subfield;
+//     returns: *__tmp2
+//
+// Note: lvalue must have already been analyzed (resolved_type fields populated)
+static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
+                                                tick_ast_node_t* lvalue_type,
+                                                tick_analyze_ctx_t* ctx) {
+  if (!lvalue || !ctx) return NULL;
+
+  ALOG_ENTER("decomposing lvalue chain");
+
+  // Base case: simple identifier needs no decomposition
+  if (lvalue->kind == TICK_AST_IDENTIFIER_EXPR) {
+    ALOG_EXIT("simple identifier, no decomposition");
+    return lvalue;
+  }
+
+  // Extract the type from the lvalue node if not provided
+  // (Each level except the top will extract its own type)
+  if (!lvalue_type) {
+    switch (lvalue->kind) {
+      case TICK_AST_FIELD_ACCESS_EXPR:
+        lvalue_type = lvalue->field_access_expr.resolved_type;
+        break;
+      case TICK_AST_UNARY_EXPR:
+        lvalue_type = lvalue->unary_expr.resolved_type;
+        break;
+      case TICK_AST_INDEX_EXPR:
+        // For index expressions, we need to get the element type
+        // This should have been set during analysis, but index_expr
+        // doesn't have a resolved_type field. We'll handle this
+        // by looking at the array type and extracting the element type.
+        // For now, we'll skip type checking for index operations
+        lvalue_type = NULL;
+        break;
+      default:
+        lvalue_type = NULL;
+        break;
+    }
+  }
+
+  tick_ast_node_t* access_expr = NULL;
+  tick_ast_node_t* base_for_access = NULL;
+
+  // Recursively decompose the base expression and build the current access
+  switch (lvalue->kind) {
+    case TICK_AST_FIELD_ACCESS_EXPR: {
+      // Decompose: base.field
+      tick_ast_node_t* obj = lvalue->field_access_expr.object;
+      tick_ast_node_t* decomposed_obj = decompose_lvalue_chain(obj, NULL, ctx);
+      if (!decomposed_obj) return NULL;
+
+      // If decomposed_obj is a dereference (*tmpN), extract tmpN
+      // Otherwise use decomposed_obj directly
+      if (decomposed_obj->kind == TICK_AST_UNARY_EXPR &&
+          decomposed_obj->unary_expr.op == UNOP_DEREF) {
+        base_for_access = decomposed_obj->unary_expr.operand;
+      } else {
+        base_for_access = decomposed_obj;
+      }
+
+      // Build: (*base_for_access).field or base_for_access.field
+      // Preserve is_arrow flag from original lvalue
+      bool needs_deref = (decomposed_obj->kind == TICK_AST_UNARY_EXPR &&
+                          decomposed_obj->unary_expr.op == UNOP_DEREF);
+
+      if (needs_deref) {
+        // Create (*tmpN).field
+        tick_ast_node_t* deref = create_unary_node(
+            ctx->alloc, UNOP_DEREF, base_for_access, lvalue->loc);
+        access_expr = create_field_access_node(
+            ctx->alloc, deref, lvalue->field_access_expr.field_name, lvalue->loc);
+      } else {
+        // Create base.field or base->field (when base is identifier)
+        access_expr = create_field_access_node(
+            ctx->alloc, base_for_access, lvalue->field_access_expr.field_name, lvalue->loc);
+      }
+      // Preserve the is_arrow flag from the original lvalue
+      access_expr->field_access_expr.is_arrow = lvalue->field_access_expr.is_arrow;
+      break;
+    }
+
+    case TICK_AST_INDEX_EXPR: {
+      // Decompose: base[index]
+      tick_ast_node_t* arr = lvalue->index_expr.array;
+      tick_ast_node_t* decomposed_arr = decompose_lvalue_chain(arr, NULL, ctx);
+      if (!decomposed_arr) return NULL;
+
+      // If decomposed_arr is a dereference (*tmpN), extract tmpN
+      if (decomposed_arr->kind == TICK_AST_UNARY_EXPR &&
+          decomposed_arr->unary_expr.op == UNOP_DEREF) {
+        base_for_access = decomposed_arr->unary_expr.operand;
+      } else {
+        base_for_access = decomposed_arr;
+      }
+
+      // Build: (*base_for_access)[index] or base_for_access[index]
+      bool needs_deref = (decomposed_arr->kind == TICK_AST_UNARY_EXPR &&
+                          decomposed_arr->unary_expr.op == UNOP_DEREF);
+
+      if (needs_deref) {
+        // Create (*tmpN)[index]
+        tick_ast_node_t* deref = create_unary_node(
+            ctx->alloc, UNOP_DEREF, base_for_access, lvalue->loc);
+        access_expr = create_index_node(
+            ctx->alloc, deref, lvalue->index_expr.index, lvalue->loc);
+      } else {
+        // Create base[index] (when base is identifier)
+        access_expr = create_index_node(
+            ctx->alloc, base_for_access, lvalue->index_expr.index, lvalue->loc);
+      }
+      break;
+    }
+
+    case TICK_AST_UNARY_EXPR: {
+      if (lvalue->unary_expr.op == UNOP_DEREF) {
+        // Decompose: *ptr
+        tick_ast_node_t* ptr = lvalue->unary_expr.operand;
+        tick_ast_node_t* decomposed_ptr = decompose_lvalue_chain(ptr, NULL, ctx);
+        if (!decomposed_ptr) return NULL;
+
+        // Build: *decomposed_ptr
+        // If decomposed_ptr is already (*tmpN), we have *(*tmpN) which is tmpN
+        if (decomposed_ptr->kind == TICK_AST_UNARY_EXPR &&
+            decomposed_ptr->unary_expr.op == UNOP_DEREF) {
+          access_expr = create_unary_node(
+              ctx->alloc, UNOP_DEREF, decomposed_ptr, lvalue->loc);
+        } else {
+          access_expr = create_unary_node(
+              ctx->alloc, UNOP_DEREF, decomposed_ptr, lvalue->loc);
+        }
+      } else {
+        ALOG_EXIT("unsupported unary operator for lvalue");
+        return NULL;
+      }
+      break;
+    }
+
+    default:
+      ALOG_EXIT("unsupported lvalue kind: %d", lvalue->kind);
+      return NULL;
+  }
+
+  if (!access_expr) {
+    ALOG_EXIT("failed to create access expression");
+    return NULL;
+  }
+
+  // Create temporary: let __tmpN = &access_expr;
+  // 1. Create address-of expression
+  tick_ast_node_t* addr_expr = create_address_of_lvalue(access_expr, ctx->alloc);
+
+  // 2. Create pointer type for the temporary
+  tick_ast_node_t* ptr_type = create_pointer_type_node(ctx->alloc, lvalue_type);
+
+  // 3. Allocate temporary ID from function scope
+  u32 tmpid = ctx->function_scope->next_tmpid++;
+
+  // 4. Create temp declaration: let __tmpN: *T = &access_expr;
+  tick_ast_node_t* temp_decl = create_temp_decl(
+      ctx->alloc, tmpid, ptr_type, addr_expr);
+  if (!temp_decl) {
+    ALOG_EXIT("failed to create temp decl");
+    return NULL;
+  }
+
+  // 5. Insert the temporary before the current statement
+  insert_temp_in_block(ctx, temp_decl);
+
+  // 6. Create identifier referencing the temp
+  tick_ast_node_t* temp_ident = create_temp_identifier(ctx->alloc, temp_decl);
+  if (!temp_ident) {
+    ALOG_EXIT("failed to create temp identifier");
+    return NULL;
+  }
+
+  // 7. Return: *__tmpN
+  tick_ast_node_t* result = create_unary_node(
+      ctx->alloc, UNOP_DEREF, temp_ident, lvalue->loc);
+
+  // Mark as synthetic to prevent re-decomposition if analyze_stmt is called again
+  result->node_flags |= TICK_NODE_FLAG_SYNTHETIC;
+
+  ALOG_EXIT("created __tmp%u", tmpid);
+  return result;
 }
 
 // Analyze type node - resolve builtin type names and user-defined types
@@ -1137,29 +1588,30 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       // Analyze the struct type
       analyze_type(expr->struct_init_expr.type, ctx);
 
-      // Decompose and analyze field initializer expressions
-      // Codegen requires all field values to be LITERAL or IDENTIFIER_EXPR
+      // Analyze field initializer expressions
       for (tick_ast_node_t* field = expr->struct_init_expr.fields; field;
            field = field->next) {
         if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
-          DECOMPOSE_FIELD(field, struct_init_field.value);
+          // Recursively analyze the field value
           analyze_expr(field->struct_init_field.value, ctx);
         }
       }
+
+      // Note: Decomposition happens at the statement level (in DECL case)
+      // not here, so struct inits can still contain complex expressions
 
       return expr->struct_init_expr.type;
     }
 
     case TICK_AST_ARRAY_INIT_EXPR: {
-      // Decompose and analyze array element expressions
-      // Codegen requires all array elements to be LITERAL or IDENTIFIER_EXPR
-      tick_ast_node_t** elem_ptr = &expr->array_init_expr.elements;
-      while (*elem_ptr) {
-        DECOMPOSE_LIST_ELEM(elem_ptr);
-        analyze_expr(*elem_ptr, ctx);
-        elem_ptr = &(*elem_ptr)->next;
+      // Analyze array element expressions
+      tick_ast_node_t* elem = expr->array_init_expr.elements;
+      while (elem) {
+        analyze_expr(elem, ctx);
+        elem = elem->next;
       }
 
+      // Note: Decomposition happens at the statement level (in DECL case)
       // Array init doesn't have a specific type - inferred from context
       return NULL;
     }
@@ -1705,6 +2157,12 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
     case TICK_AST_DECL: {
       ALOG_ENTER("%.*s", (int)stmt->decl.name.sz, stmt->decl.name.buf);
 
+      // Skip if already analyzed (e.g., compiler-generated temps)
+      if (stmt->decl.analysis_state == TICK_ANALYSIS_STATE_COMPLETED) {
+        ALOG_EXIT("already analyzed");
+        return TICK_ANALYZE_OK;
+      }
+
       // If type is NULL, infer from initializer
       // analyze_expr handles decomposition internally
       if (stmt->decl.type == NULL && stmt->decl.init) {
@@ -1715,12 +2173,26 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
         }
         stmt->decl.type = inferred_type;
         ALOG("inferred: %s", tick_type_str(inferred_type));
+
+        // Decompose struct/array init if needed
+        if (stmt->decl.init->kind == TICK_AST_STRUCT_INIT_EXPR) {
+          stmt->decl.init = decompose_struct_init(stmt->decl.init, ctx);
+        } else if (stmt->decl.init->kind == TICK_AST_ARRAY_INIT_EXPR) {
+          stmt->decl.init = decompose_array_init(stmt->decl.init, ctx);
+        }
       } else if (stmt->decl.init) {
         // Type is explicit, analyze initializer separately
         analyze_expr(stmt->decl.init, ctx);
         if (analyze_has_error(ctx)) {
           ALOG_EXIT("FAILED");
           return TICK_ANALYZE_ERR;
+        }
+
+        // Decompose struct/array init if needed
+        if (stmt->decl.init->kind == TICK_AST_STRUCT_INIT_EXPR) {
+          stmt->decl.init = decompose_struct_init(stmt->decl.init, ctx);
+        } else if (stmt->decl.init->kind == TICK_AST_ARRAY_INIT_EXPR) {
+          stmt->decl.init = decompose_array_init(stmt->decl.init, ctx);
         }
       }
 
@@ -1740,8 +2212,7 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
     }
 
     case TICK_AST_ASSIGN_STMT: {
-      // Don't decompose here - analyze_expr handles it internally
-      // Analyze both sides
+      // Analyze both sides first
       tick_ast_node_t* lhs_type = analyze_expr(stmt->assign_stmt.lhs, ctx);
       if (analyze_has_error(ctx)) {
         return TICK_ANALYZE_ERR;
@@ -1749,6 +2220,25 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       tick_ast_node_t* rhs_type = analyze_expr(stmt->assign_stmt.rhs, ctx);
       if (analyze_has_error(ctx)) {
         return TICK_ANALYZE_ERR;
+      }
+
+      // Phase 2: Multi-step lvalue decomposition to pointer form
+      // Transform complex lvalues into step-by-step pointer temporaries
+      // Example: container.field[index].subfield = value
+      //   → let __tmp0 = &container.field;
+      //     let __tmp1 = &(*__tmp0)[index];
+      //     let __tmp2 = &(*__tmp1).subfield;
+      //     *__tmp2 = value;
+      // Skip for synthetic assignments or already-decomposed lvalues
+      if (!is_simple_lvalue(stmt->assign_stmt.lhs) &&
+          !(stmt->node_flags & TICK_NODE_FLAG_SYNTHETIC) &&
+          !(stmt->assign_stmt.lhs->node_flags & TICK_NODE_FLAG_SYNTHETIC)) {
+        tick_ast_node_t* final_lvalue = decompose_lvalue_chain(
+            stmt->assign_stmt.lhs, lhs_type, ctx);
+        if (!final_lvalue) {
+          return TICK_ANALYZE_ERR;
+        }
+        stmt->assign_stmt.lhs = final_lvalue;
       }
 
       // Type compatibility checking (for future enhancement)
@@ -1877,12 +2367,17 @@ static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
   // Enter function scope
   tick_scope_push(ctx);
 
+  // Save previous function_scope and set to current scope for tmpid allocation
+  tick_scope_t* prev_function_scope = ctx->function_scope;
+  ctx->function_scope = ctx->current_scope;
+
   // Analyze and register parameters in function scope
   for (tick_ast_node_t* param = func->function.params; param;
        param = param->next) {
     if (param->kind == TICK_AST_PARAM) {
       err = analyze_type(param->param.type, ctx);
       if (err != TICK_ANALYZE_OK) {
+        ctx->function_scope = prev_function_scope;
         tick_scope_pop(ctx);
         ALOG_EXIT("FAILED (param type)");
         return err;
@@ -1900,6 +2395,7 @@ static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
   // Check if signature has unresolved dependencies
   // If so, defer body analysis until dependencies are resolved
   if (ctx->pending_deps.head != NULL) {
+    ctx->function_scope = prev_function_scope;
     tick_scope_pop(ctx);
     ALOG_EXIT("signature has dependencies, deferring body analysis");
     return TICK_ANALYZE_OK;
@@ -1908,16 +2404,53 @@ static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
   // Analyze function body
   err = analyze_stmt(func->function.body, ctx);
   if (err != TICK_ANALYZE_OK) {
+    ctx->function_scope = prev_function_scope;
     tick_scope_pop(ctx);
     ALOG_EXIT("FAILED (body)");
     return err;
   }
 
-  // Exit function scope
+  // Restore previous function_scope and exit function scope
+  ctx->function_scope = prev_function_scope;
   tick_scope_pop(ctx);
 
   ALOG_EXIT("fn complete");
   return TICK_ANALYZE_OK;
+}
+
+// Helper to create and collect forward declaration for struct/union
+static void collect_forward_decl(tick_ast_node_t* decl,
+                                  tick_analyze_ctx_t* ctx) {
+  if (!decl || decl->kind != TICK_AST_DECL) return;
+
+  // Manually allocate AST node (can't use ALLOC_AST_NODE macro in void function)
+  tick_allocator_config_t config = {
+      .flags = TICK_ALLOCATOR_ZEROMEM,
+      .alignment2 = 0,
+  };
+  tick_buf_t buf = {0};
+  if (ctx->alloc.realloc(ctx->alloc.ctx, &buf, sizeof(tick_ast_node_t),
+                         &config) != TICK_OK) {
+    return;  // Silently fail on allocation error
+  }
+  tick_ast_node_t* fwd_decl = (tick_ast_node_t*)buf.buf;
+
+  // Copy the declaration but mark as forward
+  *fwd_decl = *decl;
+  fwd_decl->decl.quals.is_forward_decl = true;
+  fwd_decl->node_flags = TICK_NODE_FLAG_SYNTHETIC | TICK_NODE_FLAG_ANALYZED;
+  fwd_decl->next = NULL;
+  fwd_decl->prev = NULL;
+
+  // Add to forward declarations list (manually, using next/prev pointers)
+  if (!ctx->forward_decls.head) {
+    ctx->forward_decls.head = fwd_decl;
+    ctx->forward_decls.tail = fwd_decl;
+  } else {
+    ctx->forward_decls.tail->next = fwd_decl;
+    fwd_decl->prev = ctx->forward_decls.tail;
+    ctx->forward_decls.tail = fwd_decl;
+  }
 }
 
 // Analyze struct declaration - resolve field types
@@ -1938,6 +2471,9 @@ static tick_analyze_error_t analyze_struct_decl(tick_ast_node_t* decl,
     ALOG_EXIT("FAILED");
     return err;
   }
+
+  // Collect forward declaration for this struct
+  collect_forward_decl(decl, ctx);
 
   ALOG_EXIT("struct complete");
   return TICK_ANALYZE_OK;
@@ -2281,6 +2817,9 @@ static tick_analyze_error_t analyze_union_decl(tick_ast_node_t* decl,
     return err;
   }
 
+  // Collect forward declaration for this union
+  collect_forward_decl(decl, ctx);
+
   ALOG_EXIT("union complete");
   return TICK_ANALYZE_OK;
 }
@@ -2493,6 +3032,21 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
       ALOG_EXIT("OK");
       decl->decl.analysis_state = TICK_ANALYSIS_STATE_COMPLETED;
     }
+  }
+
+  // PASS 3: Prepend forward declarations to module.decls
+  if (ctx->forward_decls.head) {
+    ALOG("Prepending %s forward declarations",
+         ctx->forward_decls.tail == ctx->forward_decls.head ? "1" : "multiple");
+
+    // Link forward_decls.tail to the current head of module.decls
+    ctx->forward_decls.tail->next = module->module.decls;
+    if (module->module.decls) {
+      module->module.decls->prev = ctx->forward_decls.tail;
+    }
+
+    // Update module.decls to point to forward_decls.head
+    module->module.decls = ctx->forward_decls.head;
   }
 
   goto cleanup;
