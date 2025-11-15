@@ -15,58 +15,59 @@
 // Keyword lookup table
 typedef struct {
   const char* keyword;
+  usz length;
   tick_tok_type_t type;
 } keyword_entry_t;
 
 static const keyword_entry_t keywords[] = {
-    {"align", TICK_TOK_ALIGN},
-    {"and", TICK_TOK_AND},
-    {"as", TICK_TOK_AS},
-    {"async", TICK_TOK_ASYNC},
-    {"bool", TICK_TOK_BOOL},
-    {"break", TICK_TOK_BREAK},
-    {"case", TICK_TOK_CASE},
-    {"catch", TICK_TOK_CATCH},
-    {"continue", TICK_TOK_CONTINUE},
-    {"default", TICK_TOK_DEFAULT},
-    {"defer", TICK_TOK_DEFER},
-    {"else", TICK_TOK_ELSE},
-    {"enum", TICK_TOK_ENUM},
-    {"errdefer", TICK_TOK_ERRDEFER},
-    {"extern", TICK_TOK_EXTERN},
-    {"false", TICK_TOK_BOOL_LITERAL},
-    {"fn", TICK_TOK_FN},
-    {"for", TICK_TOK_FOR},
-    {"if", TICK_TOK_IF},
-    {"i16", TICK_TOK_I16},
-    {"i32", TICK_TOK_I32},
-    {"i64", TICK_TOK_I64},
-    {"i8", TICK_TOK_I8},
-    {"import", TICK_TOK_IMPORT},
-    {"isz", TICK_TOK_ISZ},
-    {"let", TICK_TOK_LET},
-    {"null", TICK_TOK_NULL},
-    {"or", TICK_TOK_OR},
-    {"orelse", TICK_TOK_ORELSE},
-    {"packed", TICK_TOK_PACKED},
-    {"pub", TICK_TOK_PUB},
-    {"resume", TICK_TOK_RESUME},
-    {"return", TICK_TOK_RETURN},
-    {"struct", TICK_TOK_STRUCT},
-    {"suspend", TICK_TOK_SUSPEND},
-    {"switch", TICK_TOK_SWITCH},
-    {"true", TICK_TOK_BOOL_LITERAL},
-    {"try", TICK_TOK_TRY},
-    {"u16", TICK_TOK_U16},
-    {"u32", TICK_TOK_U32},
-    {"u64", TICK_TOK_U64},
-    {"u8", TICK_TOK_U8},
-    {"undefined", TICK_TOK_UNDEFINED},
-    {"union", TICK_TOK_UNION},
-    {"usz", TICK_TOK_USZ},
-    {"var", TICK_TOK_VAR},
-    {"void", TICK_TOK_VOID},
-    {"volatile", TICK_TOK_VOLATILE},
+    {"align", 5, TICK_TOK_ALIGN},
+    {"and", 3, TICK_TOK_AND},
+    {"as", 2, TICK_TOK_AS},
+    {"async", 5, TICK_TOK_ASYNC},
+    {"bool", 4, TICK_TOK_BOOL},
+    {"break", 5, TICK_TOK_BREAK},
+    {"case", 4, TICK_TOK_CASE},
+    {"catch", 5, TICK_TOK_CATCH},
+    {"continue", 8, TICK_TOK_CONTINUE},
+    {"default", 7, TICK_TOK_DEFAULT},
+    {"defer", 5, TICK_TOK_DEFER},
+    {"else", 4, TICK_TOK_ELSE},
+    {"enum", 4, TICK_TOK_ENUM},
+    {"errdefer", 8, TICK_TOK_ERRDEFER},
+    {"extern", 6, TICK_TOK_EXTERN},
+    {"false", 5, TICK_TOK_BOOL_LITERAL},
+    {"fn", 2, TICK_TOK_FN},
+    {"for", 3, TICK_TOK_FOR},
+    {"i16", 3, TICK_TOK_I16},
+    {"i32", 3, TICK_TOK_I32},
+    {"i64", 3, TICK_TOK_I64},
+    {"i8", 2, TICK_TOK_I8},
+    {"if", 2, TICK_TOK_IF},
+    {"import", 6, TICK_TOK_IMPORT},
+    {"isz", 3, TICK_TOK_ISZ},
+    {"let", 3, TICK_TOK_LET},
+    {"null", 4, TICK_TOK_NULL},
+    {"or", 2, TICK_TOK_OR},
+    {"orelse", 6, TICK_TOK_ORELSE},
+    {"packed", 6, TICK_TOK_PACKED},
+    {"pub", 3, TICK_TOK_PUB},
+    {"resume", 6, TICK_TOK_RESUME},
+    {"return", 6, TICK_TOK_RETURN},
+    {"struct", 6, TICK_TOK_STRUCT},
+    {"suspend", 7, TICK_TOK_SUSPEND},
+    {"switch", 6, TICK_TOK_SWITCH},
+    {"true", 4, TICK_TOK_BOOL_LITERAL},
+    {"try", 3, TICK_TOK_TRY},
+    {"u16", 3, TICK_TOK_U16},
+    {"u32", 3, TICK_TOK_U32},
+    {"u64", 3, TICK_TOK_U64},
+    {"u8", 2, TICK_TOK_U8},
+    {"undefined", 9, TICK_TOK_UNDEFINED},
+    {"union", 5, TICK_TOK_UNION},
+    {"usz", 3, TICK_TOK_USZ},
+    {"var", 3, TICK_TOK_VAR},
+    {"void", 4, TICK_TOK_VOID},
+    {"volatile", 8, TICK_TOK_VOLATILE},
 };
 
 static const usz keyword_count = sizeof(keywords) / sizeof(keywords[0]);
@@ -245,14 +246,38 @@ static uint64_t parse_decimal_number(const u8* start, usz length,
 }
 
 static tick_tok_type_t check_keyword(const u8* start, usz length) {
-  // Linear search through keywords
-  for (usz i = 0; i < keyword_count; i++) {
-    const char* kw = keywords[i].keyword;
-    usz kw_len = strlen(kw);
-    if (length == kw_len && memcmp(start, kw, length) == 0) {
-      return keywords[i].type;
+  // Binary search through keywords
+  isz left = 0;
+  isz right = (isz)keyword_count - 1;
+
+  while (left <= right) {
+    isz mid = left + (right - left) / 2;
+    const char* kw = keywords[mid].keyword;
+    usz kw_len = keywords[mid].length;
+
+    // Compare strings lexicographically
+    usz min_len = length < kw_len ? length : kw_len;
+    int cmp = memcmp(start, kw, min_len);
+
+    // If equal up to min_len, the shorter string is "less than"
+    if (cmp == 0) {
+      if (length < kw_len) {
+        cmp = -1;
+      } else if (length > kw_len) {
+        cmp = 1;
+      } else {
+        // Exact match
+        return keywords[mid].type;
+      }
+    }
+
+    if (cmp < 0) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
     }
   }
+
   return TICK_TOK_IDENT;
 }
 

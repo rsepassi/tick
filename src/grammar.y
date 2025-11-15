@@ -90,8 +90,12 @@ static void parse_error(tick_parse_t* parse, const char* msg) {
     const char* tok_str = tick_tok_format(&TOKEN, tok_buf, sizeof(tok_buf));
 
     char err_msg[512];
-    snprintf(err_msg, sizeof(err_msg), "Syntax error at %s", tok_str);
-    parse_error(parse, err_msg);
+    snprintf(err_msg, sizeof(err_msg), "syntax error: unexpected %s", tok_str);
+
+    // Use centralized error formatting for rich output
+    tick_format_error_with_context(parse->errbuf, parse->source,
+                                   TOKEN.line, TOKEN.col, err_msg, 0);
+    parse->has_error = true;
 }
 
 // Parse failure handler

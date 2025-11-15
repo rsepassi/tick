@@ -314,10 +314,11 @@ void Parse(void* yyp, int yymajor, tick_tok_t yyminor, tick_parse_t* parse);
 void ParseFree(void* p, void (*freeProc)(void*));
 void ParseTrace(FILE* stream, char* zPrefix);
 
-void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc,
-                     tick_buf_t errbuf) {
+void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf,
+                     tick_buf_t source) {
   parse->alloc = alloc;
   parse->errbuf = errbuf;
+  parse->source = source;
   parse->root.root = NULL;
   parse->has_error = false;
 
@@ -352,6 +353,152 @@ tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok) {
     Parse(parse->lemon_parser, tok->type, *tok, parse);
   }
   return TICK_OK;
+}
+
+// ============================================================================
+// Error Reporting Functions
+// ============================================================================
+
+// Find byte offset in source buffer for a given line/column location
+// Returns the offset, or source.sz if location is past EOF
+static usz tick_source_offset_for_location(tick_buf_t source, usz line,
+                                           usz col) {
+  if (!source.buf || source.sz == 0) return 0;
+
+  usz current_line = 1;
+  usz current_col = 1;
+  usz offset = 0;
+
+  while (offset < source.sz && current_line < line) {
+    if (source.buf[offset] == '\n') {
+      current_line++;
+      current_col = 1;
+    } else {
+      current_col++;
+    }
+    offset++;
+  }
+
+  // Now we're on the target line, advance to target column
+  while (offset < source.sz && current_col < col) {
+    if (source.buf[offset] == '\n') break;  // Stop at end of line
+    current_col++;
+    offset++;
+  }
+
+  return offset;
+}
+
+// Extract a single line from source buffer starting at given offset
+// Returns a tick_buf_t pointing into source (not a copy)
+// Result does not include the newline character
+static tick_buf_t tick_extract_line_at_offset(tick_buf_t source, usz offset) {
+  tick_buf_t result = {NULL, 0};
+  if (!source.buf || offset >= source.sz) return result;
+
+  // Find start of line (move backward to previous newline or start)
+  usz line_start = offset;
+  while (line_start > 0 && source.buf[line_start - 1] != '\n') {
+    line_start--;
+  }
+
+  // Find end of line (move forward to next newline or EOF)
+  usz line_end = offset;
+  while (line_end < source.sz && source.buf[line_end] != '\n') {
+    line_end++;
+  }
+
+  result.buf = source.buf + line_start;
+  result.sz = line_end - line_start;
+  return result;
+}
+
+// Format error message with source context and write to errbuf
+// Output format:
+//   {line}:{col}: {message}
+//     {line} | {source_line}
+//            | {caret}
+void tick_format_error_with_context(tick_buf_t errbuf, tick_buf_t source,
+                                    usz line, usz col, const char* message,
+                                    usz span_len) {
+  if (!errbuf.buf || errbuf.sz == 0) return;
+
+  char* err = (char*)errbuf.buf;
+  usz err_sz = errbuf.sz;
+  usz written = 0;
+
+  // Line 1: "line:col: message"
+  int n = snprintf(err + written, err_sz - written, "%zu:%zu: %s\n", line, col,
+                   message);
+  if (n < 0 || (usz)n >= err_sz - written) return;  // Truncated
+  written += n;
+
+  // Extract source line if available
+  if (!source.buf || source.sz == 0) {
+    return;  // No source available, stop here
+  }
+
+  usz offset = tick_source_offset_for_location(source, line, col);
+  tick_buf_t line_buf = tick_extract_line_at_offset(source, offset);
+
+  if (!line_buf.buf || line_buf.sz == 0) {
+    return;  // Could not extract line
+  }
+
+  // Calculate number of digits in line number for padding
+  usz line_num_width = 0;
+  usz tmp = line;
+  do {
+    line_num_width++;
+    tmp /= 10;
+  } while (tmp > 0);
+
+  // Line 2: "  {line} | {source_line}"
+  n = snprintf(err + written, err_sz - written, "%*s%zu | ", 0, "", line);
+  if (n < 0 || (usz)n >= err_sz - written) return;
+  written += n;
+
+  // Append source line (handle tabs: convert to spaces)
+  for (usz i = 0; i < line_buf.sz && written < err_sz - 1; i++) {
+    char c = line_buf.buf[i];
+    if (c == '\t') {
+      // Convert tab to single space for simplicity
+      err[written++] = ' ';
+    } else {
+      err[written++] = c;
+    }
+  }
+
+  // Add newline after source line
+  if (written < err_sz - 1) {
+    err[written++] = '\n';
+  }
+
+  // Line 3: "       | {spaces}^{span}"
+  // Calculate padding: line number width + " | "
+  n = snprintf(err + written, err_sz - written, "%*s | ", (int)line_num_width,
+               "");
+  if (n < 0 || (usz)n >= err_sz - written) return;
+  written += n;
+
+  // Add spaces up to error column (col is 1-indexed)
+  usz spaces = (col > 1) ? (col - 1) : 0;
+  for (usz i = 0; i < spaces && written < err_sz - 1; i++) {
+    err[written++] = ' ';
+  }
+
+  // Add caret(s) for the span
+  usz carets = (span_len > 0) ? span_len : 1;
+  for (usz i = 0; i < carets && written < err_sz - 1; i++) {
+    err[written++] = '^';
+  }
+
+  // Null-terminate
+  if (written < err_sz) {
+    err[written] = '\0';
+  } else {
+    err[err_sz - 1] = '\0';
+  }
 }
 
 // ============================================================================

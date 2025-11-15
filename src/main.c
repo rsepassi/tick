@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
   tick_lex_t lex;
   tick_lex_init(&lex, input, str_pool_alloc, errbuf);
   tick_parse_t parse;
-  tick_parse_init(&parse, ast_pool_alloc, errbuf);
+  tick_parse_init(&parse, ast_pool_alloc, errbuf, input);
 
 #define COMPILE_ERR()                 \
   do {                                \
@@ -85,7 +85,8 @@ int main(int argc, char** argv) {
   }
 
   // analyze, typecheck
-  if (tick_ast_analyze(&root, parse.alloc, errbuf) != TICK_OK) COMPILE_ERR();
+  if (tick_ast_analyze(&root, parse.alloc, errbuf, input) != TICK_OK)
+    COMPILE_ERR();
 
 #undef COMPILE_ERR
 

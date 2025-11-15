@@ -780,7 +780,8 @@ struct tick_analyze_ctx_s {
   tick_ast_node_t* module;       // Pointer to MODULE node (ast->root)
   tick_alloc_t alloc;
   tick_buf_t errbuf;
-  tick_work_queue_t work_queue;          // Queue for lazy analysis
+  tick_buf_t source;             // Source code buffer (for error reporting)
+  tick_work_queue_t work_queue;  // Queue for lazy analysis
   tick_dependency_list_t pending_deps;   // Dependencies for current declaration
   tick_dependency_list_t forward_decls;  // Forward declarations to prepend
   int scope_depth;  // Current scope depth (0=module, 1+=function/block)
@@ -790,6 +791,15 @@ struct tick_analyze_ctx_s {
   tick_ast_node_t*
       current_stmt;  // Current statement being analyzed (for insertion point)
 };
+
+// Scope guard for RAII-style state management in analysis
+typedef struct {
+  tick_analyze_ctx_t* ctx;
+  tick_scope_t* prev_function_scope;
+  tick_ast_node_t* prev_block;
+  tick_ast_node_t* prev_stmt;
+  bool did_push_scope;  // Track if we called tick_scope_push()
+} tick_scope_guard_t;
 
 // AST node metadata flags
 // These flags track the provenance and state of AST nodes explicitly,
@@ -831,8 +841,10 @@ struct tick_ast_node_s {
       tick_ast_node_t* type;
       tick_ast_node_t* init;
       tick_qualifier_flags_t quals;
-      u32 tmpid;                     // 0=user-named, >0=unnamed temporary
-      u8 analysis_state;             // tick_analysis_state_t
+      u32 tmpid;           // 0=user-named, >0=unnamed temporary
+      u8 analysis_state;   // tick_analysis_state_t (overall completion state)
+      u8 signature_state;  // tick_analysis_state_t (function signature only)
+      u8 body_state;       // tick_analysis_state_t (function body only)
       tick_ast_node_t* next_queued;  // Intrusive linked list for work queue /
                                      // dependency tracking
       bool in_pending_deps;  // True if currently in pending_deps list (O(1)
@@ -1045,6 +1057,7 @@ typedef struct {
 typedef struct {
   tick_alloc_t alloc;
   tick_buf_t errbuf;
+  tick_buf_t source;  // Source code buffer (for error reporting)
   tick_ast_t root;
   void* lemon_parser;  // Lemon parser instance
   bool has_error;      // Set to true when parse error occurs
@@ -1078,14 +1091,19 @@ void tick_lex_next(tick_lex_t* lex, tick_tok_t* tok);
 const char* tick_tok_format(tick_tok_t* tok, char* buf, usz buf_sz);
 
 // Parser functions
-void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc,
-                     tick_buf_t errbuf);
+void tick_parse_init(tick_parse_t* parse, tick_alloc_t alloc, tick_buf_t errbuf,
+                     tick_buf_t source);
 tick_err_t tick_parse_tok(tick_parse_t* parse, tick_tok_t* tok);
+
+// Error reporting functions
+void tick_format_error_with_context(tick_buf_t errbuf, tick_buf_t source,
+                                    usz line, usz col, const char* message,
+                                    usz span_len);
 
 // AST functions
 const char* tick_ast_kind_str(tick_ast_node_kind_t kind);
 tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
-                            tick_buf_t errbuf);
+                            tick_buf_t errbuf, tick_buf_t source);
 
 // AST helper functions (canonical query API)
 // Node state queries
@@ -1136,7 +1154,7 @@ void tick_dependency_list_clear(tick_dependency_list_t* list);
 void tick_dependency_list_add(tick_dependency_list_t* list,
                               tick_ast_node_t* decl);
 void tick_analyze_ctx_init(tick_analyze_ctx_t* ctx, tick_alloc_t alloc,
-                           tick_buf_t errbuf);
+                           tick_buf_t errbuf, tick_buf_t source);
 void tick_analyze_ctx_destroy(tick_analyze_ctx_t* ctx);
 void tick_scope_push(tick_analyze_ctx_t* ctx);
 void tick_scope_pop(tick_analyze_ctx_t* ctx);

@@ -1,1 +1,3 @@
 ERROR: 3:3: unknown builtin '@foo'
+3 |   @foo("test");
+  |   ^

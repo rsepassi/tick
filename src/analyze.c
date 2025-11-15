@@ -6,11 +6,26 @@
 // Analysis Debug Logging
 // ============================================================================
 
+// ============================================================================
+// Error Reporting Utilities
+// ============================================================================
+
 // Analysis error macro - reports error with location context
-#define ANALYSIS_ERROR(ctx, loc, fmt, ...)                                \
-  do {                                                                    \
-    snprintf((char*)(ctx)->errbuf.buf, (ctx)->errbuf.sz, "%zu:%zu: " fmt, \
-             (loc).line, (loc).col, ##__VA_ARGS__);                       \
+#define ANALYSIS_ERROR(ctx, loc, fmt, ...)                                   \
+  do {                                                                       \
+    char __msg_buf[512];                                                     \
+    snprintf(__msg_buf, sizeof(__msg_buf), fmt, ##__VA_ARGS__);              \
+    tick_format_error_with_context((ctx)->errbuf, (ctx)->source, (loc).line, \
+                                   (loc).col, __msg_buf, 0);                 \
+  } while (0)
+
+// Analysis error with span (underlines multiple characters)
+#define ANALYSIS_ERROR_SPAN(ctx, loc, span_len, fmt, ...)                    \
+  do {                                                                       \
+    char __msg_buf[512];                                                     \
+    snprintf(__msg_buf, sizeof(__msg_buf), fmt, ##__VA_ARGS__);              \
+    tick_format_error_with_context((ctx)->errbuf, (ctx)->source, (loc).line, \
+                                   (loc).col, __msg_buf, (span_len));        \
   } while (0)
 
 #ifdef TICK_DEBUG_ANALYZE
@@ -891,13 +906,38 @@ static void insert_temp_in_block(tick_analyze_ctx_t* ctx,
   ALOG("  inserted __tmp%u before current statement", temp_decl->decl.tmpid);
 }
 
-// Forward declarations (needed for decompose_to_simple)
+// Forward declarations (needed for decompose_to_simple and mutual recursion)
 static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
                                      tick_analyze_ctx_t* ctx);
 static tick_analyze_error_t analyze_type(tick_ast_node_t* type_node,
                                          tick_analyze_ctx_t* ctx);
 static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
                                          tick_analyze_ctx_t* ctx);
+
+// Expression analysis helpers (dispatch targets)
+// NOTE: Only helpers that have been extracted are declared here
+static tick_ast_node_t* analyze_literal_expr(tick_ast_node_t* expr,
+                                             tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_binary_expr(tick_ast_node_t* expr,
+                                            tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_identifier_expr(tick_ast_node_t* expr,
+                                                tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_unary_expr(tick_ast_node_t* expr,
+                                           tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_cast_expr(tick_ast_node_t* expr,
+                                          tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_struct_init_expr(tick_ast_node_t* expr,
+                                                 tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_array_init_expr(tick_ast_node_t* expr,
+                                                tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_call_expr(tick_ast_node_t* expr,
+                                          tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_index_expr(tick_ast_node_t* expr,
+                                           tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_unwrap_panic_expr(tick_ast_node_t* expr,
+                                                  tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_field_access_expr(tick_ast_node_t* expr,
+                                                  tick_analyze_ctx_t* ctx);
 
 // ============================================================================
 // Complex Helper Functions (require forward declarations)
@@ -1658,753 +1698,859 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
   if (!expr) return NULL;
 
   switch (expr->kind) {
-    case TICK_AST_LITERAL: {
-      // Infer type based on literal kind
-      if (expr->literal.kind == TICK_LIT_STRING) {
-        // String literals are *u8 (pointer to u8)
-        tick_ast_node_t* u8_type = alloc_type_node(ctx->alloc, TICK_TYPE_U8);
-        if (!u8_type) return NULL;
+    case TICK_AST_LITERAL:
+      return analyze_literal_expr(expr, ctx);
 
-        // Create pointer type node
+    case TICK_AST_BINARY_EXPR:
+      return analyze_binary_expr(expr, ctx);
+
+    case TICK_AST_UNARY_EXPR:
+      return analyze_unary_expr(expr, ctx);
+
+    case TICK_AST_CAST_EXPR:
+      return analyze_cast_expr(expr, ctx);
+
+    case TICK_AST_STRUCT_INIT_EXPR:
+      return analyze_struct_init_expr(expr, ctx);
+
+    case TICK_AST_ARRAY_INIT_EXPR:
+      return analyze_array_init_expr(expr, ctx);
+
+    case TICK_AST_IDENTIFIER_EXPR:
+      return analyze_identifier_expr(expr, ctx);
+
+    case TICK_AST_CALL_EXPR:
+      return analyze_call_expr(expr, ctx);
+
+    case TICK_AST_INDEX_EXPR:
+      return analyze_index_expr(expr, ctx);
+
+    case TICK_AST_UNWRAP_PANIC_EXPR:
+      return analyze_unwrap_panic_expr(expr, ctx);
+
+    case TICK_AST_FIELD_ACCESS_EXPR:
+      return analyze_field_access_expr(expr, ctx);
+
+    default:
+      return NULL;
+  }
+}
+
+// ============================================================================
+// Expression Analysis Helper Implementations
+// ============================================================================
+
+// Helper to determine if we need a dependency on a declaration for its type
+// Returns true if the type is not yet available or fully resolved
+static bool needs_type_dependency(tick_ast_node_t* decl,
+                                  tick_ast_node_t* type) {
+  (void)decl;  // Parameter reserved for future use
+
+  // If no type at all, need the declaration
+  if (!type) return true;
+
+  // If type is unresolved (TICK_TYPE_UNKNOWN), need the declaration
+  if (tick_type_is_unresolved(type)) return true;
+
+  // For user-defined types, ensure the type definition is available
+  // Note: We don't need full analysis - type entry is sufficient for forward
+  // references (pointers can use forward declarations)
+  if (tick_type_is_user_defined(type) && !type->type_named.type_entry) {
+    return true;
+  }
+
+  // For function types, we only need the signature, not the body
+  // If decl.type exists and is resolved, we have the signature
+  if (type->kind == TICK_AST_TYPE_FUNCTION) {
+    // Check if all param types and return type are resolved
+    if (type->type_function.return_type &&
+        tick_type_is_unresolved(type->type_function.return_type)) {
+      return true;
+    }
+    for (tick_ast_node_t* param = type->type_function.params; param;
+         param = param->next) {
+      if (param->kind == TICK_AST_PARAM && param->param.type &&
+          tick_type_is_unresolved(param->param.type)) {
+        return true;
+      }
+    }
+    // Signature is resolved, we don't need to wait for body
+    return false;
+  }
+
+  // Type is resolved and available
+  return false;
+}
+
+static tick_ast_node_t* analyze_literal_expr(tick_ast_node_t* expr,
+                                             tick_analyze_ctx_t* ctx) {
+  // Infer type based on literal kind
+  if (expr->literal.kind == TICK_LIT_STRING) {
+    // String literals are *u8 (pointer to u8)
+    tick_ast_node_t* u8_type = alloc_type_node(ctx->alloc, TICK_TYPE_U8);
+    if (!u8_type) return NULL;
+
+    // Create pointer type node
+    tick_ast_node_t* ptr_type;
+    ALLOC_AST_NODE(ctx->alloc, ptr_type);
+    ptr_type->kind = TICK_AST_TYPE_POINTER;
+    ptr_type->type_pointer.pointee_type = u8_type;
+    return ptr_type;
+  } else if (expr->literal.kind == TICK_LIT_BOOL) {
+    // Transform bool literal to uint: true -> 1, false -> 0
+    expr->literal.kind = TICK_LIT_UINT;
+    expr->literal.data.uint_value = expr->literal.data.bool_value ? 1 : 0;
+    return alloc_type_node(ctx->alloc, TICK_TYPE_BOOL);
+  } else if (expr->literal.kind == TICK_LIT_INT) {
+    // Signed integer literals: use smallest type that fits
+    int64_t value = expr->literal.data.int_value;
+    if (value >= -128 && value <= 127) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I8);
+    } else if (value >= -32768 && value <= 32767) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I16);
+    } else if (value >= -2147483648LL && value <= 2147483647LL) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I32);
+    } else {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I64);
+    }
+  } else if (expr->literal.kind == TICK_LIT_UINT) {
+    // Unsigned integer literals: prefer signed types
+    uint64_t value = expr->literal.data.uint_value;
+    if (value <= 127) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I8);
+    } else if (value <= 32767) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I16);
+    } else if (value <= 2147483647) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I32);
+    } else if (value <= 9223372036854775807ULL) {
+      return alloc_type_node(ctx->alloc, TICK_TYPE_I64);
+    } else {
+      // Only use unsigned if value doesn't fit in i64
+      return alloc_type_node(ctx->alloc, TICK_TYPE_U64);
+    }
+  } else {
+    // Fallback for other literal types
+    return alloc_type_node(ctx->alloc, TICK_TYPE_I32);
+  }
+}
+
+static tick_ast_node_t* analyze_binary_expr(tick_ast_node_t* expr,
+                                            tick_analyze_ctx_t* ctx) {
+  RETURN_IF_RESOLVED(expr, binary_expr);
+
+#ifdef TICK_DEBUG_ANALYZE
+  ALOG_ENTER("binary: %s", tick_binop_str(expr->binary_expr.op));
+#endif
+
+  // Decompose left and right operands if complex
+  DECOMPOSE_FIELD(expr, binary_expr.left);
+  DECOMPOSE_FIELD(expr, binary_expr.right);
+
+  // Analyze operands (after decomposition, they should be simple)
+  tick_ast_node_t* left_type = analyze_expr(expr->binary_expr.left, ctx);
+  tick_ast_node_t* right_type = analyze_expr(expr->binary_expr.right, ctx);
+
+  tick_ast_node_t* result_type = NULL;
+
+  // Special handling for orelse operator
+  if (expr->binary_expr.op == BINOP_ORELSE) {
+    if (left_type && left_type->kind == TICK_AST_TYPE_OPTIONAL) {
+      result_type = left_type->type_optional.inner_type;
+    } else if (right_type) {
+      result_type = right_type;
+    }
+  } else {
+    // Check if both operands have valid, resolved types
+    if (!left_type || !right_type) {
+      result_type = NULL;
+    } else if (tick_type_is_unresolved(left_type)) {
+      result_type = NULL;
+    } else if (tick_type_is_unresolved(right_type)) {
+      result_type = NULL;
+    } else if (left_type->kind == TICK_AST_TYPE_NAMED) {
+      result_type =
+          alloc_type_node(ctx->alloc, left_type->type_named.builtin_type);
+    }
+  }
+
+  expr->binary_expr.resolved_type = result_type;
+
+  // Populate builtin semantic category
+  expr->binary_expr.builtin = (tick_builtin_t)0;
+  if (result_type && result_type->kind == TICK_AST_TYPE_NAMED) {
+    tick_builtin_type_t type = result_type->type_named.builtin_type;
+    tick_builtin_t builtin = map_binop_to_builtin(expr->binary_expr.op, type);
+    if (builtin != 0) {
+      expr->binary_expr.builtin = builtin;
+    }
+  }
+
+#ifdef TICK_DEBUG_ANALYZE
+  ALOG_EXIT("-> %s", tick_type_str(result_type));
+#endif
+  return result_type;
+}
+
+static tick_ast_node_t* analyze_identifier_expr(tick_ast_node_t* expr,
+                                                tick_analyze_ctx_t* ctx) {
+  // Check if this is an AT builtin (@identifier)
+  if (expr->identifier_expr.name.sz > 0 &&
+      expr->identifier_expr.name.buf[0] == '@') {
+    // Resolve @builtin string to enum
+    if (expr->identifier_expr.name.sz == 4 &&
+        memcmp(expr->identifier_expr.name.buf, "@dbg", 4) == 0) {
+      expr->identifier_expr.at_builtin = TICK_AT_BUILTIN_DBG;
+      return NULL;
+    } else if (expr->identifier_expr.name.sz == 6 &&
+               memcmp(expr->identifier_expr.name.buf, "@panic", 6) == 0) {
+      expr->identifier_expr.at_builtin = TICK_AT_BUILTIN_PANIC;
+      return NULL;
+    } else {
+      ANALYSIS_ERROR(ctx, expr->loc, "unknown builtin '%.*s'",
+                     (int)expr->identifier_expr.name.sz,
+                     expr->identifier_expr.name.buf);
+      return NULL;
+    }
+  }
+
+  // Look up identifier in symbol table and cache the result
+  if (!expr->identifier_expr.symbol) {
+    expr->identifier_expr.symbol = tick_scope_lookup_symbol(
+        ctx->current_scope, expr->identifier_expr.name);
+  }
+
+  tick_symbol_t* sym = expr->identifier_expr.symbol;
+  if (!sym) {
+    ANALYSIS_ERROR(ctx, expr->loc, "undefined identifier '%.*s'",
+                   (int)expr->identifier_expr.name.sz,
+                   expr->identifier_expr.name.buf);
+    return NULL;
+  }
+
+  // Annotate with prefix requirement for codegen
+  expr->identifier_expr.needs_user_prefix = identifier_needs_user_prefix(expr);
+
+  // Get type from symbol's declaration
+  tick_ast_node_t* decl = sym->decl;
+  tick_ast_node_t* result_type = get_symbol_type(sym);
+
+  // Track dependencies for module-level declarations
+  if (decl && decl->kind == TICK_AST_DECL) {
+    tick_symbol_t* module_sym =
+        tick_scope_lookup_symbol(ctx->module_scope, expr->identifier_expr.name);
+    bool is_module_level = (module_sym && module_sym->decl == decl);
+
+    bool needs_dep = needs_type_dependency(decl, result_type);
+
+    if (is_module_level && needs_dep &&
+        decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED &&
+        decl->decl.analysis_state != TICK_ANALYSIS_STATE_IN_PROGRESS) {
+      tick_dependency_list_add(&ctx->pending_deps, decl);
+      ALOG("! dep: %.*s", (int)decl->decl.name.sz, decl->decl.name.buf);
+    }
+  }
+
+  if (!result_type) {
+    ALOG("id: %.*s -> type not available yet",
+         (int)expr->identifier_expr.name.sz, expr->identifier_expr.name.buf);
+    return NULL;
+  }
+
+  ALOG("id: %.*s -> %s", (int)expr->identifier_expr.name.sz,
+       expr->identifier_expr.name.buf, tick_type_str(result_type));
+
+  return result_type;
+}
+
+static tick_ast_node_t* analyze_unary_expr(tick_ast_node_t* expr,
+                                           tick_analyze_ctx_t* ctx) {
+  RETURN_IF_RESOLVED(expr, unary_expr);
+
+  ALOG_ENTER("unary: %s", tick_unop_str(expr->unary_expr.op));
+
+  // Decompose complex operands (nested operations, calls, etc.)
+  DECOMPOSE_FIELD(expr, unary_expr.operand);
+
+  // Analyze operand
+  tick_ast_node_t* operand_type = analyze_expr(expr->unary_expr.operand, ctx);
+
+  // Check if operand type is valid and resolved
+  tick_ast_node_t* result_type = NULL;
+  if (!operand_type) {
+    // Operand not analyzed yet
+    result_type = NULL;
+  } else if (tick_type_is_unresolved(operand_type)) {
+    // Operand type not resolved yet
+    result_type = NULL;
+  } else {
+    // Determine result type based on operator
+    switch (expr->unary_expr.op) {
+      case UNOP_ADDR: {
+        // Address-of operator: T -> *T
         tick_ast_node_t* ptr_type;
         ALLOC_AST_NODE(ctx->alloc, ptr_type);
         ptr_type->kind = TICK_AST_TYPE_POINTER;
-        ptr_type->type_pointer.pointee_type = u8_type;
-        return ptr_type;
-      } else if (expr->literal.kind == TICK_LIT_BOOL) {
-        // Transform bool literal to uint: true -> 1, false -> 0
-        expr->literal.kind = TICK_LIT_UINT;
-        expr->literal.data.uint_value = expr->literal.data.bool_value ? 1 : 0;
-        return alloc_type_node(ctx->alloc, TICK_TYPE_BOOL);
-      } else if (expr->literal.kind == TICK_LIT_INT) {
-        // Signed integer literals: use smallest type that fits
-        int64_t value = expr->literal.data.int_value;
-        if (value >= -128 && value <= 127) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I8);
-        } else if (value >= -32768 && value <= 32767) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I16);
-        } else if (value >= -2147483648LL && value <= 2147483647LL) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I32);
-        } else {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I64);
-        }
-      } else if (expr->literal.kind == TICK_LIT_UINT) {
-        // Unsigned integer literals: prefer signed types
-        uint64_t value = expr->literal.data.uint_value;
-        if (value <= 127) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I8);
-        } else if (value <= 32767) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I16);
-        } else if (value <= 2147483647) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I32);
-        } else if (value <= 9223372036854775807ULL) {
-          return alloc_type_node(ctx->alloc, TICK_TYPE_I64);
-        } else {
-          // Only use unsigned if value doesn't fit in i64
-          return alloc_type_node(ctx->alloc, TICK_TYPE_U64);
-        }
-      } else {
-        // Fallback for other literal types
-        return alloc_type_node(ctx->alloc, TICK_TYPE_I32);
-      }
-    }
-
-    case TICK_AST_BINARY_EXPR: {
-      RETURN_IF_RESOLVED(expr, binary_expr);
-
-      ALOG_ENTER("binary: %s", tick_binop_str(expr->binary_expr.op));
-
-      // Decompose left and right operands if complex
-      // This handles cases like: (a + b) + c -> tmp1 = a + b; tmp1 + c
-      DECOMPOSE_FIELD(expr, binary_expr.left);
-      DECOMPOSE_FIELD(expr, binary_expr.right);
-
-      // Analyze operands (after decomposition, they should be simple)
-      tick_ast_node_t* left_type = analyze_expr(expr->binary_expr.left, ctx);
-      tick_ast_node_t* right_type = analyze_expr(expr->binary_expr.right, ctx);
-
-      tick_ast_node_t* result_type = NULL;
-
-      // Special handling for orelse operator
-      if (expr->binary_expr.op == BINOP_ORELSE) {
-        // For 'a orelse b': a is ?T, b is T, result is T
-        if (left_type && left_type->kind == TICK_AST_TYPE_OPTIONAL) {
-          // Result type is the inner type of the optional
-          result_type = left_type->type_optional.inner_type;
-        } else if (right_type) {
-          // Fallback: use right type
-          result_type = right_type;
-        }
-      } else {
-        // Check if both operands have valid, resolved types
-        // If either operand is NULL or UNKNOWN, we can't determine the result
-        // type yet
-        if (!left_type || !right_type) {
-          // Operand not analyzed yet
-          result_type = NULL;
-        } else if (tick_type_is_unresolved(left_type)) {
-          // Left operand type not resolved yet
-          result_type = NULL;
-        } else if (tick_type_is_unresolved(right_type)) {
-          // Right operand type not resolved yet
-          result_type = NULL;
-        } else if (left_type->kind == TICK_AST_TYPE_NAMED) {
-          // Both operands have resolved types - use left type for result
-          // TODO: Proper type checking and type promotion
-          result_type =
-              alloc_type_node(ctx->alloc, left_type->type_named.builtin_type);
-        }
+        ptr_type->type_pointer.pointee_type = operand_type;
+        result_type = ptr_type;
+        break;
       }
 
-      expr->binary_expr.resolved_type = result_type;
+      case UNOP_DEREF: {
+        // Dereference operator: *T -> T
+        if (operand_type->kind == TICK_AST_TYPE_POINTER) {
+          result_type = operand_type->type_pointer.pointee_type;
 
-      // Populate builtin semantic category (codegen will map to runtime funcs)
-      expr->binary_expr.builtin = (tick_builtin_t)0;  // Default: no builtin
-      if (result_type && result_type->kind == TICK_AST_TYPE_NAMED) {
-        tick_builtin_type_t type = result_type->type_named.builtin_type;
-        tick_builtin_t builtin =
-            map_binop_to_builtin(expr->binary_expr.op, type);
-        if (builtin != 0) {
-          // Store semantic operation category for codegen
-          expr->binary_expr.builtin = builtin;
-        }
-      }
-
-      ALOG_EXIT("-> %s", tick_type_str(result_type));
-      return result_type;
-    }
-
-    case TICK_AST_UNARY_EXPR: {
-      RETURN_IF_RESOLVED(expr, unary_expr);
-
-      ALOG_ENTER("unary: %s", tick_unop_str(expr->unary_expr.op));
-
-      // Decompose complex operands (nested operations, calls, etc.)
-      DECOMPOSE_FIELD(expr, unary_expr.operand);
-
-      // Analyze operand
-      tick_ast_node_t* operand_type =
-          analyze_expr(expr->unary_expr.operand, ctx);
-
-      // Check if operand type is valid and resolved
-      tick_ast_node_t* result_type = NULL;
-      if (!operand_type) {
-        // Operand not analyzed yet
-        result_type = NULL;
-      } else if (tick_type_is_unresolved(operand_type)) {
-        // Operand type not resolved yet
-        result_type = NULL;
-      } else {
-        // Determine result type based on operator
-        switch (expr->unary_expr.op) {
-          case UNOP_ADDR: {
-            // Address-of operator: T -> *T
-            tick_ast_node_t* ptr_type;
-            ALLOC_AST_NODE(ctx->alloc, ptr_type);
-            ptr_type->kind = TICK_AST_TYPE_POINTER;
-            ptr_type->type_pointer.pointee_type = operand_type;
-            result_type = ptr_type;
-            break;
-          }
-
-          case UNOP_DEREF: {
-            // Dereference operator: *T -> T
-            if (operand_type->kind == TICK_AST_TYPE_POINTER) {
-              result_type = operand_type->type_pointer.pointee_type;
-
-              // When dereferencing, we need the full type definition (not just
-              // forward decl) Analyze the pointee type to ensure it's resolved
-              // and track dependencies
-              if (result_type) {
-                tick_analyze_error_t err = analyze_type(result_type, ctx);
-                if (err != TICK_ANALYZE_OK) {
-                  result_type = NULL;
-                }
-              }
-            } else {
-              ANALYSIS_ERROR(ctx, expr->loc,
-                             "cannot dereference non-pointer type %s",
-                             tick_type_str(operand_type));
+          // When dereferencing, we need the full type definition (not just
+          // forward decl) Analyze the pointee type to ensure it's resolved
+          // and track dependencies
+          if (result_type) {
+            tick_analyze_error_t err = analyze_type(result_type, ctx);
+            if (err != TICK_ANALYZE_OK) {
               result_type = NULL;
             }
-            break;
           }
-
-          case UNOP_NOT:
-            // Logical NOT: returns bool
-            result_type = alloc_type_node(ctx->alloc, TICK_TYPE_BOOL);
-            break;
-
-          case UNOP_NEG:
-          case UNOP_BIT_NOT:
-            // Arithmetic/bitwise operators: same type as operand
-            result_type = operand_type;
-            break;
-
-          default:
-            result_type = operand_type;
-            break;
+        } else {
+          ANALYSIS_ERROR(ctx, expr->loc,
+                         "cannot dereference non-pointer type %s",
+                         tick_type_str(operand_type));
+          result_type = NULL;
         }
+        break;
       }
 
-      expr->unary_expr.resolved_type = result_type;
+      case UNOP_NOT:
+        // Logical NOT: returns bool
+        result_type = alloc_type_node(ctx->alloc, TICK_TYPE_BOOL);
+        break;
 
-      // Populate builtin semantic category for negation (codegen will map to
-      // runtime funcs)
-      expr->unary_expr.builtin = (tick_builtin_t)0;  // Default: no builtin
-      if (expr->unary_expr.op == UNOP_NEG && result_type &&
-          result_type->kind == TICK_AST_TYPE_NAMED) {
-        tick_builtin_type_t type = result_type->type_named.builtin_type;
-        bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
-        if (is_signed) {
-          // Store semantic operation category for codegen
-          expr->unary_expr.builtin = TICK_BUILTIN_CHECKED_NEG;
-        }
-      }
+      case UNOP_NEG:
+      case UNOP_BIT_NOT:
+        // Arithmetic/bitwise operators: same type as operand
+        result_type = operand_type;
+        break;
 
-      ALOG_EXIT("-> %s", tick_type_str(result_type));
-      return result_type;
+      default:
+        result_type = operand_type;
+        break;
     }
+  }
 
-    case TICK_AST_CAST_EXPR: {
-      RETURN_IF_RESOLVED(expr, cast_expr);
+  expr->unary_expr.resolved_type = result_type;
 
-      // Decompose complex source expressions
-      DECOMPOSE_FIELD(expr, cast_expr.expr);
-
-      // Analyze source expression (for validation)
-      analyze_expr(expr->cast_expr.expr, ctx);
-
-      // Result type is the cast target type
-      analyze_type(expr->cast_expr.type, ctx);
-      expr->cast_expr.resolved_type = expr->cast_expr.type;
-
-      return expr->cast_expr.type;
+  // Populate builtin semantic category for negation (codegen will map to
+  // runtime funcs)
+  expr->unary_expr.builtin = (tick_builtin_t)0;  // Default: no builtin
+  if (expr->unary_expr.op == UNOP_NEG && result_type &&
+      result_type->kind == TICK_AST_TYPE_NAMED) {
+    tick_builtin_type_t type = result_type->type_named.builtin_type;
+    bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
+    if (is_signed) {
+      // Store semantic operation category for codegen
+      expr->unary_expr.builtin = TICK_BUILTIN_CHECKED_NEG;
     }
+  }
 
-    case TICK_AST_STRUCT_INIT_EXPR: {
-      // Analyze the struct type
-      analyze_type(expr->struct_init_expr.type, ctx);
+  ALOG_EXIT("-> %s", tick_type_str(result_type));
+  return result_type;
+}
 
-      // Analyze field initializer expressions
-      for (tick_ast_node_t* field = expr->struct_init_expr.fields; field;
-           field = field->next) {
-        if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
-          // Recursively analyze the field value
-          analyze_expr(field->struct_init_field.value, ctx);
-        }
-      }
+static tick_ast_node_t* analyze_cast_expr(tick_ast_node_t* expr,
+                                          tick_analyze_ctx_t* ctx) {
+  RETURN_IF_RESOLVED(expr, cast_expr);
 
-      // Note: Decomposition happens at the statement level (in DECL case)
-      // not here, so struct inits can still contain complex expressions
+  // Decompose complex source expressions
+  DECOMPOSE_FIELD(expr, cast_expr.expr);
 
-      return expr->struct_init_expr.type;
+  // Analyze source expression (for validation)
+  analyze_expr(expr->cast_expr.expr, ctx);
+
+  // Result type is the cast target type
+  analyze_type(expr->cast_expr.type, ctx);
+  expr->cast_expr.resolved_type = expr->cast_expr.type;
+
+  return expr->cast_expr.type;
+}
+
+static tick_ast_node_t* analyze_struct_init_expr(tick_ast_node_t* expr,
+                                                 tick_analyze_ctx_t* ctx) {
+  // Analyze the struct type
+  analyze_type(expr->struct_init_expr.type, ctx);
+
+  // Analyze field initializer expressions
+  for (tick_ast_node_t* field = expr->struct_init_expr.fields; field;
+       field = field->next) {
+    if (field->kind == TICK_AST_STRUCT_INIT_FIELD) {
+      // Recursively analyze the field value
+      analyze_expr(field->struct_init_field.value, ctx);
     }
+  }
 
-    case TICK_AST_ARRAY_INIT_EXPR: {
-      // Analyze array element expressions
-      tick_ast_node_t* elem = expr->array_init_expr.elements;
-      while (elem) {
-        analyze_expr(elem, ctx);
-        elem = elem->next;
+  // Note: Decomposition happens at the statement level (in DECL case)
+  // not here, so struct inits can still contain complex expressions
+
+  return expr->struct_init_expr.type;
+}
+
+static tick_ast_node_t* analyze_array_init_expr(tick_ast_node_t* expr,
+                                                tick_analyze_ctx_t* ctx) {
+  // Analyze array element expressions
+  tick_ast_node_t* elem = expr->array_init_expr.elements;
+  while (elem) {
+    analyze_expr(elem, ctx);
+    elem = elem->next;
+  }
+
+  // Note: Decomposition happens at the statement level (in DECL case)
+  // Array init doesn't have a specific type - inferred from context
+  return NULL;
+}
+
+static tick_ast_node_t* analyze_call_expr(tick_ast_node_t* expr,
+                                          tick_analyze_ctx_t* ctx) {
+  // Log function name if it's an identifier
+#ifdef TICK_DEBUG_ANALYZE
+  if (expr->call_expr.callee &&
+      expr->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
+    ALOG_ENTER("call %.*s",
+               (int)expr->call_expr.callee->identifier_expr.name.sz,
+               expr->call_expr.callee->identifier_expr.name.buf);
+  } else {
+    ALOG_ENTER("call");
+  }
+#endif
+
+  // Decompose callee if it's complex (e.g., function pointer deref, field
+  // access)
+  DECOMPOSE_FIELD(expr, call_expr.callee);
+
+  // Analyze callee (this will resolve @builtin identifiers and get function
+  // type)
+  tick_ast_node_t* callee_type = analyze_expr(expr->call_expr.callee, ctx);
+
+  // Decompose and analyze arguments
+  // All arguments must be simple (LITERAL or IDENTIFIER_EXPR)
+  // Note: Arguments form a linked list, so we need to be careful with
+  // decomposition
+  tick_ast_node_t** arg_ptr = &expr->call_expr.args;
+  while (*arg_ptr) {
+    DECOMPOSE_LIST_ELEM(arg_ptr);
+    analyze_expr(*arg_ptr, ctx);
+    arg_ptr = &(*arg_ptr)->next;
+  }
+
+  // Get return type from function signature
+  tick_ast_node_t* result_type = NULL;
+  if (callee_type && callee_type->kind == TICK_AST_TYPE_FUNCTION) {
+    result_type = callee_type->type_function.return_type;
+    ALOG_EXIT("-> %s", tick_type_str(result_type));
+  } else if (!callee_type) {
+    // Callee type not available yet (function not analyzed)
+    // Dependencies should have been added by analyze_expr above
+    ALOG_EXIT("-> type not available yet");
+    result_type = NULL;
+  } else {
+    // @builtins - explicitly return void
+    // Check if it's a known @builtin
+    if (expr->call_expr.callee &&
+        expr->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
+      tick_at_builtin_t builtin =
+          expr->call_expr.callee->identifier_expr.at_builtin;
+      if (builtin == TICK_AT_BUILTIN_DBG) {
+        result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
+        ALOG_EXIT("-> void (@dbg)");
+      } else if (builtin == TICK_AT_BUILTIN_PANIC) {
+        result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
+        ALOG_EXIT("-> void (@panic)");
+      } else {
+        // Unknown callee - this should not happen
+        CHECK(0, "call expression has non-function callee type");
       }
+    } else {
+      // Unknown callee - this should not happen
+      CHECK(0, "call expression has non-function callee type");
+    }
+  }
 
-      // Note: Decomposition happens at the statement level (in DECL case)
-      // Array init doesn't have a specific type - inferred from context
+  return result_type;
+}
+
+static tick_ast_node_t* analyze_index_expr(tick_ast_node_t* expr,
+                                           tick_analyze_ctx_t* ctx) {
+  ALOG_ENTER("index");
+
+  // Decompose complex array and index expressions
+  DECOMPOSE_FIELD(expr, index_expr.array);
+  DECOMPOSE_FIELD(expr, index_expr.index);
+
+  // Analyze array/pointer expression
+  tick_ast_node_t* array_type = analyze_expr(expr->index_expr.array, ctx);
+
+  // Analyze index expression
+  tick_ast_node_t* index_type = analyze_expr(expr->index_expr.index, ctx);
+
+  // Validate index is numeric
+  if (index_type && !tick_type_is_numeric(index_type)) {
+    ANALYSIS_ERROR(ctx, expr->loc, "array index must be numeric, got %s",
+                   tick_type_str(index_type));
+    ALOG_EXIT("FAILED");
+    return NULL;
+  }
+
+  // Determine element type based on array type
+  tick_ast_node_t* result_type = NULL;
+  if (array_type) {
+    if (array_type->kind == TICK_AST_TYPE_POINTER) {
+      // Pointer indexing: *T -> T
+      result_type = array_type->type_pointer.pointee_type;
+    } else if (array_type->kind == TICK_AST_TYPE_ARRAY ||
+               array_type->kind == TICK_AST_TYPE_SLICE) {
+      // Array/Slice indexing: [N]T -> T or []T -> T
+      // (SLICE uses type_array with size=NULL)
+      result_type = array_type->type_array.element_type;
+    } else {
+      ANALYSIS_ERROR(ctx, expr->loc, "cannot index into type %s",
+                     tick_type_str(array_type));
+      ALOG_EXIT("FAILED");
       return NULL;
     }
+  }
 
-    case TICK_AST_IDENTIFIER_EXPR: {
-      // Check if this is an AT builtin (@identifier)
-      if (expr->identifier_expr.name.sz > 0 &&
-          expr->identifier_expr.name.buf[0] == '@') {
-        // Resolve @builtin string to enum
-        if (expr->identifier_expr.name.sz == 4 &&
-            memcmp(expr->identifier_expr.name.buf, "@dbg", 4) == 0) {
-          expr->identifier_expr.at_builtin = TICK_AT_BUILTIN_DBG;
-          // Builtins don't have a type - return NULL
-          // The call expression handler will determine the return type
-          return NULL;
-        } else if (expr->identifier_expr.name.sz == 6 &&
-                   memcmp(expr->identifier_expr.name.buf, "@panic", 6) == 0) {
-          expr->identifier_expr.at_builtin = TICK_AT_BUILTIN_PANIC;
-          // Builtins don't have a type - return NULL
-          // The call expression handler will determine the return type
-          return NULL;
-        } else {
-          // Unknown builtin
-          snprintf((char*)ctx->errbuf.buf, ctx->errbuf.sz,
-                   "%zu:%zu: unknown builtin '%.*s'", expr->loc.line,
-                   expr->loc.col, (int)expr->identifier_expr.name.sz,
-                   expr->identifier_expr.name.buf);
-          return NULL;
-        }
+  ALOG_EXIT("-> %s", tick_type_str(result_type));
+  return result_type;
+}
+
+static tick_ast_node_t* analyze_unwrap_panic_expr(tick_ast_node_t* expr,
+                                                  tick_analyze_ctx_t* ctx) {
+  RETURN_IF_RESOLVED(expr, unwrap_panic_expr);
+
+  // Decompose complex operands
+  DECOMPOSE_FIELD(expr, unwrap_panic_expr.operand);
+
+  // Analyze operand
+  tick_ast_node_t* operand_type =
+      analyze_expr(expr->unwrap_panic_expr.operand, ctx);
+
+  // For 'a.?': a is ?T, result is T
+  tick_ast_node_t* result_type = NULL;
+  if (operand_type && operand_type->kind == TICK_AST_TYPE_OPTIONAL) {
+    // Result type is the inner type of the optional
+    result_type = operand_type->type_optional.inner_type;
+  }
+
+  expr->unwrap_panic_expr.resolved_type = result_type;
+  return result_type;
+}
+
+static tick_ast_node_t* analyze_field_access_expr(tick_ast_node_t* expr,
+                                                  tick_analyze_ctx_t* ctx) {
+  RETURN_IF_RESOLVED(expr, field_access_expr);
+
+  ALOG_ENTER("field access: .%.*s", (int)expr->field_access_expr.field_name.sz,
+             expr->field_access_expr.field_name.buf);
+
+  // Decompose complex object expressions
+  DECOMPOSE_FIELD(expr, field_access_expr.object);
+
+  // Check if object is a type name (for enum value access like Color.Red)
+  tick_ast_node_t* object_type = NULL;
+
+  if (expr->field_access_expr.object &&
+      expr->field_access_expr.object->kind == TICK_AST_IDENTIFIER_EXPR) {
+    // Try to look up as a type name first
+    tick_buf_t obj_name = expr->field_access_expr.object->identifier_expr.name;
+    tick_type_entry_t* type_entry = tick_types_lookup(ctx->types, obj_name);
+
+    if (type_entry) {
+      // Object is a type name - create a TYPE_NAMED node for it
+      object_type = alloc_user_type_node(ctx->alloc, obj_name);
+      if (object_type) {
+        object_type->type_named.type_entry = type_entry;
+        object_type->type_named.builtin_type = type_entry->builtin_type;
+        ALOG("object is type name: %.*s", (int)obj_name.sz, obj_name.buf);
       }
+    }
+  }
 
-      // Look up identifier in symbol table and cache the result
-      if (!expr->identifier_expr.symbol) {
-        expr->identifier_expr.symbol = tick_scope_lookup_symbol(
-            ctx->current_scope, expr->identifier_expr.name);
-      }
+  if (!object_type) {
+    // Not a type name, analyze as expression
+    object_type = analyze_expr(expr->field_access_expr.object, ctx);
+  }
 
-      tick_symbol_t* sym = expr->identifier_expr.symbol;
-      if (!sym) {
-        // Symbol not found
-        ANALYSIS_ERROR(ctx, expr->loc, "undefined identifier '%.*s'",
-                       (int)expr->identifier_expr.name.sz,
-                       expr->identifier_expr.name.buf);
+  tick_ast_node_t* result_type = NULL;
+
+  if (!object_type) {
+    // Object type not available yet
+    ALOG_EXIT("object type not available");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
+
+  // Handle automatic pointer dereferencing (single-level only)
+  // In Tick, obj.field works for both T and *T (like Go)
+  tick_ast_node_t* base_type = object_type;
+  if (object_type->kind == TICK_AST_TYPE_POINTER) {
+    base_type = object_type->type_pointer.pointee_type;
+    expr->field_access_expr.object_is_pointer = true;
+    ALOG("dereferencing pointer to access field");
+
+    // Analyze the pointee type to ensure it's resolved and track
+    // dependencies
+    if (base_type) {
+      tick_analyze_error_t err = analyze_type(base_type, ctx);
+      if (err != TICK_ANALYZE_OK) {
+        ALOG_EXIT("FAILED to analyze pointee type");
+        expr->field_access_expr.resolved_type = NULL;
         return NULL;
       }
+    }
+  } else {
+    expr->field_access_expr.object_is_pointer = false;
+  }
 
-      // Annotate with prefix requirement for codegen
-      expr->identifier_expr.needs_user_prefix =
-          identifier_needs_user_prefix(expr);
+  // Check if we have a valid base type
+  if (!base_type) {
+    ANALYSIS_ERROR(ctx, expr->loc, "cannot access field of null type");
+    ALOG_EXIT("FAILED: null base type");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
 
-      // Get type from symbol's declaration
-      tick_ast_node_t* decl = sym->decl;
-      tick_ast_node_t* result_type = get_symbol_type(sym);
+  // Base type must be a named user-defined type (struct/union/enum)
+  if (base_type->kind != TICK_AST_TYPE_NAMED) {
+    ANALYSIS_ERROR(ctx, expr->loc,
+                   "cannot access field of non-aggregate type %s",
+                   tick_type_str(base_type));
+    ALOG_EXIT("FAILED: not a named type");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
 
-      // If this references a module-level declaration that doesn't have type
-      // info yet, add it as a dependency. Local variables are analyzed in
-      // place, not queued.
-      if (decl && decl->kind == TICK_AST_DECL) {
-        // Check if this is a module-level declaration by seeing if it's in
-        // module scope
-        tick_symbol_t* module_sym = tick_scope_lookup_symbol(
-            ctx->module_scope, expr->identifier_expr.name);
-        bool is_module_level = (module_sym && module_sym->decl == decl);
+  // Check if type is resolved
+  if (tick_type_is_unresolved(base_type)) {
+    ALOG_EXIT("base type not resolved yet");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
 
-        // Check if we need type info from this declaration
-        bool needs_dependency = false;
-        if (!result_type) {
-          // No type info at all
-          needs_dependency = true;
-        } else if (tick_type_is_unresolved(result_type)) {
-          // Type is UNKNOWN - needs to be analyzed
-          needs_dependency = true;
-        } else if (decl->decl.analysis_state ==
-                   TICK_ANALYSIS_STATE_NOT_STARTED) {
-          // Declaration not analyzed yet
-          needs_dependency = true;
-        }
+  // Type must be user-defined (struct/union/enum)
+  if (base_type->type_named.builtin_type != TICK_TYPE_USER_DEFINED) {
+    ANALYSIS_ERROR(ctx, expr->loc, "cannot access field of builtin type %s",
+                   tick_builtin_type_str(base_type->type_named.builtin_type));
+    ALOG_EXIT("FAILED: not a user-defined type");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
 
-        // Only add module-level declarations to the work queue if we need type
-        // info For functions, if we have the signature (decl.type), we don't
-        // need to wait for the body
-        if (is_module_level && needs_dependency &&
-            decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED &&
-            decl->decl.analysis_state != TICK_ANALYSIS_STATE_IN_PROGRESS) {
-          // Add to dependency list so this declaration gets analyzed
-          tick_dependency_list_add(&ctx->pending_deps, decl);
-          ALOG("! dep: %.*s", (int)decl->decl.name.sz, decl->decl.name.buf);
+  // Get the type entry from the type table
+  tick_type_entry_t* type_entry = base_type->type_named.type_entry;
+  if (!type_entry || !type_entry->parent_decl) {
+    ANALYSIS_ERROR(ctx, expr->loc, "type entry not found in type table");
+    ALOG_EXIT("FAILED: no type entry");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
+
+  // Get the declaration node
+  tick_ast_node_t* type_decl = type_entry->parent_decl;
+  if (!type_decl || type_decl->kind != TICK_AST_DECL || !type_decl->decl.init) {
+    ANALYSIS_ERROR(ctx, expr->loc, "invalid type declaration");
+    ALOG_EXIT("FAILED: invalid decl");
+    expr->field_access_expr.resolved_type = NULL;
+    return NULL;
+  }
+
+  tick_ast_node_t* type_def = type_decl->decl.init;
+  tick_buf_t field_name = expr->field_access_expr.field_name;
+
+  // Look up field based on type kind
+  switch (type_def->kind) {
+    case TICK_AST_STRUCT_DECL: {
+      ALOG("looking up field in struct %.*s", (int)type_decl->decl.name.sz,
+           type_decl->decl.name.buf);
+
+      // Search for field in struct fields
+      for (tick_ast_node_t* field = type_def->struct_decl.fields; field;
+           field = field->next) {
+        if (field->kind != TICK_AST_FIELD) continue;
+
+        if (field->field.name.sz == field_name.sz &&
+            memcmp(field->field.name.buf, field_name.buf, field_name.sz) == 0) {
+          // Found the field!
+          result_type = field->field.type;
+          ALOG("found field: %.*s -> %s", (int)field_name.sz, field_name.buf,
+               tick_type_str(result_type));
+
+          // Track dependencies if field type is unresolved
+          if (result_type) {
+            tick_analyze_error_t err = analyze_type(result_type, ctx);
+            if (err != TICK_ANALYZE_OK) {
+              result_type = NULL;
+            }
+          }
+          break;
         }
       }
 
       if (!result_type) {
-        // Type not available yet (declaration not analyzed)
-        ALOG("id: %.*s -> type not available yet",
-             (int)expr->identifier_expr.name.sz,
-             expr->identifier_expr.name.buf);
-        return NULL;
+        ANALYSIS_ERROR(ctx, expr->loc, "struct '%.*s' has no field '%.*s'",
+                       (int)type_decl->decl.name.sz, type_decl->decl.name.buf,
+                       (int)field_name.sz, field_name.buf);
+        ALOG_EXIT("FAILED: field not found");
       }
-
-      ALOG("id: %.*s -> %s", (int)expr->identifier_expr.name.sz,
-           expr->identifier_expr.name.buf, tick_type_str(result_type));
-
-      return result_type;
+      break;
     }
 
-    case TICK_AST_CALL_EXPR: {
-      // Log function name if it's an identifier
-#ifdef TICK_DEBUG_ANALYZE
-      if (expr->call_expr.callee &&
-          expr->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
-        ALOG_ENTER("call %.*s",
-                   (int)expr->call_expr.callee->identifier_expr.name.sz,
-                   expr->call_expr.callee->identifier_expr.name.buf);
-      } else {
-        ALOG_ENTER("call");
-      }
-#endif
+    case TICK_AST_UNION_DECL: {
+      ALOG("looking up field in union %.*s", (int)type_decl->decl.name.sz,
+           type_decl->decl.name.buf);
 
-      // Decompose callee if it's complex (e.g., function pointer deref, field
-      // access)
-      DECOMPOSE_FIELD(expr, call_expr.callee);
+      // Search for field in union fields
+      for (tick_ast_node_t* field = type_def->union_decl.fields; field;
+           field = field->next) {
+        if (field->kind != TICK_AST_FIELD) continue;
 
-      // Analyze callee (this will resolve @builtin identifiers and get function
-      // type)
-      tick_ast_node_t* callee_type = analyze_expr(expr->call_expr.callee, ctx);
+        if (field->field.name.sz == field_name.sz &&
+            memcmp(field->field.name.buf, field_name.buf, field_name.sz) == 0) {
+          // Found the field!
+          result_type = field->field.type;
+          ALOG("found field: %.*s -> %s", (int)field_name.sz, field_name.buf,
+               tick_type_str(result_type));
 
-      // Decompose and analyze arguments
-      // All arguments must be simple (LITERAL or IDENTIFIER_EXPR)
-      // Note: Arguments form a linked list, so we need to be careful with
-      // decomposition
-      tick_ast_node_t** arg_ptr = &expr->call_expr.args;
-      while (*arg_ptr) {
-        DECOMPOSE_LIST_ELEM(arg_ptr);
-        analyze_expr(*arg_ptr, ctx);
-        arg_ptr = &(*arg_ptr)->next;
-      }
-
-      // Get return type from function signature
-      tick_ast_node_t* result_type = NULL;
-      if (callee_type && callee_type->kind == TICK_AST_TYPE_FUNCTION) {
-        result_type = callee_type->type_function.return_type;
-        ALOG_EXIT("-> %s", tick_type_str(result_type));
-      } else if (!callee_type) {
-        // Callee type not available yet (function not analyzed)
-        // Dependencies should have been added by analyze_expr above
-        ALOG_EXIT("-> type not available yet");
-        result_type = NULL;
-      } else {
-        // @builtins - explicitly return void
-        // Check if it's a known @builtin
-        if (expr->call_expr.callee &&
-            expr->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
-          tick_at_builtin_t builtin =
-              expr->call_expr.callee->identifier_expr.at_builtin;
-          if (builtin == TICK_AT_BUILTIN_DBG) {
-            result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
-            ALOG_EXIT("-> void (@dbg)");
-          } else if (builtin == TICK_AT_BUILTIN_PANIC) {
-            result_type = alloc_type_node(ctx->alloc, TICK_TYPE_VOID);
-            ALOG_EXIT("-> void (@panic)");
-          } else {
-            // Unknown callee - this should not happen
-            CHECK(0, "call expression has non-function callee type");
-          }
-        } else {
-          // Unknown callee - this should not happen
-          CHECK(0, "call expression has non-function callee type");
-        }
-      }
-
-      return result_type;
-    }
-
-    case TICK_AST_INDEX_EXPR: {
-      ALOG_ENTER("index");
-
-      // Decompose complex array and index expressions
-      DECOMPOSE_FIELD(expr, index_expr.array);
-      DECOMPOSE_FIELD(expr, index_expr.index);
-
-      // Analyze array/pointer expression
-      tick_ast_node_t* array_type = analyze_expr(expr->index_expr.array, ctx);
-
-      // Analyze index expression
-      tick_ast_node_t* index_type = analyze_expr(expr->index_expr.index, ctx);
-
-      // Validate index is numeric
-      if (index_type && !tick_type_is_numeric(index_type)) {
-        ANALYSIS_ERROR(ctx, expr->loc, "array index must be numeric, got %s",
-                       tick_type_str(index_type));
-        ALOG_EXIT("FAILED");
-        return NULL;
-      }
-
-      // Determine element type based on array type
-      tick_ast_node_t* result_type = NULL;
-      if (array_type) {
-        if (array_type->kind == TICK_AST_TYPE_POINTER) {
-          // Pointer indexing: *T -> T
-          result_type = array_type->type_pointer.pointee_type;
-        } else if (array_type->kind == TICK_AST_TYPE_ARRAY ||
-                   array_type->kind == TICK_AST_TYPE_SLICE) {
-          // Array/Slice indexing: [N]T -> T or []T -> T
-          // (SLICE uses type_array with size=NULL)
-          result_type = array_type->type_array.element_type;
-        } else {
-          ANALYSIS_ERROR(ctx, expr->loc, "cannot index into type %s",
-                         tick_type_str(array_type));
-          ALOG_EXIT("FAILED");
-          return NULL;
-        }
-      }
-
-      ALOG_EXIT("-> %s", tick_type_str(result_type));
-      return result_type;
-    }
-
-    case TICK_AST_UNWRAP_PANIC_EXPR: {
-      RETURN_IF_RESOLVED(expr, unwrap_panic_expr);
-
-      // Decompose complex operands
-      DECOMPOSE_FIELD(expr, unwrap_panic_expr.operand);
-
-      // Analyze operand
-      tick_ast_node_t* operand_type =
-          analyze_expr(expr->unwrap_panic_expr.operand, ctx);
-
-      // For 'a.?': a is ?T, result is T
-      tick_ast_node_t* result_type = NULL;
-      if (operand_type && operand_type->kind == TICK_AST_TYPE_OPTIONAL) {
-        // Result type is the inner type of the optional
-        result_type = operand_type->type_optional.inner_type;
-      }
-
-      expr->unwrap_panic_expr.resolved_type = result_type;
-      return result_type;
-    }
-
-    case TICK_AST_FIELD_ACCESS_EXPR: {
-      RETURN_IF_RESOLVED(expr, field_access_expr);
-
-      ALOG_ENTER("field access: .%.*s",
-                 (int)expr->field_access_expr.field_name.sz,
-                 expr->field_access_expr.field_name.buf);
-
-      // Decompose complex object expressions
-      DECOMPOSE_FIELD(expr, field_access_expr.object);
-
-      // Check if object is a type name (for enum value access like Color.Red)
-      tick_ast_node_t* object_type = NULL;
-
-      if (expr->field_access_expr.object &&
-          expr->field_access_expr.object->kind == TICK_AST_IDENTIFIER_EXPR) {
-        // Try to look up as a type name first
-        tick_buf_t obj_name =
-            expr->field_access_expr.object->identifier_expr.name;
-        tick_type_entry_t* type_entry = tick_types_lookup(ctx->types, obj_name);
-
-        if (type_entry) {
-          // Object is a type name - create a TYPE_NAMED node for it
-          object_type = alloc_user_type_node(ctx->alloc, obj_name);
-          if (object_type) {
-            object_type->type_named.type_entry = type_entry;
-            object_type->type_named.builtin_type = type_entry->builtin_type;
-            ALOG("object is type name: %.*s", (int)obj_name.sz, obj_name.buf);
-          }
-        }
-      }
-
-      if (!object_type) {
-        // Not a type name, analyze as expression
-        object_type = analyze_expr(expr->field_access_expr.object, ctx);
-      }
-
-      tick_ast_node_t* result_type = NULL;
-
-      if (!object_type) {
-        // Object type not available yet
-        ALOG_EXIT("object type not available");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      // Handle automatic pointer dereferencing (single-level only)
-      // In Tick, obj.field works for both T and *T (like Go)
-      tick_ast_node_t* base_type = object_type;
-      if (object_type->kind == TICK_AST_TYPE_POINTER) {
-        base_type = object_type->type_pointer.pointee_type;
-        expr->field_access_expr.object_is_pointer = true;
-        ALOG("dereferencing pointer to access field");
-
-        // Analyze the pointee type to ensure it's resolved and track
-        // dependencies
-        if (base_type) {
-          tick_analyze_error_t err = analyze_type(base_type, ctx);
-          if (err != TICK_ANALYZE_OK) {
-            ALOG_EXIT("FAILED to analyze pointee type");
-            expr->field_access_expr.resolved_type = NULL;
-            return NULL;
-          }
-        }
-      } else {
-        expr->field_access_expr.object_is_pointer = false;
-      }
-
-      // Check if we have a valid base type
-      if (!base_type) {
-        ANALYSIS_ERROR(ctx, expr->loc, "cannot access field of null type");
-        ALOG_EXIT("FAILED: null base type");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      // Base type must be a named user-defined type (struct/union/enum)
-      if (base_type->kind != TICK_AST_TYPE_NAMED) {
-        ANALYSIS_ERROR(ctx, expr->loc,
-                       "cannot access field of non-aggregate type %s",
-                       tick_type_str(base_type));
-        ALOG_EXIT("FAILED: not a named type");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      // Check if type is resolved
-      if (tick_type_is_unresolved(base_type)) {
-        ALOG_EXIT("base type not resolved yet");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      // Type must be user-defined (struct/union/enum)
-      if (base_type->type_named.builtin_type != TICK_TYPE_USER_DEFINED) {
-        ANALYSIS_ERROR(
-            ctx, expr->loc, "cannot access field of builtin type %s",
-            tick_builtin_type_str(base_type->type_named.builtin_type));
-        ALOG_EXIT("FAILED: not a user-defined type");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      // Get the type entry from the type table
-      tick_type_entry_t* type_entry = base_type->type_named.type_entry;
-      if (!type_entry || !type_entry->parent_decl) {
-        ANALYSIS_ERROR(ctx, expr->loc, "type entry not found in type table");
-        ALOG_EXIT("FAILED: no type entry");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      // Get the declaration node
-      tick_ast_node_t* type_decl = type_entry->parent_decl;
-      if (!type_decl || type_decl->kind != TICK_AST_DECL ||
-          !type_decl->decl.init) {
-        ANALYSIS_ERROR(ctx, expr->loc, "invalid type declaration");
-        ALOG_EXIT("FAILED: invalid decl");
-        expr->field_access_expr.resolved_type = NULL;
-        return NULL;
-      }
-
-      tick_ast_node_t* type_def = type_decl->decl.init;
-      tick_buf_t field_name = expr->field_access_expr.field_name;
-
-      // Look up field based on type kind
-      switch (type_def->kind) {
-        case TICK_AST_STRUCT_DECL: {
-          ALOG("looking up field in struct %.*s", (int)type_decl->decl.name.sz,
-               type_decl->decl.name.buf);
-
-          // Search for field in struct fields
-          for (tick_ast_node_t* field = type_def->struct_decl.fields; field;
-               field = field->next) {
-            if (field->kind != TICK_AST_FIELD) continue;
-
-            if (field->field.name.sz == field_name.sz &&
-                memcmp(field->field.name.buf, field_name.buf, field_name.sz) ==
-                    0) {
-              // Found the field!
-              result_type = field->field.type;
-              ALOG("found field: %.*s -> %s", (int)field_name.sz,
-                   field_name.buf, tick_type_str(result_type));
-
-              // Track dependencies if field type is unresolved
-              if (result_type) {
-                tick_analyze_error_t err = analyze_type(result_type, ctx);
-                if (err != TICK_ANALYZE_OK) {
-                  result_type = NULL;
-                }
-              }
-              break;
+          // Track dependencies if field type is unresolved
+          if (result_type) {
+            tick_analyze_error_t err = analyze_type(result_type, ctx);
+            if (err != TICK_ANALYZE_OK) {
+              result_type = NULL;
             }
           }
-
-          if (!result_type) {
-            ANALYSIS_ERROR(ctx, expr->loc, "struct '%.*s' has no field '%.*s'",
-                           (int)type_decl->decl.name.sz,
-                           type_decl->decl.name.buf, (int)field_name.sz,
-                           field_name.buf);
-            ALOG_EXIT("FAILED: field not found");
-          }
           break;
         }
-
-        case TICK_AST_UNION_DECL: {
-          ALOG("looking up field in union %.*s", (int)type_decl->decl.name.sz,
-               type_decl->decl.name.buf);
-
-          // Search for field in union fields
-          for (tick_ast_node_t* field = type_def->union_decl.fields; field;
-               field = field->next) {
-            if (field->kind != TICK_AST_FIELD) continue;
-
-            if (field->field.name.sz == field_name.sz &&
-                memcmp(field->field.name.buf, field_name.buf, field_name.sz) ==
-                    0) {
-              // Found the field!
-              result_type = field->field.type;
-              ALOG("found field: %.*s -> %s", (int)field_name.sz,
-                   field_name.buf, tick_type_str(result_type));
-
-              // Track dependencies if field type is unresolved
-              if (result_type) {
-                tick_analyze_error_t err = analyze_type(result_type, ctx);
-                if (err != TICK_ANALYZE_OK) {
-                  result_type = NULL;
-                }
-              }
-              break;
-            }
-          }
-
-          if (!result_type) {
-            ANALYSIS_ERROR(ctx, expr->loc, "union '%.*s' has no field '%.*s'",
-                           (int)type_decl->decl.name.sz,
-                           type_decl->decl.name.buf, (int)field_name.sz,
-                           field_name.buf);
-            ALOG_EXIT("FAILED: field not found");
-          }
-          break;
-        }
-
-        case TICK_AST_ENUM_DECL: {
-          ALOG("looking up value in enum %.*s", (int)type_decl->decl.name.sz,
-               type_decl->decl.name.buf);
-
-          // Search for value in enum values
-          bool found = false;
-          for (tick_ast_node_t* value = type_def->enum_decl.values; value;
-               value = value->next) {
-            if (value->kind != TICK_AST_ENUM_VALUE) continue;
-
-            if (value->enum_value.name.sz == field_name.sz &&
-                memcmp(value->enum_value.name.buf, field_name.buf,
-                       field_name.sz) == 0) {
-              // Found the enum value!
-              // Transform field access node to ENUM_VALUE node
-              expr->kind = TICK_AST_ENUM_VALUE;
-              expr->enum_value.parent_decl = type_decl;
-              expr->enum_value.name = field_name;
-              expr->enum_value.value = value->enum_value.value;
-
-              result_type = type_decl->decl.type;
-              found = true;
-              ALOG("transformed enum field access %.*s.%.*s -> ENUM_VALUE",
-                   (int)type_decl->decl.name.sz, type_decl->decl.name.buf,
-                   (int)field_name.sz, field_name.buf);
-
-              // Return early since we transformed the node
-              ALOG_EXIT("-> %s", tick_type_str(result_type));
-              return result_type;
-            }
-          }
-
-          if (!found) {
-            ANALYSIS_ERROR(ctx, expr->loc, "enum '%.*s' has no value '%.*s'",
-                           (int)type_decl->decl.name.sz,
-                           type_decl->decl.name.buf, (int)field_name.sz,
-                           field_name.buf);
-            ALOG_EXIT("FAILED: enum value not found");
-          }
-          break;
-        }
-
-        default:
-          ANALYSIS_ERROR(ctx, expr->loc, "cannot access fields of type %s",
-                         tick_type_str(base_type));
-          ALOG_EXIT("FAILED: unsupported type kind");
-          break;
       }
 
-      expr->field_access_expr.resolved_type = result_type;
-      ALOG_EXIT("-> %s", tick_type_str(result_type));
-      return result_type;
+      if (!result_type) {
+        ANALYSIS_ERROR(ctx, expr->loc, "union '%.*s' has no field '%.*s'",
+                       (int)type_decl->decl.name.sz, type_decl->decl.name.buf,
+                       (int)field_name.sz, field_name.buf);
+        ALOG_EXIT("FAILED: field not found");
+      }
+      break;
+    }
+
+    case TICK_AST_ENUM_DECL: {
+      ALOG("looking up value in enum %.*s", (int)type_decl->decl.name.sz,
+           type_decl->decl.name.buf);
+
+      // Search for value in enum values
+      bool found = false;
+      for (tick_ast_node_t* value = type_def->enum_decl.values; value;
+           value = value->next) {
+        if (value->kind != TICK_AST_ENUM_VALUE) continue;
+
+        if (value->enum_value.name.sz == field_name.sz &&
+            memcmp(value->enum_value.name.buf, field_name.buf, field_name.sz) ==
+                0) {
+          // Found the enum value!
+          // Transform field access node to ENUM_VALUE node
+          expr->kind = TICK_AST_ENUM_VALUE;
+          expr->enum_value.parent_decl = type_decl;
+          expr->enum_value.name = field_name;
+          expr->enum_value.value = value->enum_value.value;
+
+          result_type = type_decl->decl.type;
+          found = true;
+          ALOG("transformed enum field access %.*s.%.*s -> ENUM_VALUE",
+               (int)type_decl->decl.name.sz, type_decl->decl.name.buf,
+               (int)field_name.sz, field_name.buf);
+
+          // Return early since we transformed the node
+          ALOG_EXIT("-> %s", tick_type_str(result_type));
+          return result_type;
+        }
+      }
+
+      if (!found) {
+        ANALYSIS_ERROR(ctx, expr->loc, "enum '%.*s' has no value '%.*s'",
+                       (int)type_decl->decl.name.sz, type_decl->decl.name.buf,
+                       (int)field_name.sz, field_name.buf);
+        ALOG_EXIT("FAILED: enum value not found");
+      }
+      break;
     }
 
     default:
-      return NULL;
+      ANALYSIS_ERROR(ctx, expr->loc, "cannot access fields of type %s",
+                     tick_type_str(base_type));
+      ALOG_EXIT("FAILED: unsupported type kind");
+      break;
+  }
+
+  expr->field_access_expr.resolved_type = result_type;
+  ALOG_EXIT("-> %s", tick_type_str(result_type));
+  return result_type;
+}
+
+// ============================================================================
+// Scope Guard for RAII-style State Management
+// ============================================================================
+
+// Initialize guard with current context (saves nothing yet)
+static void scope_guard_init(tick_scope_guard_t* guard,
+                             tick_analyze_ctx_t* ctx) {
+  guard->ctx = ctx;
+  guard->prev_function_scope = NULL;
+  guard->prev_block = NULL;
+  guard->prev_stmt = NULL;
+  guard->did_push_scope = false;
+}
+
+// Push a new scope (increments depth, creates new scope)
+static void scope_guard_push_scope(tick_scope_guard_t* guard) {
+  tick_scope_push(guard->ctx);
+  guard->did_push_scope = true;
+}
+
+// Save and set function_scope
+static void scope_guard_set_function_scope(tick_scope_guard_t* guard,
+                                           tick_scope_t* new_scope) {
+  guard->prev_function_scope = guard->ctx->function_scope;
+  guard->ctx->function_scope = new_scope;
+}
+
+// Save and set current_block
+static void scope_guard_set_block(tick_scope_guard_t* guard,
+                                  tick_ast_node_t* new_block) {
+  guard->prev_block = guard->ctx->current_block;
+  guard->ctx->current_block = new_block;
+}
+
+// Save and set current_stmt
+static void scope_guard_set_stmt(tick_scope_guard_t* guard,
+                                 tick_ast_node_t* new_stmt) {
+  guard->prev_stmt = guard->ctx->current_stmt;
+  guard->ctx->current_stmt = new_stmt;
+}
+
+// Restore all saved state in reverse order of setup
+static void scope_guard_destroy(tick_scope_guard_t* guard) {
+  // Restore current_stmt (last set, first restored)
+  if (guard->prev_stmt != NULL || guard->ctx->current_stmt != NULL) {
+    guard->ctx->current_stmt = guard->prev_stmt;
+  }
+
+  // Restore current_block
+  if (guard->prev_block != NULL || guard->ctx->current_block != NULL) {
+    guard->ctx->current_block = guard->prev_block;
+  }
+
+  // Restore function_scope
+  if (guard->prev_function_scope != NULL ||
+      guard->ctx->function_scope != guard->ctx->module_scope) {
+    guard->ctx->function_scope = guard->prev_function_scope;
+  }
+
+  // Pop scope (last pushed, first popped - LIFO)
+  if (guard->did_push_scope) {
+    tick_scope_pop(guard->ctx);
   }
 }
 
@@ -2415,36 +2561,30 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
 
   switch (stmt->kind) {
     case TICK_AST_BLOCK_STMT: {
-      // Enter new block scope
-      tick_scope_push(ctx);
-
-      // Save previous current_block and set to this block
-      tick_ast_node_t* prev_block = ctx->current_block;
-      ctx->current_block = stmt;
+      // Use scope guard for automatic state management
+      tick_scope_guard_t guard;
+      scope_guard_init(&guard, ctx);
+      scope_guard_push_scope(&guard);
+      scope_guard_set_block(&guard, stmt);
 
       // Iterate through statements, tracking current_stmt for temporary
       // insertion
       for (tick_ast_node_t* s = stmt->block_stmt.stmts; s; s = s->next) {
         // Set current_stmt so temporaries are inserted before this statement
-        ctx->current_stmt = s;
+        scope_guard_set_stmt(&guard, s);
 
         tick_analyze_error_t err = analyze_stmt(s, ctx);
         if (err != TICK_ANALYZE_OK) {
-          ctx->current_block = prev_block;
-          ctx->current_stmt = NULL;
-          tick_scope_pop(ctx);
+          scope_guard_destroy(&guard);  // Auto-cleanup on error
           return err;
         }
       }
 
-      // Clear current_stmt
-      ctx->current_stmt = NULL;
+      // Clear current_stmt after loop
+      scope_guard_set_stmt(&guard, NULL);
 
-      // Restore previous current_block
-      ctx->current_block = prev_block;
-
-      // Exit block scope
-      tick_scope_pop(ctx);
+      // Cleanup: restore all saved state
+      scope_guard_destroy(&guard);
       return TICK_ANALYZE_OK;
     }
 
@@ -2704,19 +2844,29 @@ static tick_analyze_error_t analyze_enum_decl(tick_ast_node_t* decl,
   return TICK_ANALYZE_OK;
 }
 
-// Analyze a function declaration
-static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
-                                             tick_analyze_ctx_t* ctx) {
+// Analyze function signature only (return type + parameter types)
+// This is sufficient for function calls and type checking
+static tick_analyze_error_t analyze_function_signature(
+    tick_ast_node_t* decl, tick_analyze_ctx_t* ctx) {
   if (!decl || decl->kind != TICK_AST_DECL) return TICK_ANALYZE_OK;
 
   tick_ast_node_t* func = decl->decl.init;
   if (!func || func->kind != TICK_AST_FUNCTION) return TICK_ANALYZE_OK;
 
-  ALOG_ENTER("fn %.*s", (int)decl->decl.name.sz, decl->decl.name.buf);
+  // Skip if signature already analyzed
+  if (decl->decl.signature_state == TICK_ANALYSIS_STATE_COMPLETED) {
+    return TICK_ANALYZE_OK;
+  }
+
+  ALOG_ENTER("fn %.*s signature", (int)decl->decl.name.sz, decl->decl.name.buf);
+
+  // Mark signature as in progress
+  decl->decl.signature_state = TICK_ANALYSIS_STATE_IN_PROGRESS;
 
   // Analyze return type
   tick_analyze_error_t err = analyze_type(func->function.return_type, ctx);
   if (err != TICK_ANALYZE_OK) {
+    decl->decl.signature_state = TICK_ANALYSIS_STATE_FAILED;
     ALOG_EXIT("FAILED (return type)");
     return err;
   }
@@ -2732,58 +2882,121 @@ static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
   ALOG("return: %s", ret_type_str);
 #endif
 
-  // Enter function scope
-  tick_scope_push(ctx);
-
-  // Save previous function_scope and set to current scope for tmpid allocation
-  tick_scope_t* prev_function_scope = ctx->function_scope;
-  ctx->function_scope = ctx->current_scope;
-
-  // Analyze and register parameters in function scope
+  // Analyze parameter types (don't need to enter scope for signature analysis)
   for (tick_ast_node_t* param = func->function.params; param;
        param = param->next) {
     if (param->kind == TICK_AST_PARAM) {
       err = analyze_type(param->param.type, ctx);
       if (err != TICK_ANALYZE_OK) {
-        ctx->function_scope = prev_function_scope;
-        tick_scope_pop(ctx);
+        decl->decl.signature_state = TICK_ANALYSIS_STATE_FAILED;
         ALOG_EXIT("FAILED (param type)");
         return err;
       }
 
-      // Log parameter details
-      ALOG("%.*s: %s", (int)param->param.name.sz, param->param.name.buf,
+      ALOG("param %.*s: %s", (int)param->param.name.sz, param->param.name.buf,
            tick_type_str(param->param.type));
-
-      // Register parameter in function scope
-      tick_scope_insert_symbol(ctx->current_scope, param->param.name, param);
     }
   }
 
   // Check if signature has unresolved dependencies
-  // If so, defer body analysis until dependencies are resolved
   if (ctx->pending_deps.head != NULL) {
-    ctx->function_scope = prev_function_scope;
-    tick_scope_pop(ctx);
-    ALOG_EXIT("signature has dependencies, deferring body analysis");
+    // Reset state so we retry later
+    decl->decl.signature_state = TICK_ANALYSIS_STATE_NOT_STARTED;
+    ALOG_EXIT("signature has dependencies, deferring");
     return TICK_ANALYZE_OK;
   }
 
+  // Signature complete!
+  decl->decl.signature_state = TICK_ANALYSIS_STATE_COMPLETED;
+  ALOG_EXIT("signature complete");
+  return TICK_ANALYZE_OK;
+}
+
+// Analyze function body
+// Requires: signature must be completed first
+static tick_analyze_error_t analyze_function_body(tick_ast_node_t* decl,
+                                                  tick_analyze_ctx_t* ctx) {
+  if (!decl || decl->kind != TICK_AST_DECL) return TICK_ANALYZE_OK;
+
+  tick_ast_node_t* func = decl->decl.init;
+  if (!func || func->kind != TICK_AST_FUNCTION) return TICK_ANALYZE_OK;
+
+  // Signature must be completed first
+  CHECK(decl->decl.signature_state == TICK_ANALYSIS_STATE_COMPLETED,
+        "function body analysis requires completed signature");
+
+  // Skip if body already analyzed
+  if (decl->decl.body_state == TICK_ANALYSIS_STATE_COMPLETED) {
+    return TICK_ANALYZE_OK;
+  }
+
+  ALOG_ENTER("fn %.*s body", (int)decl->decl.name.sz, decl->decl.name.buf);
+
+  // Mark body as in progress
+  decl->decl.body_state = TICK_ANALYSIS_STATE_IN_PROGRESS;
+
+  // Use scope guard for automatic state management
+  tick_scope_guard_t guard;
+  scope_guard_init(&guard, ctx);
+  scope_guard_push_scope(&guard);
+  scope_guard_set_function_scope(&guard, ctx->current_scope);
+
+  // Register parameters in function scope
+  // (Signature was already analyzed, so types are resolved)
+  for (tick_ast_node_t* param = func->function.params; param;
+       param = param->next) {
+    if (param->kind == TICK_AST_PARAM) {
+      tick_scope_insert_symbol(ctx->current_scope, param->param.name, param);
+    }
+  }
+
   // Analyze function body
-  err = analyze_stmt(func->function.body, ctx);
+  tick_analyze_error_t err = analyze_stmt(func->function.body, ctx);
   if (err != TICK_ANALYZE_OK) {
-    ctx->function_scope = prev_function_scope;
-    tick_scope_pop(ctx);
+    decl->decl.body_state = TICK_ANALYSIS_STATE_FAILED;
+    scope_guard_destroy(&guard);  // Auto-cleanup on error
     ALOG_EXIT("FAILED (body)");
     return err;
   }
 
-  // Restore previous function_scope and exit function scope
-  ctx->function_scope = prev_function_scope;
-  tick_scope_pop(ctx);
+  // Cleanup: restore all saved state
+  scope_guard_destroy(&guard);
 
-  ALOG_EXIT("fn complete");
+  // Check if body has unresolved dependencies
+  if (ctx->pending_deps.head != NULL) {
+    // Reset state so we retry later
+    decl->decl.body_state = TICK_ANALYSIS_STATE_NOT_STARTED;
+    ALOG_EXIT("body has dependencies, deferring");
+    return TICK_ANALYZE_OK;
+  }
+
+  // Body complete!
+  decl->decl.body_state = TICK_ANALYSIS_STATE_COMPLETED;
+  ALOG_EXIT("body complete");
   return TICK_ANALYZE_OK;
+}
+
+// Analyze a function declaration (coordinator for signature + body)
+static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
+                                             tick_analyze_ctx_t* ctx) {
+  if (!decl || decl->kind != TICK_AST_DECL) return TICK_ANALYZE_OK;
+
+  tick_ast_node_t* func = decl->decl.init;
+  if (!func || func->kind != TICK_AST_FUNCTION) return TICK_ANALYZE_OK;
+
+  // Analyze signature first
+  tick_analyze_error_t err = analyze_function_signature(decl, ctx);
+  if (err != TICK_ANALYZE_OK) {
+    return err;
+  }
+
+  // If signature not completed yet (has dependencies), defer body
+  if (decl->decl.signature_state != TICK_ANALYSIS_STATE_COMPLETED) {
+    return TICK_ANALYZE_OK;
+  }
+
+  // Signature complete, analyze body
+  return analyze_function_body(decl, ctx);
 }
 
 // Helper to create and collect forward declaration for struct/union
@@ -3213,6 +3426,31 @@ static tick_analyze_error_t analyze_decl_without_init(tick_ast_node_t* decl,
 }
 
 // Analyze a declaration with an initializer
+//
+// Function Type Rules:
+// ====================
+// Bare TYPE_FUNCTION (not wrapped in TYPE_POINTER) is only valid in two cases:
+//
+// 1. Function implementation:
+//    let f = fn() i32 { ... }
+//    - decl.type is inferred or explicitly TYPE_FUNCTION
+//    - decl.init is FUNCTION node
+//    - Emits as: int32_t __u_f(...) { ... }
+//
+// 2. Extern function declaration (no init, handled in
+// analyze_decl_without_init):
+//    extern let f: fn() i32;
+//    - decl.type is TYPE_FUNCTION
+//    - decl.init is NULL
+//    - decl.quals.is_extern is true
+//    - Emits as: extern int32_t f(...);
+//
+// For function pointer variables, use TYPE_POINTER(TYPE_FUNCTION):
+//    let fp: *fn() i32;
+//    - decl.type is TYPE_POINTER(TYPE_FUNCTION)
+//    - Emits as: int32_t (*__u_fp)(...);
+//
+// Any other use of bare TYPE_FUNCTION is an error.
 static tick_analyze_error_t analyze_decl_with_init(tick_ast_node_t* decl,
                                                    tick_analyze_ctx_t* ctx) {
   CHECK(decl && decl->kind == TICK_AST_DECL && decl->decl.init,
@@ -3322,13 +3560,13 @@ static tick_analyze_error_t analyze_decl_lazy(tick_ast_node_t* decl,
 }
 
 tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
-                            tick_buf_t errbuf) {
+                            tick_buf_t errbuf, tick_buf_t source) {
   CHECK(ast && ast->root && ast->root->kind == TICK_AST_MODULE,
         "analyze must be given a module");
 
   tick_analyze_ctx_t ctx_val;
   tick_analyze_ctx_t* ctx = &ctx_val;
-  tick_analyze_ctx_init(ctx, alloc, errbuf);
+  tick_analyze_ctx_init(ctx, alloc, errbuf, source);
 
   // Set module pointer in context for access during analysis
   ctx->module = ast->root;
@@ -3345,6 +3583,8 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
 
     // Initialize analysis state
     decl->decl.analysis_state = TICK_ANALYSIS_STATE_NOT_STARTED;
+    decl->decl.signature_state = TICK_ANALYSIS_STATE_NOT_STARTED;
+    decl->decl.body_state = TICK_ANALYSIS_STATE_NOT_STARTED;
 
     // Register type declarations in type table
     if (decl->decl.init) {

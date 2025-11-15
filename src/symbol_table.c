@@ -340,11 +340,12 @@ void tick_dependency_list_add(tick_dependency_list_t* list,
 }
 
 void tick_analyze_ctx_init(tick_analyze_ctx_t* ctx, tick_alloc_t alloc,
-                           tick_buf_t errbuf) {
+                           tick_buf_t errbuf, tick_buf_t source) {
   if (!ctx) return;
 
   ctx->alloc = alloc;
   ctx->errbuf = errbuf;
+  ctx->source = source;
 
   // Create global type table with allocator context
   ctx->types = hashmap_new_with_allocator(
