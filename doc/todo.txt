@@ -1,2 +1,36 @@
-std:
-- allocators
+- test
+- build
+- feature: methods
+- feature: switch union, enum
+- feature: for array, slice, optional
+- feature: for else (error union)
+- feature: if optional
+- feature: slice struct (.len .ptr)
+- feature: block labels
+- feature: uN bit fields
+- feature: be/le auto-flip
+- feature: alias types
+- feature: char
+- feature: semicolon insertion
+- feature: interface
+- feature: modules/namespaces
+- feature: slice expression a[2:8]
+- feature: variadic
+- feature: enum <-> strings, <-> int
+- feature: assign-equal += -= ...
+- feature: if/switch init for scoped vars
+- feature: if/switch expressions x = switch ...
+- feature: C interop
+- feature: doc comments
+- feature: multidim arrays
+- feature: alignment of pointer type
+- feature: atomics
+- feature: sizeof, offsetof, alignof, containerof
+- feature: min/max
+- feature: embed file
+- feature: memcpy, memset, memmove
+- feature: @src for logging
+- feature: build modes
+- std: allocators
+- std: concurrency
+- std: math (abs, sqrt, sin, cos, tan, exp, exp2, log, log2, log10)
