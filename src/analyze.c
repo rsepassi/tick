@@ -92,6 +92,567 @@ static const char* tick_type_str(tick_ast_node_t* type) {
 }
 
 // ============================================================================
+// Runtime Function Name Lookup Tables
+// ============================================================================
+// Constant-time lookup tables for runtime function names
+// Eliminates string building and type checking in codegen
+// All combinations populated - invalid ones use NULL (checked in analysis)
+
+#define NUM_BUILTINS 17
+#define NUM_TYPES 14
+
+// Runtime function names indexed by [builtin][type]
+// Returns function name string or NULL if not applicable
+static const char* RUNTIME_FUNCS[NUM_BUILTINS][NUM_TYPES] = {
+    // TICK_BUILTIN_SAT_ADD
+    [TICK_BUILTIN_SAT_ADD] =
+        {
+            [TICK_TYPE_I8] = "tick_sat_add_i8",
+            [TICK_TYPE_I16] = "tick_sat_add_i16",
+            [TICK_TYPE_I32] = "tick_sat_add_i32",
+            [TICK_TYPE_I64] = "tick_sat_add_i64",
+            [TICK_TYPE_ISZ] = "tick_sat_add_isz",
+            [TICK_TYPE_U8] = "tick_sat_add_u8",
+            [TICK_TYPE_U16] = "tick_sat_add_u16",
+            [TICK_TYPE_U32] = "tick_sat_add_u32",
+            [TICK_TYPE_U64] = "tick_sat_add_u64",
+            [TICK_TYPE_USZ] = "tick_sat_add_usz",
+        },
+    // TICK_BUILTIN_SAT_SUB
+    [TICK_BUILTIN_SAT_SUB] =
+        {
+            [TICK_TYPE_I8] = "tick_sat_sub_i8",
+            [TICK_TYPE_I16] = "tick_sat_sub_i16",
+            [TICK_TYPE_I32] = "tick_sat_sub_i32",
+            [TICK_TYPE_I64] = "tick_sat_sub_i64",
+            [TICK_TYPE_ISZ] = "tick_sat_sub_isz",
+            [TICK_TYPE_U8] = "tick_sat_sub_u8",
+            [TICK_TYPE_U16] = "tick_sat_sub_u16",
+            [TICK_TYPE_U32] = "tick_sat_sub_u32",
+            [TICK_TYPE_U64] = "tick_sat_sub_u64",
+            [TICK_TYPE_USZ] = "tick_sat_sub_usz",
+        },
+    // TICK_BUILTIN_SAT_MUL
+    [TICK_BUILTIN_SAT_MUL] =
+        {
+            [TICK_TYPE_I8] = "tick_sat_mul_i8",
+            [TICK_TYPE_I16] = "tick_sat_mul_i16",
+            [TICK_TYPE_I32] = "tick_sat_mul_i32",
+            [TICK_TYPE_I64] = "tick_sat_mul_i64",
+            [TICK_TYPE_ISZ] = "tick_sat_mul_isz",
+            [TICK_TYPE_U8] = "tick_sat_mul_u8",
+            [TICK_TYPE_U16] = "tick_sat_mul_u16",
+            [TICK_TYPE_U32] = "tick_sat_mul_u32",
+            [TICK_TYPE_U64] = "tick_sat_mul_u64",
+            [TICK_TYPE_USZ] = "tick_sat_mul_usz",
+        },
+    // TICK_BUILTIN_SAT_DIV
+    [TICK_BUILTIN_SAT_DIV] =
+        {
+            [TICK_TYPE_I8] = "tick_sat_div_i8",
+            [TICK_TYPE_I16] = "tick_sat_div_i16",
+            [TICK_TYPE_I32] = "tick_sat_div_i32",
+            [TICK_TYPE_I64] = "tick_sat_div_i64",
+            [TICK_TYPE_ISZ] = "tick_sat_div_isz",
+            [TICK_TYPE_U8] = "tick_sat_div_u8",
+            [TICK_TYPE_U16] = "tick_sat_div_u16",
+            [TICK_TYPE_U32] = "tick_sat_div_u32",
+            [TICK_TYPE_U64] = "tick_sat_div_u64",
+            [TICK_TYPE_USZ] = "tick_sat_div_usz",
+        },
+    // TICK_BUILTIN_WRAP_ADD
+    [TICK_BUILTIN_WRAP_ADD] =
+        {
+            [TICK_TYPE_I8] = "tick_wrap_add_i8",
+            [TICK_TYPE_I16] = "tick_wrap_add_i16",
+            [TICK_TYPE_I32] = "tick_wrap_add_i32",
+            [TICK_TYPE_I64] = "tick_wrap_add_i64",
+            [TICK_TYPE_ISZ] = "tick_wrap_add_isz",
+            // Unsigned types use native C wrapping - no runtime function needed
+        },
+    // TICK_BUILTIN_WRAP_SUB
+    [TICK_BUILTIN_WRAP_SUB] =
+        {
+            [TICK_TYPE_I8] = "tick_wrap_sub_i8",
+            [TICK_TYPE_I16] = "tick_wrap_sub_i16",
+            [TICK_TYPE_I32] = "tick_wrap_sub_i32",
+            [TICK_TYPE_I64] = "tick_wrap_sub_i64",
+            [TICK_TYPE_ISZ] = "tick_wrap_sub_isz",
+        },
+    // TICK_BUILTIN_WRAP_MUL
+    [TICK_BUILTIN_WRAP_MUL] =
+        {
+            [TICK_TYPE_I8] = "tick_wrap_mul_i8",
+            [TICK_TYPE_I16] = "tick_wrap_mul_i16",
+            [TICK_TYPE_I32] = "tick_wrap_mul_i32",
+            [TICK_TYPE_I64] = "tick_wrap_mul_i64",
+            [TICK_TYPE_ISZ] = "tick_wrap_mul_isz",
+        },
+    // TICK_BUILTIN_WRAP_DIV
+    [TICK_BUILTIN_WRAP_DIV] =
+        {
+            [TICK_TYPE_I8] = "tick_wrap_div_i8",
+            [TICK_TYPE_I16] = "tick_wrap_div_i16",
+            [TICK_TYPE_I32] = "tick_wrap_div_i32",
+            [TICK_TYPE_I64] = "tick_wrap_div_i64",
+            [TICK_TYPE_ISZ] = "tick_wrap_div_isz",
+        },
+    // TICK_BUILTIN_CHECKED_ADD
+    [TICK_BUILTIN_CHECKED_ADD] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_add_i8",
+            [TICK_TYPE_I16] = "tick_checked_add_i16",
+            [TICK_TYPE_I32] = "tick_checked_add_i32",
+            [TICK_TYPE_I64] = "tick_checked_add_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_add_isz",
+            [TICK_TYPE_U8] = "tick_wrap_add_u8",
+            [TICK_TYPE_U16] = "tick_wrap_add_u16",
+            [TICK_TYPE_U32] = "tick_wrap_add_u32",
+            [TICK_TYPE_U64] = "tick_wrap_add_u64",
+            [TICK_TYPE_USZ] = "tick_wrap_add_usz",
+        },
+    // TICK_BUILTIN_CHECKED_SUB
+    [TICK_BUILTIN_CHECKED_SUB] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_sub_i8",
+            [TICK_TYPE_I16] = "tick_checked_sub_i16",
+            [TICK_TYPE_I32] = "tick_checked_sub_i32",
+            [TICK_TYPE_I64] = "tick_checked_sub_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_sub_isz",
+            [TICK_TYPE_U8] = "tick_wrap_sub_u8",
+            [TICK_TYPE_U16] = "tick_wrap_sub_u16",
+            [TICK_TYPE_U32] = "tick_wrap_sub_u32",
+            [TICK_TYPE_U64] = "tick_wrap_sub_u64",
+            [TICK_TYPE_USZ] = "tick_wrap_sub_usz",
+        },
+    // TICK_BUILTIN_CHECKED_MUL
+    [TICK_BUILTIN_CHECKED_MUL] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_mul_i8",
+            [TICK_TYPE_I16] = "tick_checked_mul_i16",
+            [TICK_TYPE_I32] = "tick_checked_mul_i32",
+            [TICK_TYPE_I64] = "tick_checked_mul_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_mul_isz",
+            [TICK_TYPE_U8] = "tick_wrap_mul_u8",
+            [TICK_TYPE_U16] = "tick_wrap_mul_u16",
+            [TICK_TYPE_U32] = "tick_wrap_mul_u32",
+            [TICK_TYPE_U64] = "tick_wrap_mul_u64",
+            [TICK_TYPE_USZ] = "tick_wrap_mul_usz",
+        },
+    // TICK_BUILTIN_CHECKED_DIV
+    [TICK_BUILTIN_CHECKED_DIV] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_div_i8",
+            [TICK_TYPE_I16] = "tick_checked_div_i16",
+            [TICK_TYPE_I32] = "tick_checked_div_i32",
+            [TICK_TYPE_I64] = "tick_checked_div_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_div_isz",
+            [TICK_TYPE_U8] = "tick_checked_div_u8",
+            [TICK_TYPE_U16] = "tick_checked_div_u16",
+            [TICK_TYPE_U32] = "tick_checked_div_u32",
+            [TICK_TYPE_U64] = "tick_checked_div_u64",
+            [TICK_TYPE_USZ] = "tick_checked_div_usz",
+        },
+    // TICK_BUILTIN_CHECKED_MOD
+    [TICK_BUILTIN_CHECKED_MOD] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_mod_i8",
+            [TICK_TYPE_I16] = "tick_checked_mod_i16",
+            [TICK_TYPE_I32] = "tick_checked_mod_i32",
+            [TICK_TYPE_I64] = "tick_checked_mod_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_mod_isz",
+            [TICK_TYPE_U8] = "tick_checked_mod_u8",
+            [TICK_TYPE_U16] = "tick_checked_mod_u16",
+            [TICK_TYPE_U32] = "tick_checked_mod_u32",
+            [TICK_TYPE_U64] = "tick_checked_mod_u64",
+            [TICK_TYPE_USZ] = "tick_checked_mod_usz",
+        },
+    // TICK_BUILTIN_CHECKED_SHL
+    [TICK_BUILTIN_CHECKED_SHL] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_shl_i8",
+            [TICK_TYPE_I16] = "tick_checked_shl_i16",
+            [TICK_TYPE_I32] = "tick_checked_shl_i32",
+            [TICK_TYPE_I64] = "tick_checked_shl_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_shl_isz",
+            [TICK_TYPE_U8] = "tick_checked_shl_u8",
+            [TICK_TYPE_U16] = "tick_checked_shl_u16",
+            [TICK_TYPE_U32] = "tick_checked_shl_u32",
+            [TICK_TYPE_U64] = "tick_checked_shl_u64",
+            [TICK_TYPE_USZ] = "tick_checked_shl_usz",
+        },
+    // TICK_BUILTIN_CHECKED_SHR
+    [TICK_BUILTIN_CHECKED_SHR] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_shr_i8",
+            [TICK_TYPE_I16] = "tick_checked_shr_i16",
+            [TICK_TYPE_I32] = "tick_checked_shr_i32",
+            [TICK_TYPE_I64] = "tick_checked_shr_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_shr_isz",
+            [TICK_TYPE_U8] = "tick_checked_shr_u8",
+            [TICK_TYPE_U16] = "tick_checked_shr_u16",
+            [TICK_TYPE_U32] = "tick_checked_shr_u32",
+            [TICK_TYPE_U64] = "tick_checked_shr_u64",
+            [TICK_TYPE_USZ] = "tick_checked_shr_usz",
+        },
+    // TICK_BUILTIN_CHECKED_NEG
+    [TICK_BUILTIN_CHECKED_NEG] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_neg_i8",
+            [TICK_TYPE_I16] = "tick_checked_neg_i16",
+            [TICK_TYPE_I32] = "tick_checked_neg_i32",
+            [TICK_TYPE_I64] = "tick_checked_neg_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_neg_isz",
+            // Unsigned types cannot be negated
+        },
+    // TICK_BUILTIN_CHECKED_CAST handled separately via CAST_FUNCS table
+};
+
+// Cast function names indexed by [src_type][dst_type]
+// Returns function name string or NULL if bare cast is sufficient
+static const char* CAST_FUNCS[NUM_TYPES][NUM_TYPES] = {
+    // From I8
+    [TICK_TYPE_I8] =
+        {
+            [TICK_TYPE_I8] = NULL,   // Same type - bare cast
+            [TICK_TYPE_I16] = NULL,  // Widening - bare cast
+            [TICK_TYPE_I32] = NULL,
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = "tick_checked_cast_i8_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_i8_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_i8_u32",
+            [TICK_TYPE_U64] = "tick_checked_cast_i8_u64",
+            [TICK_TYPE_USZ] = "tick_checked_cast_i8_usz",
+        },
+    // From I16
+    [TICK_TYPE_I16] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_i16_i8",
+            [TICK_TYPE_I16] = NULL,
+            [TICK_TYPE_I32] = NULL,
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = "tick_checked_cast_i16_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_i16_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_i16_u32",
+            [TICK_TYPE_U64] = "tick_checked_cast_i16_u64",
+            [TICK_TYPE_USZ] = "tick_checked_cast_i16_usz",
+        },
+    // From I32
+    [TICK_TYPE_I32] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_i32_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_i32_i16",
+            [TICK_TYPE_I32] = NULL,
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = "tick_checked_cast_i32_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_i32_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_i32_u32",
+            [TICK_TYPE_U64] = "tick_checked_cast_i32_u64",
+            [TICK_TYPE_USZ] = "tick_checked_cast_i32_usz",
+        },
+    // From I64
+    [TICK_TYPE_I64] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_i64_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_i64_i16",
+            [TICK_TYPE_I32] = "tick_checked_cast_i64_i32",
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = "tick_checked_cast_i64_isz",
+            [TICK_TYPE_U8] = "tick_checked_cast_i64_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_i64_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_i64_u32",
+            [TICK_TYPE_U64] = "tick_checked_cast_i64_u64",
+            [TICK_TYPE_USZ] = "tick_checked_cast_i64_usz",
+        },
+    // From ISZ
+    [TICK_TYPE_ISZ] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_isz_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_isz_i16",
+            [TICK_TYPE_I32] = "tick_checked_cast_isz_i32",
+            [TICK_TYPE_I64] = "tick_checked_cast_isz_i64",
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = "tick_checked_cast_isz_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_isz_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_isz_u32",
+            [TICK_TYPE_U64] = "tick_checked_cast_isz_u64",
+            [TICK_TYPE_USZ] = "tick_checked_cast_isz_usz",
+        },
+    // From U8
+    [TICK_TYPE_U8] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_u8_i8",
+            [TICK_TYPE_I16] = NULL,  // Widening to larger signed - safe
+            [TICK_TYPE_I32] = NULL,
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = NULL,
+            [TICK_TYPE_U16] = NULL,
+            [TICK_TYPE_U32] = NULL,
+            [TICK_TYPE_U64] = NULL,
+            [TICK_TYPE_USZ] = NULL,
+        },
+    // From U16
+    [TICK_TYPE_U16] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_u16_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_u16_i16",
+            [TICK_TYPE_I32] = NULL,
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = "tick_checked_cast_u16_u8",
+            [TICK_TYPE_U16] = NULL,
+            [TICK_TYPE_U32] = NULL,
+            [TICK_TYPE_U64] = NULL,
+            [TICK_TYPE_USZ] = NULL,
+        },
+    // From U32
+    [TICK_TYPE_U32] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_u32_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_u32_i16",
+            [TICK_TYPE_I32] = "tick_checked_cast_u32_i32",
+            [TICK_TYPE_I64] = NULL,
+            [TICK_TYPE_ISZ] = NULL,
+            [TICK_TYPE_U8] = "tick_checked_cast_u32_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_u32_u16",
+            [TICK_TYPE_U32] = NULL,
+            [TICK_TYPE_U64] = NULL,
+            [TICK_TYPE_USZ] = NULL,
+        },
+    // From U64
+    [TICK_TYPE_U64] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_u64_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_u64_i16",
+            [TICK_TYPE_I32] = "tick_checked_cast_u64_i32",
+            [TICK_TYPE_I64] = "tick_checked_cast_u64_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_cast_u64_isz",
+            [TICK_TYPE_U8] = "tick_checked_cast_u64_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_u64_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_u64_u32",
+            [TICK_TYPE_U64] = NULL,
+            [TICK_TYPE_USZ] = "tick_checked_cast_u64_usz",
+        },
+    // From USZ
+    [TICK_TYPE_USZ] =
+        {
+            [TICK_TYPE_I8] = "tick_checked_cast_usz_i8",
+            [TICK_TYPE_I16] = "tick_checked_cast_usz_i16",
+            [TICK_TYPE_I32] = "tick_checked_cast_usz_i32",
+            [TICK_TYPE_I64] = "tick_checked_cast_usz_i64",
+            [TICK_TYPE_ISZ] = "tick_checked_cast_usz_isz",
+            [TICK_TYPE_U8] = "tick_checked_cast_usz_u8",
+            [TICK_TYPE_U16] = "tick_checked_cast_usz_u16",
+            [TICK_TYPE_U32] = "tick_checked_cast_usz_u32",
+            [TICK_TYPE_U64] = "tick_checked_cast_usz_u64",
+            [TICK_TYPE_USZ] = NULL,
+        },
+};
+
+// Helper function to map binary operation + type to builtin enum
+// Returns the builtin enum, or 0 if no runtime function needed
+static tick_builtin_t map_binop_to_builtin(tick_binop_t op,
+                                           tick_builtin_type_t type) {
+  // Check if type is signed for wrapping operations
+  bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
+
+  switch (op) {
+    // Saturating operations
+    case BINOP_SAT_ADD:
+      return TICK_BUILTIN_SAT_ADD;
+    case BINOP_SAT_SUB:
+      return TICK_BUILTIN_SAT_SUB;
+    case BINOP_SAT_MUL:
+      return TICK_BUILTIN_SAT_MUL;
+    case BINOP_SAT_DIV:
+      return TICK_BUILTIN_SAT_DIV;
+
+    // Wrapping operations - only for signed types
+    case BINOP_WRAP_ADD:
+      return is_signed ? TICK_BUILTIN_WRAP_ADD : (tick_builtin_t)0;
+    case BINOP_WRAP_SUB:
+      return is_signed ? TICK_BUILTIN_WRAP_SUB : (tick_builtin_t)0;
+    case BINOP_WRAP_MUL:
+      return is_signed ? TICK_BUILTIN_WRAP_MUL : (tick_builtin_t)0;
+    case BINOP_WRAP_DIV:
+      return is_signed ? TICK_BUILTIN_WRAP_DIV : (tick_builtin_t)0;
+
+    // Default arithmetic - checked for signed, wrapping for unsigned
+    case BINOP_ADD:
+      return is_signed ? TICK_BUILTIN_CHECKED_ADD : TICK_BUILTIN_WRAP_ADD;
+    case BINOP_SUB:
+      return is_signed ? TICK_BUILTIN_CHECKED_SUB : TICK_BUILTIN_WRAP_SUB;
+    case BINOP_MUL:
+      return is_signed ? TICK_BUILTIN_CHECKED_MUL : TICK_BUILTIN_WRAP_MUL;
+
+    // Division and modulo - always checked
+    case BINOP_DIV:
+      return TICK_BUILTIN_CHECKED_DIV;
+    case BINOP_MOD:
+      return TICK_BUILTIN_CHECKED_MOD;
+
+    // Shifts - always checked
+    case BINOP_LSHIFT:
+      return TICK_BUILTIN_CHECKED_SHL;
+    case BINOP_RSHIFT:
+      return TICK_BUILTIN_CHECKED_SHR;
+
+    default:
+      return (
+          tick_builtin_t)0;  // Not an arithmetic operation - no runtime func
+  }
+}
+
+// ============================================================================
+// Cast Strategy Helpers
+// ============================================================================
+
+// Check if builtin type is numeric (supports checked operations)
+static bool tick_type_is_numeric_builtin(tick_builtin_type_t type) {
+  return (type >= TICK_TYPE_I8 && type <= TICK_TYPE_USZ);
+}
+
+// Check if a cast from src to dst is a widening conversion (always safe)
+static bool is_widening_cast(tick_builtin_type_t src, tick_builtin_type_t dst) {
+  if (src == dst) return true;
+
+  // Signed to signed widening
+  if (src == TICK_TYPE_I8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
+                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_I16 &&
+      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_I32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+
+  // Unsigned to unsigned widening
+  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_U16 || dst == TICK_TYPE_U32 ||
+                              dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
+    return true;
+  if (src == TICK_TYPE_U16 &&
+      (dst == TICK_TYPE_U32 || dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
+    return true;
+  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
+    return true;
+
+  // Unsigned to signed widening (safe if destination is larger)
+  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
+                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_U16 &&
+      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
+    return true;
+
+  return false;
+}
+
+// Compute the cast strategy for a given source and destination type
+static tick_cast_strategy_t compute_cast_strategy(tick_builtin_type_t src,
+                                                  tick_builtin_type_t dst) {
+  // Non-numeric types use bare C cast
+  bool src_numeric = tick_type_is_numeric_builtin(src);
+  bool dst_numeric = tick_type_is_numeric_builtin(dst);
+  if (!src_numeric || !dst_numeric) {
+    return CAST_STRATEGY_BARE;
+  }
+
+  // Widening casts are safe - use bare C cast
+  if (is_widening_cast(src, dst)) {
+    return CAST_STRATEGY_BARE;
+  }
+
+  // Narrowing or sign-changing casts need checked cast
+  return CAST_STRATEGY_CHECKED;
+}
+
+// Check if identifier needs __u_ prefix
+// Returns false for: AT builtins, extern decls, pub decls, temporaries
+// Returns true for: regular user variables
+static bool identifier_needs_user_prefix(tick_ast_node_t* identifier) {
+  CHECK(identifier && identifier->kind == TICK_AST_IDENTIFIER_EXPR,
+        "must be identifier");
+
+  // AT builtins don't need prefix
+  if (identifier->identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
+    return false;
+  }
+
+  // If symbol resolved, check the declaration
+  tick_symbol_t* sym = identifier->identifier_expr.symbol;
+  if (sym && sym->decl) {
+    tick_ast_node_t* decl = sym->decl;
+
+    // Temporaries don't need prefix (have __tmp{N} instead)
+    if (tick_node_is_temporary(decl)) {
+      return false;
+    }
+
+    // Extern and pub declarations don't need prefix (link with C code)
+    if (decl->kind == TICK_AST_DECL) {
+      if (decl->decl.quals.is_extern || decl->decl.quals.is_pub) {
+        return false;
+      }
+    }
+  }
+
+  // Default: needs __u_ prefix
+  return true;
+}
+
+// Check if declaration is static const string literal
+static bool is_decl_static_string(tick_ast_node_t* decl) {
+  CHECK(decl && decl->kind == TICK_AST_DECL, "must be decl");
+
+  return decl->decl.quals.is_static && decl->decl.init &&
+         decl->decl.init->kind == TICK_AST_LITERAL &&
+         decl->decl.init->literal.kind == TICK_LIT_STRING;
+}
+
+// Check if type is pointer-to-array (*[N]T)
+static bool is_type_ptr_to_array(tick_ast_node_t* type) {
+  if (!type || type->kind != TICK_AST_TYPE_POINTER) {
+    return false;
+  }
+
+  tick_ast_node_t* pointee = type->type_pointer.pointee_type;
+  return pointee && pointee->kind == TICK_AST_TYPE_ARRAY;
+}
+
+// Try to extract builtin type from an expression's resolved type
+// Returns TICK_TYPE_UNKNOWN if type cannot be determined
+static tick_builtin_type_t get_expr_builtin_type(tick_ast_node_t* expr) {
+  if (!expr) return TICK_TYPE_UNKNOWN;
+
+  tick_ast_node_t* type = NULL;
+  switch (expr->kind) {
+    case TICK_AST_BINARY_EXPR:
+      type = expr->binary_expr.resolved_type;
+      break;
+    case TICK_AST_UNARY_EXPR:
+      type = expr->unary_expr.resolved_type;
+      break;
+    case TICK_AST_CAST_EXPR:
+      type = expr->cast_expr.resolved_type;
+      break;
+    default:
+      return TICK_TYPE_UNKNOWN;
+  }
+
+  if (type && type->kind == TICK_AST_TYPE_NAMED) {
+    return type->type_named.builtin_type;
+  }
+
+  return TICK_TYPE_UNKNOWN;
+}
+
+// ============================================================================
 // Debug-only String Helpers
 // ============================================================================
 
@@ -522,8 +1083,8 @@ static bool is_simple_expr(tick_ast_node_t* expr) {
 
   // Dereference of simple expression is simple - keeps lvalues intact
   // e.g., (*ptr).field or (*ptr)[index] should not decompose the *ptr part
-  // Address-of simple expression is also simple - needed for lvalue decomposition
-  // e.g., &x.y should not decompose when used as temp init
+  // Address-of simple expression is also simple - needed for lvalue
+  // decomposition e.g., &x.y should not decompose when used as temp init
   if (expr->kind == TICK_AST_UNARY_EXPR &&
       (expr->unary_expr.op == UNOP_DEREF || expr->unary_expr.op == UNOP_ADDR) &&
       is_simple_expr(expr->unary_expr.operand)) {
@@ -616,6 +1177,10 @@ static tick_ast_node_t* create_temp_decl(tick_alloc_t alloc, u32 tmpid,
       init->literal.kind == TICK_LIT_STRING) {
     decl->decl.quals.is_static = true;
   }
+
+  // Annotate with codegen hints
+  decl->decl.is_static_string = is_decl_static_string(decl);
+  decl->decl.is_ptr_to_array = is_type_ptr_to_array(type);
 
   decl->decl.analysis_state =
       TICK_ANALYSIS_STATE_COMPLETED;  // Already analyzed
@@ -829,7 +1394,8 @@ static tick_ast_node_t* decompose_to_simple(tick_ast_node_t* expr,
   }
 
   // Allocate a new temporary ID from the function-level scope
-  // This ensures all temporaries in a function have unique IDs across all blocks
+  // This ensures all temporaries in a function have unique IDs across all
+  // blocks
   u32 tmpid = ctx->function_scope->next_tmpid++;
 
   // Create a temporary declaration: let __tmpN: <type> = <expr>;
@@ -858,8 +1424,8 @@ static tick_ast_node_t* decompose_to_simple(tick_ast_node_t* expr,
 
 // Forward declarations for mutual recursion
 static void flatten_struct_init(tick_ast_node_t* base_lvalue,
-                                 tick_ast_node_t* init_expr,
-                                 tick_analyze_ctx_t* ctx);
+                                tick_ast_node_t* init_expr,
+                                tick_analyze_ctx_t* ctx);
 
 // ============================================================================
 // Lvalue Decomposition (Phase 2)
@@ -872,10 +1438,9 @@ static bool is_simple_lvalue(tick_ast_node_t* expr) {
 }
 
 // Helper: Create a unary expression node (for address-of and dereference)
-static tick_ast_node_t* create_unary_node(tick_alloc_t alloc,
-                                           tick_unop_t op,
-                                           tick_ast_node_t* operand,
-                                           tick_ast_loc_t loc) {
+static tick_ast_node_t* create_unary_node(tick_alloc_t alloc, tick_unop_t op,
+                                          tick_ast_node_t* operand,
+                                          tick_ast_loc_t loc) {
   tick_ast_node_t* node;
   ALLOC_AST_NODE(alloc, node);
   node->kind = TICK_AST_UNARY_EXPR;
@@ -888,8 +1453,8 @@ static tick_ast_node_t* create_unary_node(tick_alloc_t alloc,
 }
 
 // Helper: Create a pointer type node
-static tick_ast_node_t* create_pointer_type_node(tick_alloc_t alloc,
-                                                  tick_ast_node_t* pointee_type) {
+static tick_ast_node_t* create_pointer_type_node(
+    tick_alloc_t alloc, tick_ast_node_t* pointee_type) {
   tick_ast_node_t* node;
   ALLOC_AST_NODE(alloc, node);
   node->kind = TICK_AST_TYPE_POINTER;
@@ -899,11 +1464,17 @@ static tick_ast_node_t* create_pointer_type_node(tick_alloc_t alloc,
   return node;
 }
 
+// Forward declarations for helper functions
+static tick_ast_node_t* create_field_access_node(tick_alloc_t alloc,
+                                                 tick_ast_node_t* object,
+                                                 tick_buf_t field_name,
+                                                 tick_ast_loc_t loc);
+
 // Helper: Create address-of expression for lvalue
-// Handles: &x, &obj.field, &arr[i], &*ptr (optimizes to just ptr)
+// Handles: &x, &obj.field, &arr[i], &*ptr (cancels to just ptr)
 static tick_ast_node_t* create_address_of_lvalue(tick_ast_node_t* lvalue,
-                                                  tick_alloc_t alloc) {
-  // Special case: &(*ptr) → ptr (cancel out)
+                                                 tick_alloc_t alloc) {
+  // Special case: &(*ptr) → ptr (address-of and deref cancel out)
   if (lvalue->kind == TICK_AST_UNARY_EXPR &&
       lvalue->unary_expr.op == UNOP_DEREF) {
     return lvalue->unary_expr.operand;
@@ -915,9 +1486,9 @@ static tick_ast_node_t* create_address_of_lvalue(tick_ast_node_t* lvalue,
 
 // Helper: Create a field access node
 static tick_ast_node_t* create_field_access_node(tick_alloc_t alloc,
-                                                   tick_ast_node_t* object,
-                                                   tick_buf_t field_name,
-                                                   tick_ast_loc_t loc) {
+                                                 tick_ast_node_t* object,
+                                                 tick_buf_t field_name,
+                                                 tick_ast_loc_t loc) {
   tick_ast_node_t* node;
   ALLOC_AST_NODE(alloc, node);
   node->kind = TICK_AST_FIELD_ACCESS_EXPR;
@@ -933,9 +1504,9 @@ static tick_ast_node_t* create_field_access_node(tick_alloc_t alloc,
 
 // Helper: Create an index expression node
 static tick_ast_node_t* create_index_node(tick_alloc_t alloc,
-                                           tick_ast_node_t* array,
-                                           tick_ast_node_t* index,
-                                           tick_ast_loc_t loc) {
+                                          tick_ast_node_t* array,
+                                          tick_ast_node_t* index,
+                                          tick_ast_loc_t loc) {
   tick_ast_node_t* node;
   ALLOC_AST_NODE(alloc, node);
   node->kind = TICK_AST_INDEX_EXPR;
@@ -948,9 +1519,9 @@ static tick_ast_node_t* create_index_node(tick_alloc_t alloc,
 
 // Helper: Create an assignment statement node
 static tick_ast_node_t* create_assign_stmt_node(tick_alloc_t alloc,
-                                                 tick_ast_node_t* lhs,
-                                                 tick_ast_node_t* rhs,
-                                                 tick_ast_loc_t loc) {
+                                                tick_ast_node_t* lhs,
+                                                tick_ast_node_t* rhs,
+                                                tick_ast_loc_t loc) {
   tick_ast_node_t* node;
   ALLOC_AST_NODE(alloc, node);
   node->kind = TICK_AST_ASSIGN_STMT;
@@ -965,8 +1536,8 @@ static tick_ast_node_t* create_assign_stmt_node(tick_alloc_t alloc,
 
 // Recursively flatten array initializers into index assignments
 static void flatten_array_init(tick_ast_node_t* base_lvalue,
-                                tick_ast_node_t* init_expr,
-                                tick_analyze_ctx_t* ctx) {
+                               tick_ast_node_t* init_expr,
+                               tick_analyze_ctx_t* ctx) {
   ALOG("  flattening array init");
 
   tick_ast_node_t* elem = init_expr->array_init_expr.elements;
@@ -974,8 +1545,8 @@ static void flatten_array_init(tick_ast_node_t* base_lvalue,
   while (elem) {
     // Create index expression: base[index]
     tick_ast_node_t* index_lit = alloc_literal_node(ctx->alloc, index);
-    tick_ast_node_t* index_lvalue = create_index_node(
-        ctx->alloc, base_lvalue, index_lit, elem->loc);
+    tick_ast_node_t* index_lvalue =
+        create_index_node(ctx->alloc, base_lvalue, index_lit, elem->loc);
 
     // Check if element is a nested struct/array initializer
     if (elem->kind == TICK_AST_STRUCT_INIT_EXPR) {
@@ -986,8 +1557,8 @@ static void flatten_array_init(tick_ast_node_t* base_lvalue,
       flatten_array_init(index_lvalue, elem, ctx);
     } else {
       // Leaf: create assignment
-      tick_ast_node_t* assign = create_assign_stmt_node(
-          ctx->alloc, index_lvalue, elem, elem->loc);
+      tick_ast_node_t* assign =
+          create_assign_stmt_node(ctx->alloc, index_lvalue, elem, elem->loc);
       insert_temp_in_block(ctx, assign);
       // Analyze the assignment immediately so lvalue decomposition happens
       // Save and restore current_stmt so temps get inserted in the right place
@@ -1004,8 +1575,8 @@ static void flatten_array_init(tick_ast_node_t* base_lvalue,
 
 // Recursively flatten nested struct initializers into field assignments
 static void flatten_struct_init(tick_ast_node_t* base_lvalue,
-                                 tick_ast_node_t* init_expr,
-                                 tick_analyze_ctx_t* ctx) {
+                                tick_ast_node_t* init_expr,
+                                tick_analyze_ctx_t* ctx) {
   ALOG("  flattening struct init");
 
   tick_ast_node_t* field = init_expr->struct_init_expr.fields;
@@ -1046,7 +1617,7 @@ static void flatten_struct_init(tick_ast_node_t* base_lvalue,
 
 // Decompose struct initializer to declaration + field assignments
 static tick_ast_node_t* decompose_struct_init(tick_ast_node_t* init_expr,
-                                               tick_analyze_ctx_t* ctx) {
+                                              tick_analyze_ctx_t* ctx) {
   // Skip if module-level (must stay compile-time constant)
   if (ctx->scope_depth == 0) {
     ALOG("  keeping struct init at module level");
@@ -1098,7 +1669,7 @@ static tick_ast_node_t* decompose_struct_init(tick_ast_node_t* init_expr,
 
 // Decompose array initializer to declaration + index assignments
 static tick_ast_node_t* decompose_array_init(tick_ast_node_t* init_expr,
-                                              tick_analyze_ctx_t* ctx) {
+                                             tick_analyze_ctx_t* ctx) {
   // Skip if module-level
   if (ctx->scope_depth == 0) {
     ALOG("  keeping array init at module level");
@@ -1121,8 +1692,8 @@ static tick_ast_node_t* decompose_array_init(tick_ast_node_t* init_expr,
   return init_expr;
 }
 
-// Multi-step lvalue decomposition: transforms complex lvalues into pointer temporaries
-// Example: container.field[index].subfield
+// Multi-step lvalue decomposition: transforms complex lvalues into pointer
+// temporaries Example: container.field[index].subfield
 //   → let __tmp0 = &container.field;
 //     let __tmp1 = &(*__tmp0)[index];
 //     let __tmp2 = &(*__tmp1).subfield;
@@ -1130,8 +1701,8 @@ static tick_ast_node_t* decompose_array_init(tick_ast_node_t* init_expr,
 //
 // Note: lvalue must have already been analyzed (resolved_type fields populated)
 static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
-                                                tick_ast_node_t* lvalue_type,
-                                                tick_analyze_ctx_t* ctx) {
+                                               tick_ast_node_t* lvalue_type,
+                                               tick_analyze_ctx_t* ctx) {
   if (!lvalue || !ctx) return NULL;
 
   ALOG_ENTER("decomposing lvalue chain");
@@ -1196,14 +1767,17 @@ static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
         tick_ast_node_t* deref = create_unary_node(
             ctx->alloc, UNOP_DEREF, base_for_access, lvalue->loc);
         access_expr = create_field_access_node(
-            ctx->alloc, deref, lvalue->field_access_expr.field_name, lvalue->loc);
+            ctx->alloc, deref, lvalue->field_access_expr.field_name,
+            lvalue->loc);
       } else {
         // Create base.field or base->field (when base is identifier)
         access_expr = create_field_access_node(
-            ctx->alloc, base_for_access, lvalue->field_access_expr.field_name, lvalue->loc);
+            ctx->alloc, base_for_access, lvalue->field_access_expr.field_name,
+            lvalue->loc);
       }
       // Preserve the is_arrow flag from the original lvalue
-      access_expr->field_access_expr.is_arrow = lvalue->field_access_expr.is_arrow;
+      access_expr->field_access_expr.is_arrow =
+          lvalue->field_access_expr.is_arrow;
       break;
     }
 
@@ -1229,12 +1803,12 @@ static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
         // Create (*tmpN)[index]
         tick_ast_node_t* deref = create_unary_node(
             ctx->alloc, UNOP_DEREF, base_for_access, lvalue->loc);
-        access_expr = create_index_node(
-            ctx->alloc, deref, lvalue->index_expr.index, lvalue->loc);
+        access_expr = create_index_node(ctx->alloc, deref,
+                                        lvalue->index_expr.index, lvalue->loc);
       } else {
         // Create base[index] (when base is identifier)
-        access_expr = create_index_node(
-            ctx->alloc, base_for_access, lvalue->index_expr.index, lvalue->loc);
+        access_expr = create_index_node(ctx->alloc, base_for_access,
+                                        lvalue->index_expr.index, lvalue->loc);
       }
       break;
     }
@@ -1243,18 +1817,19 @@ static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
       if (lvalue->unary_expr.op == UNOP_DEREF) {
         // Decompose: *ptr
         tick_ast_node_t* ptr = lvalue->unary_expr.operand;
-        tick_ast_node_t* decomposed_ptr = decompose_lvalue_chain(ptr, NULL, ctx);
+        tick_ast_node_t* decomposed_ptr =
+            decompose_lvalue_chain(ptr, NULL, ctx);
         if (!decomposed_ptr) return NULL;
 
         // Build: *decomposed_ptr
         // If decomposed_ptr is already (*tmpN), we have *(*tmpN) which is tmpN
         if (decomposed_ptr->kind == TICK_AST_UNARY_EXPR &&
             decomposed_ptr->unary_expr.op == UNOP_DEREF) {
-          access_expr = create_unary_node(
-              ctx->alloc, UNOP_DEREF, decomposed_ptr, lvalue->loc);
+          access_expr = create_unary_node(ctx->alloc, UNOP_DEREF,
+                                          decomposed_ptr, lvalue->loc);
         } else {
-          access_expr = create_unary_node(
-              ctx->alloc, UNOP_DEREF, decomposed_ptr, lvalue->loc);
+          access_expr = create_unary_node(ctx->alloc, UNOP_DEREF,
+                                          decomposed_ptr, lvalue->loc);
         }
       } else {
         ALOG_EXIT("unsupported unary operator for lvalue");
@@ -1275,7 +1850,8 @@ static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
 
   // Create temporary: let __tmpN = &access_expr;
   // 1. Create address-of expression
-  tick_ast_node_t* addr_expr = create_address_of_lvalue(access_expr, ctx->alloc);
+  tick_ast_node_t* addr_expr =
+      create_address_of_lvalue(access_expr, ctx->alloc);
 
   // 2. Create pointer type for the temporary
   tick_ast_node_t* ptr_type = create_pointer_type_node(ctx->alloc, lvalue_type);
@@ -1284,8 +1860,8 @@ static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
   u32 tmpid = ctx->function_scope->next_tmpid++;
 
   // 4. Create temp declaration: let __tmpN: *T = &access_expr;
-  tick_ast_node_t* temp_decl = create_temp_decl(
-      ctx->alloc, tmpid, ptr_type, addr_expr);
+  tick_ast_node_t* temp_decl =
+      create_temp_decl(ctx->alloc, tmpid, ptr_type, addr_expr);
   if (!temp_decl) {
     ALOG_EXIT("failed to create temp decl");
     return NULL;
@@ -1302,10 +1878,11 @@ static tick_ast_node_t* decompose_lvalue_chain(tick_ast_node_t* lvalue,
   }
 
   // 7. Return: *__tmpN
-  tick_ast_node_t* result = create_unary_node(
-      ctx->alloc, UNOP_DEREF, temp_ident, lvalue->loc);
+  tick_ast_node_t* result =
+      create_unary_node(ctx->alloc, UNOP_DEREF, temp_ident, lvalue->loc);
 
-  // Mark as synthetic to prevent re-decomposition if analyze_stmt is called again
+  // Mark as synthetic to prevent re-decomposition if analyze_stmt is called
+  // again
   result->node_flags |= TICK_NODE_FLAG_SYNTHETIC;
 
   ALOG_EXIT("created __tmp%u", tmpid);
@@ -1487,6 +2064,19 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       }
 
       expr->binary_expr.resolved_type = result_type;
+
+      // Populate runtime_func for operations that need runtime functions
+      expr->binary_expr.runtime_func = NULL;  // Default: no runtime function
+      if (result_type && result_type->kind == TICK_AST_TYPE_NAMED) {
+        tick_builtin_type_t type = result_type->type_named.builtin_type;
+        tick_builtin_t builtin =
+            map_binop_to_builtin(expr->binary_expr.op, type);
+        if (builtin != 0) {
+          // Lookup runtime function name from table
+          expr->binary_expr.runtime_func = RUNTIME_FUNCS[builtin][type];
+        }
+      }
+
       ALOG_EXIT("-> %s", tick_type_str(result_type));
       return result_type;
     }
@@ -1565,6 +2155,20 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       }
 
       expr->unary_expr.resolved_type = result_type;
+
+      // Populate runtime_func for negation of signed types
+      expr->unary_expr.runtime_func = NULL;  // Default: no runtime function
+      if (expr->unary_expr.op == UNOP_NEG && result_type &&
+          result_type->kind == TICK_AST_TYPE_NAMED) {
+        tick_builtin_type_t type = result_type->type_named.builtin_type;
+        bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
+        if (is_signed) {
+          // Lookup checked_neg runtime function name from table
+          expr->unary_expr.runtime_func =
+              RUNTIME_FUNCS[TICK_BUILTIN_CHECKED_NEG][type];
+        }
+      }
+
       ALOG_EXIT("-> %s", tick_type_str(result_type));
       return result_type;
     }
@@ -1581,6 +2185,32 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       // Result type is the cast target type
       analyze_type(expr->cast_expr.type, ctx);
       expr->cast_expr.resolved_type = expr->cast_expr.type;
+
+      // Compute cast strategy and runtime function for codegen
+      tick_builtin_type_t src_builtin =
+          get_expr_builtin_type(expr->cast_expr.expr);
+      tick_builtin_type_t dst_builtin = TICK_TYPE_UNKNOWN;
+
+      if (expr->cast_expr.type &&
+          expr->cast_expr.type->kind == TICK_AST_TYPE_NAMED) {
+        dst_builtin = expr->cast_expr.type->type_named.builtin_type;
+      }
+
+      // Compute strategy (bare vs checked cast)
+      if (src_builtin == TICK_TYPE_UNKNOWN ||
+          dst_builtin == TICK_TYPE_UNKNOWN) {
+        // Source type unknown - default to bare cast
+        expr->cast_expr.strategy = CAST_STRATEGY_BARE;
+        expr->cast_expr.runtime_func = NULL;
+      } else {
+        expr->cast_expr.strategy =
+            compute_cast_strategy(src_builtin, dst_builtin);
+
+        // Lookup runtime function name from CAST_FUNCS table
+        // NULL means bare cast is sufficient (widening, same type, etc.)
+        expr->cast_expr.runtime_func = CAST_FUNCS[src_builtin][dst_builtin];
+      }
+
       return expr->cast_expr.type;
     }
 
@@ -1657,6 +2287,10 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
                        expr->identifier_expr.name.buf);
         return NULL;
       }
+
+      // Annotate with prefix requirement for codegen
+      expr->identifier_expr.needs_user_prefix =
+          identifier_needs_user_prefix(expr);
 
       // Get type from symbol's declaration
       tick_ast_node_t* decl = sym->decl;
@@ -1857,7 +2491,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
       if (expr->field_access_expr.object &&
           expr->field_access_expr.object->kind == TICK_AST_IDENTIFIER_EXPR) {
         // Try to look up as a type name first
-        tick_buf_t obj_name = expr->field_access_expr.object->identifier_expr.name;
+        tick_buf_t obj_name =
+            expr->field_access_expr.object->identifier_expr.name;
         tick_type_entry_t* type_entry = tick_types_lookup(ctx->types, obj_name);
 
         if (type_entry) {
@@ -2017,7 +2652,8 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
                     0) {
               // Found the field!
               result_type = field->field.type;
-              expr->field_access_expr.is_union_field = true;  // Mark as union field
+              expr->field_access_expr.is_union_field =
+                  true;  // Mark as union field
               ALOG("found field: %.*s -> %s", (int)field_name.sz,
                    field_name.buf, tick_type_str(result_type));
 
@@ -2203,6 +2839,10 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
         return err;
       }
 
+      // Annotate with codegen hints
+      stmt->decl.is_static_string = is_decl_static_string(stmt);
+      stmt->decl.is_ptr_to_array = is_type_ptr_to_array(stmt->decl.type);
+
       // Register symbol in current scope
       tick_scope_insert_symbol(ctx->current_scope, stmt->decl.name, stmt);
 
@@ -2233,8 +2873,8 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       if (!is_simple_lvalue(stmt->assign_stmt.lhs) &&
           !(stmt->node_flags & TICK_NODE_FLAG_SYNTHETIC) &&
           !(stmt->assign_stmt.lhs->node_flags & TICK_NODE_FLAG_SYNTHETIC)) {
-        tick_ast_node_t* final_lvalue = decompose_lvalue_chain(
-            stmt->assign_stmt.lhs, lhs_type, ctx);
+        tick_ast_node_t* final_lvalue =
+            decompose_lvalue_chain(stmt->assign_stmt.lhs, lhs_type, ctx);
         if (!final_lvalue) {
           return TICK_ANALYZE_ERR;
         }
@@ -2420,10 +3060,11 @@ static tick_analyze_error_t analyze_function(tick_ast_node_t* decl,
 
 // Helper to create and collect forward declaration for struct/union
 static void collect_forward_decl(tick_ast_node_t* decl,
-                                  tick_analyze_ctx_t* ctx) {
+                                 tick_analyze_ctx_t* ctx) {
   if (!decl || decl->kind != TICK_AST_DECL) return;
 
-  // Manually allocate AST node (can't use ALLOC_AST_NODE macro in void function)
+  // Manually allocate AST node (can't use ALLOC_AST_NODE macro in void
+  // function)
   tick_allocator_config_t config = {
       .flags = TICK_ALLOCATOR_ZEROMEM,
       .alignment2 = 0,
@@ -2915,6 +3556,10 @@ static tick_analyze_error_t analyze_decl_with_init(tick_ast_node_t* decl,
           return TICK_ANALYZE_ERR;
         }
       }
+
+      // Annotate with codegen hints
+      decl->decl.is_static_string = is_decl_static_string(decl);
+      decl->decl.is_ptr_to_array = is_type_ptr_to_array(decl->decl.type);
 
       ALOG_EXIT("%.*s: %s = %s", (int)decl->decl.name.sz, decl->decl.name.buf,
                 tick_type_str(decl->decl.type),

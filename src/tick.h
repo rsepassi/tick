@@ -338,7 +338,8 @@ typedef struct {
 //      * tmpid == 0: user-named variable
 //      * tmpid > 0: compiler temporary (e.g., tmpid=1 → __tmp1)
 //    - Struct/Array initialization fields must be LITERAL or IDENTIFIER_EXPR
-//    - Example: Point { x: foo() + 1 } → __tmp1 = foo() + 1; Point { x: __tmp1 }
+//    - Example: Point { x: foo() + 1 } → __tmp1 = foo() + 1; Point { x: __tmp1
+//    }
 //
 // FUTURE TRANSFORMATIONS (when high-level features are implemented):
 // 3. High-level types:
@@ -690,6 +691,13 @@ typedef enum {
   TICK_BUILTIN_CHECKED_CAST,
 } tick_builtin_t;
 
+// Cast strategies (determined by analysis pass)
+typedef enum {
+  CAST_STRATEGY_UNKNOWN,  // Not yet analyzed
+  CAST_STRATEGY_BARE,     // Direct C cast (widening, same type, non-numeric)
+  CAST_STRATEGY_CHECKED,  // Checked cast function (narrowing, sign change)
+} tick_cast_strategy_t;
+
 // Builtin types (resolved during analysis)
 typedef enum {
   TICK_TYPE_UNKNOWN,  // Not yet resolved
@@ -766,15 +774,15 @@ typedef struct {
 
 // Analysis context
 struct tick_analyze_ctx_s {
-  struct hashmap* types;        // Global type table (module-level)
-  tick_scope_t* current_scope;  // Current scope for lookups
+  struct hashmap* types;         // Global type table (module-level)
+  tick_scope_t* current_scope;   // Current scope for lookups
   tick_scope_t* function_scope;  // Function-level scope for tmpid allocation
-  tick_scope_t* module_scope;   // Root module scope
-  tick_ast_node_t* module;      // Pointer to MODULE node (ast->root)
+  tick_scope_t* module_scope;    // Root module scope
+  tick_ast_node_t* module;       // Pointer to MODULE node (ast->root)
   tick_alloc_t alloc;
   tick_buf_t errbuf;
-  tick_work_queue_t work_queue;         // Queue for lazy analysis
-  tick_dependency_list_t pending_deps;  // Dependencies for current declaration
+  tick_work_queue_t work_queue;          // Queue for lazy analysis
+  tick_dependency_list_t pending_deps;   // Dependencies for current declaration
   tick_dependency_list_t forward_decls;  // Forward declarations to prepend
   int scope_depth;  // Current scope depth (0=module, 1+=function/block)
   int log_depth;    // Current logging depth (for debug output indentation)
@@ -828,8 +836,12 @@ struct tick_ast_node_s {
       u8 analysis_state;             // tick_analysis_state_t
       tick_ast_node_t* next_queued;  // Intrusive linked list for work queue /
                                      // dependency tracking
-      bool in_pending_deps;  // True if currently in pending_deps list (O(1)
-                             // duplicate check)
+      bool in_pending_deps;   // True if currently in pending_deps list (O(1)
+                              // duplicate check)
+      bool is_static_string;  // True if static const string literal (codegen
+                              // hint)
+      bool
+          is_ptr_to_array;  // True if type is *[N]T (codegen hint for C syntax)
     } decl;
     struct {
       tick_ast_node_t* params;
@@ -892,11 +904,17 @@ struct tick_ast_node_s {
       tick_ast_node_t* left;
       tick_ast_node_t* right;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
+      const char*
+          runtime_func;  // Filled by analysis pass (e.g.,
+                         // "tick_checked_add_i32" or NULL for direct C ops)
     } binary_expr;
     struct {
       tick_unop_t op;
       tick_ast_node_t* operand;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
+      const char*
+          runtime_func;  // Filled by analysis pass (e.g.,
+                         // "tick_checked_neg_i32" or NULL for direct C ops)
     } unary_expr;
     struct {
       tick_ast_node_t* callee;
@@ -912,7 +930,8 @@ struct tick_ast_node_s {
       tick_ast_node_t* object;
       tick_buf_t field_name;
       bool is_arrow;
-      bool is_union_field;  // true if accessing union field (needs .data prefix)
+      bool
+          is_union_field;  // true if accessing union field (needs .data prefix)
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
     } field_access_expr;
     struct {
@@ -931,6 +950,11 @@ struct tick_ast_node_s {
       tick_ast_node_t* type;
       tick_ast_node_t* expr;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass (result type)
+      tick_cast_strategy_t
+          strategy;  // Filled by analysis pass (codegen strategy)
+      const char*
+          runtime_func;  // Filled by analysis pass (e.g.,
+                         // "tick_checked_cast_i32_u8" or NULL for bare casts)
     } cast_expr;
     struct {
       tick_ast_node_t* operand;
@@ -942,6 +966,7 @@ struct tick_ast_node_s {
           at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
       tick_symbol_t*
           symbol;  // Cached symbol lookup (NULL until first resolution)
+      bool needs_user_prefix;  // Filled by analysis (true if needs __u_ prefix)
     } identifier_expr;
     struct {
       tick_ast_node_t* call;   // Function call expression

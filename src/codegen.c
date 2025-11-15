@@ -133,8 +133,10 @@ static tick_err_t write_line_directive(codegen_ctx_t* ctx, usz line) {
 // ============================================================================
 
 static const char* binop_to_c(tick_binop_t op) {
+  // Map operators to C operators
+  // Note: Arithmetic/shift operations have runtime_func set and won't reach
+  // here
   switch (op) {
-    // Only comparisons and logical operators can be emitted directly
     case BINOP_EQ:
       return "==";
     case BINOP_NE:
@@ -151,57 +153,23 @@ static const char* binop_to_c(tick_binop_t op) {
       return "&&";
     case BINOP_LOGICAL_OR:
       return "||";
-    // Bitwise operators - these are well-defined in C
     case BINOP_AND:
       return "&";
     case BINOP_OR:
       return "|";
     case BINOP_XOR:
       return "^";
-
-    // All arithmetic and shift operations should be handled by
-    // codegen_binary_expr If we reach here, it means resolved_type was not set
-    // by analysis pass
-    case BINOP_ADD:
-    case BINOP_SUB:
-    case BINOP_MUL:
-      CHECK(
-          0,
-          "arithmetic operations must have resolved_type set by analysis pass");
-    case BINOP_DIV:
-    case BINOP_MOD:
-      CHECK(0, "division/modulo must have resolved_type set by analysis pass");
-    case BINOP_LSHIFT:
-    case BINOP_RSHIFT:
-      CHECK(0, "shift operations must have resolved_type set by analysis pass");
-
-    // Saturating and wrapping operations should be handled by
-    // codegen_binary_expr
-    case BINOP_SAT_ADD:
-    case BINOP_SAT_SUB:
-    case BINOP_SAT_MUL:
-    case BINOP_SAT_DIV:
-      CHECK(
-          0,
-          "saturating operations must have resolved_type set by analysis pass");
-    case BINOP_WRAP_ADD:
-    case BINOP_WRAP_SUB:
-    case BINOP_WRAP_MUL:
-    case BINOP_WRAP_DIV:
-      CHECK(0,
-            "wrapping operations must have resolved_type set by analysis pass");
-
     default:
       return "?";
   }
 }
 
 static const char* unop_to_c(tick_unop_t op) {
+  // Map operators to C operators
+  // Note: Signed negation has runtime_func set and won't reach here
   switch (op) {
     case UNOP_NEG:
-      // Negation should be handled by codegen_unary_expr for signed types
-      // If we reach here, it means resolved_type was not set or it's unsigned
-      CHECK(0, "negation must have resolved_type set by analysis pass");
+      return "-";
     case UNOP_NOT:
       return "!";
     case UNOP_BIT_NOT:
@@ -334,10 +302,6 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
 
 // Forward declarations
 static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx);
-static tick_builtin_t map_binop_to_builtin(tick_binop_t op,
-                                           tick_builtin_type_t type);
-static const char* get_builtin_function_name(tick_builtin_t builtin,
-                                             tick_builtin_type_t type);
 
 static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   switch (node->literal.kind) {
@@ -400,30 +364,17 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
     }
   }
 
-  // Check if identifier refers to a pub or extern declaration or a temporary
-  // Symbol table lookup is cached by analysis pass
-  bool skip_prefix = false;
+  // Check if this is a compiler-generated temporary
   if (node->identifier_expr.symbol && node->identifier_expr.symbol->decl) {
-    tick_ast_node_t* sym_node = node->identifier_expr.symbol->decl;
-
-    // Check if this is a compiler-generated temporary
-    if (tick_node_is_temporary(sym_node)) {
-      // Emit __tmpN for temporaries
-      return write_fmt(ctx->writer, "__tmp%u", sym_node->decl.tmpid);
+    tick_ast_node_t* decl = node->identifier_expr.symbol->decl;
+    if (tick_node_is_temporary(decl)) {
+      CHECK(decl->kind == TICK_AST_DECL, "temporary must be DECL");
+      return write_fmt(ctx->writer, "__tmp%u", decl->decl.tmpid);
     }
-
-    // Skip __u_ prefix for pub and extern declarations so they can link with C
-    // code
-    if (sym_node->kind == TICK_AST_DECL) {
-      bool is_extern = sym_node->decl.quals.is_extern;
-      bool is_pub = sym_node->decl.quals.is_pub;
-      skip_prefix = is_extern || is_pub;
-    }
-    // PARAM nodes and other kinds always get __u_ prefix
   }
-  // If symbol not found, default to adding __u_ prefix
 
-  if (!skip_prefix) {
+  // Use pre-computed prefix annotation from analysis pass
+  if (node->identifier_expr.needs_user_prefix) {
     CHECK_OK(write_str(ctx->writer, "__u_"));
   }
 
@@ -432,30 +383,19 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
 
 static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
                                       codegen_ctx_t* ctx) {
-  // Check if this is an arithmetic/shift operation that needs a builtin call
-  tick_ast_node_t* resolved_type = node->binary_expr.resolved_type;
-
-  if (resolved_type && resolved_type->kind == TICK_AST_TYPE_NAMED) {
-    tick_builtin_type_t type = resolved_type->type_named.builtin_type;
-    tick_builtin_t builtin = map_binop_to_builtin(node->binary_expr.op, type);
-
-    if (builtin != 0) {
-      // Emit as builtin function call
-      const char* func_name = get_builtin_function_name(builtin, type);
-      CHECK(func_name, "failed to get builtin function name");
-
-      CHECK_OK(write_str(ctx->writer, func_name));
-      CHECK_OK(write_str(ctx->writer, "("));
-      CHECK_OK(codegen_expr(node->binary_expr.left, ctx));
-      CHECK_OK(write_str(ctx->writer, ", "));
-      CHECK_OK(codegen_expr(node->binary_expr.right, ctx));
-      CHECK_OK(write_str(ctx->writer, ")"));
-      return TICK_OK;
-    }
+  // Use pre-computed runtime function from analysis pass
+  if (node->binary_expr.runtime_func) {
+    // Emit runtime function call
+    CHECK_OK(write_str(ctx->writer, node->binary_expr.runtime_func));
+    CHECK_OK(write_str(ctx->writer, "("));
+    CHECK_OK(codegen_expr(node->binary_expr.left, ctx));
+    CHECK_OK(write_str(ctx->writer, ", "));
+    CHECK_OK(codegen_expr(node->binary_expr.right, ctx));
+    CHECK_OK(write_str(ctx->writer, ")"));
+    return TICK_OK;
   }
 
-  // For unsigned wrapping operations or non-arithmetic operations,
-  // emit direct C operator (comparisons, logical, bitwise)
+  // Direct C operator (comparisons, logical, bitwise, unsigned wrapping)
   CHECK_OK(codegen_expr(node->binary_expr.left, ctx));
   CHECK_OK(write_str(ctx->writer, " "));
   CHECK_OK(write_str(ctx->writer, binop_to_c(node->binary_expr.op)));
@@ -466,30 +406,17 @@ static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
 
 static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
-  // Check if this is negation with a signed type (needs checked_neg builtin)
-  if (node->unary_expr.op == UNOP_NEG) {
-    tick_ast_node_t* resolved_type = node->unary_expr.resolved_type;
-
-    if (resolved_type && resolved_type->kind == TICK_AST_TYPE_NAMED) {
-      tick_builtin_type_t type = resolved_type->type_named.builtin_type;
-      bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
-
-      if (is_signed) {
-        // Emit checked_neg builtin call
-        const char* func_name =
-            get_builtin_function_name(TICK_BUILTIN_CHECKED_NEG, type);
-        CHECK(func_name, "failed to get checked_neg function name");
-
-        CHECK_OK(write_str(ctx->writer, func_name));
-        CHECK_OK(write_str(ctx->writer, "("));
-        CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
-        CHECK_OK(write_str(ctx->writer, ")"));
-        return TICK_OK;
-      }
-    }
+  // Use pre-computed runtime function from analysis pass
+  if (node->unary_expr.runtime_func) {
+    // Emit runtime function call (e.g., tick_checked_neg_i32)
+    CHECK_OK(write_str(ctx->writer, node->unary_expr.runtime_func));
+    CHECK_OK(write_str(ctx->writer, "("));
+    CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
+    CHECK_OK(write_str(ctx->writer, ")"));
+    return TICK_OK;
   }
 
-  // For other unary operations, emit direct C operator
+  // Direct C operator
   CHECK_OK(write_str(ctx->writer, unop_to_c(node->unary_expr.op)));
   CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
   return TICK_OK;
@@ -545,22 +472,23 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
 static tick_err_t codegen_field_access(tick_ast_node_t* node,
                                        codegen_ctx_t* ctx) {
-  // Check if object is an explicit dereference: (*ptr).field
-  // In C, we should emit this as ptr->field to avoid precedence issues
+  // Wrap object in parens if it's a dereference to preserve precedence
+  // e.g., (*ptr).field instead of *ptr.field
   tick_ast_node_t* object = node->field_access_expr.object;
-  bool is_explicit_deref = object && object->kind == TICK_AST_UNARY_EXPR &&
-                           object->unary_expr.op == UNOP_DEREF;
+  bool needs_parens = object && object->kind == TICK_AST_UNARY_EXPR &&
+                      object->unary_expr.op == UNOP_DEREF;
 
-  if (is_explicit_deref) {
-    // Emit operand of dereference (the pointer)
-    CHECK_OK(codegen_expr(object->unary_expr.operand, ctx));
-    CHECK_OK(write_str(ctx->writer, "->"));
-  } else {
-    // Emit object.field or object->field
-    CHECK_OK(codegen_expr(object, ctx));
-    const char* op = node->field_access_expr.is_arrow ? "->" : ".";
-    CHECK_OK(write_str(ctx->writer, op));
+  if (needs_parens) {
+    CHECK_OK(write_str(ctx->writer, "("));
   }
+  CHECK_OK(codegen_expr(object, ctx));
+  if (needs_parens) {
+    CHECK_OK(write_str(ctx->writer, ")"));
+  }
+
+  // Emit . or -> (is_arrow set by analysis for pointer types)
+  const char* op = node->field_access_expr.is_arrow ? "->" : ".";
+  CHECK_OK(write_str(ctx->writer, op));
 
   // Handle union field access: prepend "data."
   if (node->field_access_expr.is_union_field) {
@@ -573,21 +501,10 @@ static tick_err_t codegen_field_access(tick_ast_node_t* node,
 
 static tick_err_t codegen_index_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
-  // Check if array is an explicit dereference: (*ptr)[index]
-  // In C, we need parens to avoid precedence issues: *ptr[index] means *(ptr[index])
-  tick_ast_node_t* array = node->index_expr.array;
-  bool is_explicit_deref = array && array->kind == TICK_AST_UNARY_EXPR &&
-                           array->unary_expr.op == UNOP_DEREF;
-
-  if (is_explicit_deref) {
-    // Emit with parens: (*operand)[index]
-    CHECK_OK(write_str(ctx->writer, "(*"));
-    CHECK_OK(codegen_expr(array->unary_expr.operand, ctx));
-    CHECK_OK(write_str(ctx->writer, ")"));
-  } else {
-    CHECK_OK(codegen_expr(array, ctx));
-  }
-
+  // Always wrap array in parens to preserve precedence: (array)[index]
+  CHECK_OK(write_str(ctx->writer, "("));
+  CHECK_OK(codegen_expr(node->index_expr.array, ctx));
+  CHECK_OK(write_str(ctx->writer, ")"));
   CHECK_OK(write_str(ctx->writer, "["));
   CHECK_OK(codegen_expr(node->index_expr.index, ctx));
   CHECK_OK(write_str(ctx->writer, "]"));
@@ -598,182 +515,11 @@ static tick_err_t codegen_index_expr(tick_ast_node_t* node,
 // Cast Helper Functions
 // ============================================================================
 
-// Check if a builtin type is numeric (supports checked cast operations)
-static bool is_numeric_builtin_type(tick_builtin_type_t type) {
-  return (type >= TICK_TYPE_I8 && type <= TICK_TYPE_USZ);
-}
-
-// Check if a cast is a widening conversion (always safe, no runtime check
-// needed)
-static bool is_widening_cast(tick_builtin_type_t src, tick_builtin_type_t dst) {
-  // Widening casts are safe when destination can represent all source values
-
-  // Same type is trivially safe
-  if (src == dst) return true;
-
-  // Signed to signed widening
-  if (src == TICK_TYPE_I8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
-                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_I16 &&
-      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_I32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-
-  // Unsigned to unsigned widening
-  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_U16 || dst == TICK_TYPE_U32 ||
-                              dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
-    return true;
-  if (src == TICK_TYPE_U16 &&
-      (dst == TICK_TYPE_U32 || dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
-    return true;
-  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
-    return true;
-
-  // Unsigned to signed widening (safe if destination is larger)
-  // u8 can fit in i16, i32, i64 (but not i8)
-  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
-                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_U16 &&
-      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-
-  // Note: Platform-dependent types (isz, usz) conservatively assume 64-bit
-  // TODO: Could optimize for known target platforms
-
-  return false;
-}
-
-// Get the checked cast function name for a given source and destination type
-// Returns NULL if no checked cast function exists (use bare C cast instead)
-static const char* get_checked_cast_function_name(tick_builtin_type_t src,
-                                                  tick_builtin_type_t dst) {
-  // Map type enum to string suffix
-  const char* src_str = NULL;
-  const char* dst_str = NULL;
-
-  switch (src) {
-    case TICK_TYPE_I8:
-      src_str = "i8";
-      break;
-    case TICK_TYPE_I16:
-      src_str = "i16";
-      break;
-    case TICK_TYPE_I32:
-      src_str = "i32";
-      break;
-    case TICK_TYPE_I64:
-      src_str = "i64";
-      break;
-    case TICK_TYPE_ISZ:
-      src_str = "isz";
-      break;
-    case TICK_TYPE_U8:
-      src_str = "u8";
-      break;
-    case TICK_TYPE_U16:
-      src_str = "u16";
-      break;
-    case TICK_TYPE_U32:
-      src_str = "u32";
-      break;
-    case TICK_TYPE_U64:
-      src_str = "u64";
-      break;
-    case TICK_TYPE_USZ:
-      src_str = "usz";
-      break;
-    default:
-      return NULL;  // Not a numeric type
-  }
-
-  switch (dst) {
-    case TICK_TYPE_I8:
-      dst_str = "i8";
-      break;
-    case TICK_TYPE_I16:
-      dst_str = "i16";
-      break;
-    case TICK_TYPE_I32:
-      dst_str = "i32";
-      break;
-    case TICK_TYPE_I64:
-      dst_str = "i64";
-      break;
-    case TICK_TYPE_ISZ:
-      dst_str = "isz";
-      break;
-    case TICK_TYPE_U8:
-      dst_str = "u8";
-      break;
-    case TICK_TYPE_U16:
-      dst_str = "u16";
-      break;
-    case TICK_TYPE_U32:
-      dst_str = "u32";
-      break;
-    case TICK_TYPE_U64:
-      dst_str = "u64";
-      break;
-    case TICK_TYPE_USZ:
-      dst_str = "usz";
-      break;
-    default:
-      return NULL;  // Not a numeric type
-  }
-
-  // Build function name: tick_checked_cast_{src}_{dst}
-  static char buf[64];
-  snprintf(buf, sizeof(buf), "tick_checked_cast_%s_%s", src_str, dst_str);
-  return buf;
-}
-
-// Try to determine the builtin type of an expression
-// Returns TICK_TYPE_UNKNOWN if type cannot be determined
-static tick_builtin_type_t get_expr_builtin_type(tick_ast_node_t* expr) {
-  if (!expr) return TICK_TYPE_UNKNOWN;
-
-  switch (expr->kind) {
-    case TICK_AST_BINARY_EXPR:
-      if (expr->binary_expr.resolved_type &&
-          expr->binary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->binary_expr.resolved_type->type_named.builtin_type;
-      }
-      break;
-
-    case TICK_AST_UNARY_EXPR:
-      if (expr->unary_expr.resolved_type &&
-          expr->unary_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->unary_expr.resolved_type->type_named.builtin_type;
-      }
-      break;
-
-    case TICK_AST_CAST_EXPR:
-      if (expr->cast_expr.resolved_type &&
-          expr->cast_expr.resolved_type->kind == TICK_AST_TYPE_NAMED) {
-        return expr->cast_expr.resolved_type->type_named.builtin_type;
-      }
-      break;
-
-    // For other expression types (literals, identifiers, calls, etc.),
-    // we don't have type information readily available without a symbol table.
-    // The analysis pass would need to annotate all expressions with types.
-    default:
-      break;
-  }
-
-  return TICK_TYPE_UNKNOWN;
-}
-
 static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
-  // Get destination type (must be resolved by analysis pass)
-  if (!node->cast_expr.type ||
-      node->cast_expr.type->kind != TICK_AST_TYPE_NAMED) {
-    // Non-builtin type (pointer, struct, etc.) - emit bare C cast
+  // Use pre-computed cast strategy and runtime function from analysis pass
+  if (node->cast_expr.strategy == CAST_STRATEGY_BARE ||
+      !node->cast_expr.runtime_func) {
+    // Bare C cast (widening, same type, non-numeric, or no runtime func needed)
     CHECK_OK(write_str(ctx->writer, "("));
     CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
     CHECK_OK(write_str(ctx->writer, ")"));
@@ -781,291 +527,12 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     return TICK_OK;
   }
 
-  tick_builtin_type_t dst_type = node->cast_expr.type->type_named.builtin_type;
-
-  CHECK(dst_type != TICK_TYPE_UNKNOWN,
-        "cast destination type not resolved - analysis pass missing?");
-
-  // Get source type from the expression being cast
-  tick_builtin_type_t src_type = get_expr_builtin_type(node->cast_expr.expr);
-
-  // Decision tree for cast code generation:
-
-  // 1. If source type is unknown (literals, identifiers without type
-  // annotation),
-  //    we can't determine if checked cast is needed - emit bare C cast
-  if (src_type == TICK_TYPE_UNKNOWN) {
-    CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
-    CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
-    return TICK_OK;
-  }
-
-  // 2. If either type is non-numeric (bool, void, user-defined),
-  //    emit bare C cast (no runtime checking available)
-  if (!is_numeric_builtin_type(src_type) ||
-      !is_numeric_builtin_type(dst_type)) {
-    CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
-    CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
-    return TICK_OK;
-  }
-
-  // 3. If it's a widening cast (always safe), emit bare C cast
-  if (is_widening_cast(src_type, dst_type)) {
-    CHECK_OK(write_str(ctx->writer, "("));
-    CHECK_OK(codegen_type(node->cast_expr.type, ctx->writer));
-    CHECK_OK(write_str(ctx->writer, ")"));
-    CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
-    return TICK_OK;
-  }
-
-  // 4. Otherwise, it's a narrowing or sign-changing cast - emit checked cast
-  const char* cast_func = get_checked_cast_function_name(src_type, dst_type);
-  CHECK(cast_func, "failed to get checked cast function name");
-
-  // Emit: tick_checked_cast_src_dst(expr)
-  CHECK_OK(write_str(ctx->writer, cast_func));
+  // Checked cast - use pre-computed runtime function name
+  CHECK_OK(write_str(ctx->writer, node->cast_expr.runtime_func));
   CHECK_OK(write_str(ctx->writer, "("));
   CHECK_OK(codegen_expr(node->cast_expr.expr, ctx));
   CHECK_OK(write_str(ctx->writer, ")"));
 
-  return TICK_OK;
-}
-
-// Map binary operation + type to appropriate builtin
-static tick_builtin_t map_binop_to_builtin(tick_binop_t op,
-                                           tick_builtin_type_t type) {
-  // Check if type is signed for wrapping operations
-  bool is_signed = (type >= TICK_TYPE_I8 && type <= TICK_TYPE_ISZ);
-
-  switch (op) {
-    // Saturating operations
-    case BINOP_SAT_ADD:
-      return TICK_BUILTIN_SAT_ADD;
-    case BINOP_SAT_SUB:
-      return TICK_BUILTIN_SAT_SUB;
-    case BINOP_SAT_MUL:
-      return TICK_BUILTIN_SAT_MUL;
-    case BINOP_SAT_DIV:
-      return TICK_BUILTIN_SAT_DIV;
-
-    // Wrapping operations - only for signed types
-    case BINOP_WRAP_ADD:
-      return is_signed ? TICK_BUILTIN_WRAP_ADD
-                       : (tick_builtin_t)0;  // Unsigned: no builtin needed
-    case BINOP_WRAP_SUB:
-      return is_signed ? TICK_BUILTIN_WRAP_SUB : (tick_builtin_t)0;
-    case BINOP_WRAP_MUL:
-      return is_signed ? TICK_BUILTIN_WRAP_MUL : (tick_builtin_t)0;
-    case BINOP_WRAP_DIV:
-      return is_signed ? TICK_BUILTIN_WRAP_DIV : (tick_builtin_t)0;
-
-    // Default arithmetic - checked for signed, wrapping for unsigned
-    case BINOP_ADD:
-      return is_signed ? TICK_BUILTIN_CHECKED_ADD : TICK_BUILTIN_WRAP_ADD;
-    case BINOP_SUB:
-      return is_signed ? TICK_BUILTIN_CHECKED_SUB : TICK_BUILTIN_WRAP_SUB;
-    case BINOP_MUL:
-      return is_signed ? TICK_BUILTIN_CHECKED_MUL : TICK_BUILTIN_WRAP_MUL;
-
-    // Division and modulo - always checked
-    case BINOP_DIV:
-      return TICK_BUILTIN_CHECKED_DIV;
-    case BINOP_MOD:
-      return TICK_BUILTIN_CHECKED_MOD;
-
-    // Shifts - always checked
-    case BINOP_LSHIFT:
-      return TICK_BUILTIN_CHECKED_SHL;
-    case BINOP_RSHIFT:
-      return TICK_BUILTIN_CHECKED_SHR;
-
-    default:
-      return (tick_builtin_t)0;  // Not an arithmetic operation
-  }
-}
-
-// Map builtin + type to runtime function name
-static const char* get_builtin_function_name(tick_builtin_t builtin,
-                                             tick_builtin_type_t type) {
-  // Determine the operation suffix and prefix
-  const char* op_suffix = NULL;
-  const char* op_prefix = NULL;
-
-  switch (builtin) {
-    case TICK_BUILTIN_SAT_ADD:
-      op_prefix = "tick_sat";
-      op_suffix = "add";
-      break;
-    case TICK_BUILTIN_SAT_SUB:
-      op_prefix = "tick_sat";
-      op_suffix = "sub";
-      break;
-    case TICK_BUILTIN_SAT_MUL:
-      op_prefix = "tick_sat";
-      op_suffix = "mul";
-      break;
-    case TICK_BUILTIN_SAT_DIV:
-      op_prefix = "tick_sat";
-      op_suffix = "div";
-      break;
-    case TICK_BUILTIN_WRAP_ADD:
-      op_prefix = "tick_wrap";
-      op_suffix = "add";
-      break;
-    case TICK_BUILTIN_WRAP_SUB:
-      op_prefix = "tick_wrap";
-      op_suffix = "sub";
-      break;
-    case TICK_BUILTIN_WRAP_MUL:
-      op_prefix = "tick_wrap";
-      op_suffix = "mul";
-      break;
-    case TICK_BUILTIN_WRAP_DIV:
-      op_prefix = "tick_wrap";
-      op_suffix = "div";
-      break;
-    case TICK_BUILTIN_CHECKED_ADD:
-      op_prefix = "tick_checked";
-      op_suffix = "add";
-      break;
-    case TICK_BUILTIN_CHECKED_SUB:
-      op_prefix = "tick_checked";
-      op_suffix = "sub";
-      break;
-    case TICK_BUILTIN_CHECKED_MUL:
-      op_prefix = "tick_checked";
-      op_suffix = "mul";
-      break;
-    case TICK_BUILTIN_CHECKED_DIV:
-      op_prefix = "tick_checked";
-      op_suffix = "div";
-      break;
-    case TICK_BUILTIN_CHECKED_MOD:
-      op_prefix = "tick_checked";
-      op_suffix = "mod";
-      break;
-    case TICK_BUILTIN_CHECKED_SHL:
-      op_prefix = "tick_checked";
-      op_suffix = "shl";
-      break;
-    case TICK_BUILTIN_CHECKED_SHR:
-      op_prefix = "tick_checked";
-      op_suffix = "shr";
-      break;
-    case TICK_BUILTIN_CHECKED_NEG:
-      op_prefix = "tick_checked";
-      op_suffix = "neg";
-      break;
-    case TICK_BUILTIN_CHECKED_CAST:
-      // Cast is handled specially - needs both source and dest types
-      return NULL;
-    default:
-      return NULL;
-  }
-
-  // For wrapping operations, only signed types need wrapping functions
-  // Unsigned types have guaranteed modulo semantics in C
-  bool is_wrap =
-      (builtin >= TICK_BUILTIN_WRAP_ADD && builtin <= TICK_BUILTIN_WRAP_DIV);
-
-  // Map type enum to suffix
-  // Format: {prefix}_{op}_{type}
-  static char buf[32];
-  const char* type_suffix = NULL;
-
-  switch (type) {
-    case TICK_TYPE_I8:
-      type_suffix = "i8";
-      break;
-    case TICK_TYPE_I16:
-      type_suffix = "i16";
-      break;
-    case TICK_TYPE_I32:
-      type_suffix = "i32";
-      break;
-    case TICK_TYPE_I64:
-      type_suffix = "i64";
-      break;
-    case TICK_TYPE_ISZ:
-      type_suffix = "isz";
-      break;
-    case TICK_TYPE_U8:
-      CHECK(!is_wrap,
-            "wrapping builtin used with unsigned type - unsigned types don't "
-            "need wrapping");
-      type_suffix = "u8";
-      break;
-    case TICK_TYPE_U16:
-      CHECK(!is_wrap,
-            "wrapping builtin used with unsigned type - unsigned types don't "
-            "need wrapping");
-      type_suffix = "u16";
-      break;
-    case TICK_TYPE_U32:
-      CHECK(!is_wrap,
-            "wrapping builtin used with unsigned type - unsigned types don't "
-            "need wrapping");
-      type_suffix = "u32";
-      break;
-    case TICK_TYPE_U64:
-      CHECK(!is_wrap,
-            "wrapping builtin used with unsigned type - unsigned types don't "
-            "need wrapping");
-      type_suffix = "u64";
-      break;
-    case TICK_TYPE_USZ:
-      CHECK(!is_wrap,
-            "wrapping builtin used with unsigned type - unsigned types don't "
-            "need wrapping");
-      type_suffix = "usz";
-      break;
-    default:
-      CHECK(0, "builtin operation used with non-numeric type");
-  }
-
-  snprintf(buf, sizeof(buf), "%s_%s_%s", op_prefix, op_suffix, type_suffix);
-  return buf;
-}
-
-static tick_err_t codegen_builtin_call(tick_ast_node_t* node,
-                                       codegen_ctx_t* ctx) {
-  // Special handling for CHECKED_CAST - needs both source and dest type
-  CHECK(node->builtin_call.builtin != TICK_BUILTIN_CHECKED_CAST,
-        "checked cast not yet implemented");
-
-  // Get the builtin type
-  CHECK(node->builtin_call.type &&
-            node->builtin_call.type->kind == TICK_AST_TYPE_NAMED,
-        "builtin call missing or invalid type");
-
-  tick_builtin_type_t type = node->builtin_call.type->type_named.builtin_type;
-  CHECK(type != TICK_TYPE_UNKNOWN,
-        "builtin call type not resolved - analysis pass missing?");
-
-  const char* func_name =
-      get_builtin_function_name(node->builtin_call.builtin, type);
-  CHECK(func_name, "unknown builtin or type for builtin call");
-
-  // Emit function call
-  CHECK_OK(write_str(ctx->writer, func_name));
-  CHECK_OK(write_str(ctx->writer, "("));
-
-  tick_ast_node_t* arg = node->builtin_call.args;
-  bool first = true;
-  while (arg) {
-    if (!first) {
-      CHECK_OK(write_str(ctx->writer, ", "));
-    }
-    first = false;
-    CHECK_OK(codegen_expr(arg, ctx));
-    arg = arg->next;
-  }
-
-  CHECK_OK(write_str(ctx->writer, ")"));
   return TICK_OK;
 }
 
@@ -1083,8 +550,6 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       return codegen_unary_expr(expr, ctx);
     case TICK_AST_CALL_EXPR:
       return codegen_call_expr(expr, ctx);
-    case TICK_AST_BUILTIN_CALL:
-      return codegen_builtin_call(expr, ctx);
     case TICK_AST_FIELD_ACCESS_EXPR:
       return codegen_field_access(expr, ctx);
     case TICK_AST_INDEX_EXPR:
@@ -1098,7 +563,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
                 expr->enum_value.parent_decl->kind == TICK_AST_DECL,
             "enum value must have parent decl");
       CHECK_OK(write_str(ctx->writer, "__u_"));
-      CHECK_OK(write_ident(ctx->writer, expr->enum_value.parent_decl->decl.name));
+      CHECK_OK(
+          write_ident(ctx->writer, expr->enum_value.parent_decl->decl.name));
       CHECK_OK(write_str(ctx->writer, "_"));
       CHECK_OK(write_ident(ctx->writer, expr->enum_value.name));
       return TICK_OK;
@@ -1139,18 +605,6 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
         tick_ast_node_t* value = field->struct_init_field.value;
 
-        // Validate that value is simple (LITERAL, IDENTIFIER_EXPR, or nested
-        // STRUCT_INIT_EXPR/ARRAY_INIT_EXPR which are valid in C compound
-        // literals)
-        CHECK(value->kind == TICK_AST_LITERAL ||
-                  value->kind == TICK_AST_IDENTIFIER_EXPR ||
-                  value->kind == TICK_AST_STRUCT_INIT_EXPR ||
-                  value->kind == TICK_AST_ARRAY_INIT_EXPR,
-              "struct field initializer must be simple (LITERAL, "
-              "IDENTIFIER_EXPR, STRUCT_INIT_EXPR, or ARRAY_INIT_EXPR), "
-              "got %d - analysis pass should have decomposed this",
-              value->kind);
-
         if (!first) {
           CHECK_OK(write_str(ctx->writer, ", "));
         }
@@ -1181,18 +635,6 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       tick_ast_node_t* elem = expr->array_init_expr.elements;
       bool first = true;
       while (elem) {
-        // Validate that element is simple (LITERAL, IDENTIFIER_EXPR, or nested
-        // STRUCT_INIT_EXPR/ARRAY_INIT_EXPR which are valid in C array
-        // initializers)
-        CHECK(elem->kind == TICK_AST_LITERAL ||
-                  elem->kind == TICK_AST_IDENTIFIER_EXPR ||
-                  elem->kind == TICK_AST_STRUCT_INIT_EXPR ||
-                  elem->kind == TICK_AST_ARRAY_INIT_EXPR,
-              "array element initializer must be simple (LITERAL, "
-              "IDENTIFIER_EXPR, STRUCT_INIT_EXPR, or ARRAY_INIT_EXPR), "
-              "got %d - analysis pass should have decomposed this",
-              elem->kind);
-
         if (!first) {
           CHECK_OK(write_str(ctx->writer, ", "));
         }
@@ -1264,22 +706,9 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
     CHECK_OK(write_str(ctx->writer, "volatile "));
   }
 
-  // For static const string literals, we need special handling:
-  // Instead of: static const uint8_t* __tmp1 = (const char*)(uint8_t[]){...};
-  // We emit: static const uint8_t __tmp1[] = {...};
-  // The array decays to pointer naturally, avoiding the "not a compile-time
-  // constant" error
-  bool is_static_string = node->decl.quals.is_static && node->decl.init &&
-                          node->decl.init->kind == TICK_AST_LITERAL &&
-                          node->decl.init->literal.kind == TICK_LIT_STRING;
-
-  // Check if this is a pointer-to-array type: *[N]T
-  // In C this requires special syntax: T (*name)[N]
-  bool is_ptr_to_array = node->decl.type &&
-                         node->decl.type->kind == TICK_AST_TYPE_POINTER &&
-                         node->decl.type->type_pointer.pointee_type &&
-                         node->decl.type->type_pointer.pointee_type->kind ==
-                             TICK_AST_TYPE_ARRAY;
+  // Use pre-computed codegen hints from analysis pass
+  bool is_static_string = node->decl.is_static_string;
+  bool is_ptr_to_array = node->decl.is_ptr_to_array;
 
   // Emit type (for static strings, emit pointee type only)
   if (is_static_string) {
