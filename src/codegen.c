@@ -285,17 +285,8 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
       return write_str(w, ")");
     }
 
-    case TICK_AST_TYPE_OPTIONAL:
-      CHECK(0, "TYPE_OPTIONAL must be lowered before codegen");
-
-    case TICK_AST_TYPE_ERROR_UNION:
-      CHECK(0, "TYPE_ERROR_UNION must be lowered before codegen");
-
-    case TICK_AST_TYPE_SLICE:
-      CHECK(0, "TYPE_SLICE must be lowered before codegen");
-
     default:
-      CHECK(0, "unknown type kind");
+      CHECK(0, "unhandled type kind");
   }
 }
 
@@ -315,40 +306,8 @@ static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     case TICK_LIT_INT:
       return write_fmt(ctx->writer, "%lld",
                        (long long)node->literal.data.int_value);
-
-    case TICK_LIT_BOOL:
-      return write_str(ctx->writer,
-                       node->literal.data.bool_value ? "true" : "false");
-
-    case TICK_LIT_STRING: {
-      // Emit as const char* cast of u8 array: (const char*)(uint8_t[]){byte1,
-      // byte2, ..., 0}
-      tick_buf_t str = node->literal.data.string_value;
-      CHECK_OK(write_str(ctx->writer, "(const char*)(uint8_t[]){"));
-
-      for (usz i = 0; i < str.sz; i++) {
-        if (i > 0) {
-          CHECK_OK(write_str(ctx->writer, ", "));
-        }
-        CHECK_OK(write_fmt(ctx->writer, "%u", (unsigned int)str.buf[i]));
-      }
-
-      // Add null terminator
-      if (str.sz > 0) {
-        CHECK_OK(write_str(ctx->writer, ", "));
-      }
-      CHECK_OK(write_str(ctx->writer, "0}"));
-      return TICK_OK;
-    }
-
-    case TICK_LIT_NULL:
-      CHECK(0, "null must be erased by analysis pass");
-
-    case TICK_LIT_UNDEFINED:
-      CHECK(0, "undefined must be handled before codegen_literal is called");
-
     default:
-      CHECK(0, "unknown literal kind");
+      CHECK(0, "unhandled literal kind");
   }
 }
 
@@ -356,7 +315,6 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
   // Check if this is an AT builtin
   if (node->identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
-    // Emit runtime function name based on builtin enum
     switch (node->identifier_expr.at_builtin) {
       case TICK_AT_BUILTIN_DBG:
         return write_str(ctx->writer, "tick_debug_log");
@@ -440,15 +398,13 @@ static bool builtin_needs_format_cast(tick_at_builtin_t builtin) {
 static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   // Check if this is a builtin call
   tick_at_builtin_t builtin = TICK_AT_BUILTIN_UNKNOWN;
-  if (node->call_expr.callee &&
-      node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
+  if (node->call_expr.callee->kind == TICK_AST_IDENTIFIER_EXPR) {
     builtin = node->call_expr.callee->identifier_expr.at_builtin;
   }
 
   CHECK_OK(codegen_expr(node->call_expr.callee, ctx));
   CHECK_OK(write_str(ctx->writer, "("));
 
-  // Arguments are already in correct order (reversed by analysis pass)
   tick_ast_node_t* arg = node->call_expr.args;
   bool first = true;
   int arg_index = 0;
@@ -475,37 +431,96 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
 static tick_err_t codegen_field_access(tick_ast_node_t* node,
                                        codegen_ctx_t* ctx) {
-  // Wrap object in parens if it's a dereference to preserve precedence
-  // e.g., (*ptr).field instead of *ptr.field
-  tick_ast_node_t* object = node->field_access_expr.object;
-  bool needs_parens = object && object->kind == TICK_AST_UNARY_EXPR &&
-                      object->unary_expr.op == UNOP_DEREF;
-
-  if (needs_parens) {
-    CHECK_OK(write_str(ctx->writer, "("));
-  }
-  CHECK_OK(codegen_expr(object, ctx));
-  if (needs_parens) {
-    CHECK_OK(write_str(ctx->writer, ")"));
-  }
-
+  CHECK_OK(write_str(ctx->writer, "("));
+  CHECK_OK(codegen_expr(node->field_access_expr.object, ctx));
+  CHECK_OK(write_str(ctx->writer, ")"));
   // Emit . or -> (is_arrow set by analysis for pointer types)
   const char* op = node->field_access_expr.is_arrow ? "->" : ".";
   CHECK_OK(write_str(ctx->writer, op));
-
   CHECK_OK(write_ident(ctx->writer, node->field_access_expr.field_name));
   return TICK_OK;
 }
 
 static tick_err_t codegen_index_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
-  // Always wrap array in parens to preserve precedence: (array)[index]
   CHECK_OK(write_str(ctx->writer, "("));
   CHECK_OK(codegen_expr(node->index_expr.array, ctx));
   CHECK_OK(write_str(ctx->writer, ")"));
   CHECK_OK(write_str(ctx->writer, "["));
   CHECK_OK(codegen_expr(node->index_expr.index, ctx));
   CHECK_OK(write_str(ctx->writer, "]"));
+  return TICK_OK;
+}
+
+static tick_err_t codegen_enum_value(tick_ast_node_t* node,
+                                     codegen_ctx_t* ctx) {
+  // Enum value reference: emit __u_EnumName_ValueName
+  CHECK(node->enum_value.parent_decl &&
+            node->enum_value.parent_decl->kind == TICK_AST_DECL,
+        "enum value must have parent decl");
+  CHECK_OK(write_str(ctx->writer, "__u_"));
+  CHECK_OK(write_ident(ctx->writer, node->enum_value.parent_decl->decl.name));
+  CHECK_OK(write_str(ctx->writer, "_"));
+  CHECK_OK(write_ident(ctx->writer, node->enum_value.name));
+  return TICK_OK;
+}
+
+static tick_err_t codegen_struct_init_expr(tick_ast_node_t* node,
+                                           codegen_ctx_t* ctx) {
+  // Emit: (TypeName) { .field1 = val1, .field2 = val2 }
+  // Requires: All field values must be LITERAL or IDENTIFIER_EXPR (lowering
+  // decomposed complex expressions)
+
+  CHECK_OK(write_str(ctx->writer, "("));
+  CHECK_OK(codegen_type(node->struct_init_expr.type, ctx->writer));
+  CHECK_OK(write_str(ctx->writer, ") { "));
+
+  tick_ast_node_t* field = node->struct_init_expr.fields;
+  bool first = true;
+  while (field) {
+    CHECK(field->kind == TICK_AST_STRUCT_INIT_FIELD,
+          "expected STRUCT_INIT_FIELD in struct initializer");
+
+    tick_ast_node_t* value = field->struct_init_field.value;
+
+    if (!first) {
+      CHECK_OK(write_str(ctx->writer, ", "));
+    }
+    first = false;
+
+    // Emit: .fieldname = value
+    CHECK_OK(write_str(ctx->writer, "."));
+    CHECK_OK(write_ident(ctx->writer, field->struct_init_field.field_name));
+    CHECK_OK(write_str(ctx->writer, " = "));
+    CHECK_OK(codegen_expr(value, ctx));
+
+    field = field->next;
+  }
+
+  CHECK_OK(write_str(ctx->writer, " }"));
+  return TICK_OK;
+}
+
+static tick_err_t codegen_array_init_expr(tick_ast_node_t* node,
+                                          codegen_ctx_t* ctx) {
+  // Emit: { elem1, elem2, elem3 }
+
+  CHECK_OK(write_str(ctx->writer, "{ "));
+
+  // Iterate elements in source order
+  tick_ast_node_t* elem = node->array_init_expr.elements;
+  bool first = true;
+  while (elem) {
+    if (!first) {
+      CHECK_OK(write_str(ctx->writer, ", "));
+    }
+    first = false;
+
+    CHECK_OK(codegen_expr(elem, ctx));
+    elem = elem->next;
+  }
+
+  CHECK_OK(write_str(ctx->writer, " }"));
   return TICK_OK;
 }
 
@@ -534,107 +549,6 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   return TICK_OK;
 }
 
-static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
-  if (!expr) return TICK_OK;
-
-  switch (expr->kind) {
-    case TICK_AST_LITERAL:
-      return codegen_literal(expr, ctx);
-    case TICK_AST_IDENTIFIER_EXPR:
-      return codegen_identifier(expr, ctx);
-    case TICK_AST_BINARY_EXPR:
-      return codegen_binary_expr(expr, ctx);
-    case TICK_AST_UNARY_EXPR:
-      return codegen_unary_expr(expr, ctx);
-    case TICK_AST_CALL_EXPR:
-      return codegen_call_expr(expr, ctx);
-    case TICK_AST_FIELD_ACCESS_EXPR:
-      return codegen_field_access(expr, ctx);
-    case TICK_AST_INDEX_EXPR:
-      return codegen_index_expr(expr, ctx);
-    case TICK_AST_CAST_EXPR:
-      return codegen_cast_expr(expr, ctx);
-
-    case TICK_AST_ENUM_VALUE: {
-      // Enum value reference: emit __u_EnumName_ValueName
-      CHECK(expr->enum_value.parent_decl &&
-                expr->enum_value.parent_decl->kind == TICK_AST_DECL,
-            "enum value must have parent decl");
-      CHECK_OK(write_str(ctx->writer, "__u_"));
-      CHECK_OK(
-          write_ident(ctx->writer, expr->enum_value.parent_decl->decl.name));
-      CHECK_OK(write_str(ctx->writer, "_"));
-      CHECK_OK(write_ident(ctx->writer, expr->enum_value.name));
-      return TICK_OK;
-    }
-
-    // High-level expressions that must be lowered before codegen
-    case TICK_AST_ASYNC_EXPR:
-      CHECK(0,
-            "async must be lowered before codegen (use async state machine)");
-
-    case TICK_AST_STRUCT_INIT_EXPR: {
-      // Emit: (TypeName) { .field1 = val1, .field2 = val2 }
-      // Requires: All field values must be LITERAL or IDENTIFIER_EXPR (lowering
-      // decomposed complex expressions)
-
-      CHECK_OK(write_str(ctx->writer, "("));
-      CHECK_OK(codegen_type(expr->struct_init_expr.type, ctx->writer));
-      CHECK_OK(write_str(ctx->writer, ") { "));
-
-      tick_ast_node_t* field = expr->struct_init_expr.fields;
-      bool first = true;
-      while (field) {
-        CHECK(field->kind == TICK_AST_STRUCT_INIT_FIELD,
-              "expected STRUCT_INIT_FIELD in struct initializer");
-
-        tick_ast_node_t* value = field->struct_init_field.value;
-
-        if (!first) {
-          CHECK_OK(write_str(ctx->writer, ", "));
-        }
-        first = false;
-
-        // Emit: .fieldname = value
-        CHECK_OK(write_str(ctx->writer, "."));
-        CHECK_OK(write_ident(ctx->writer, field->struct_init_field.field_name));
-        CHECK_OK(write_str(ctx->writer, " = "));
-        CHECK_OK(codegen_expr(value, ctx));
-
-        field = field->next;
-      }
-
-      CHECK_OK(write_str(ctx->writer, " }"));
-      return TICK_OK;
-    }
-
-    case TICK_AST_ARRAY_INIT_EXPR: {
-      // Emit: { elem1, elem2, elem3 }
-
-      CHECK_OK(write_str(ctx->writer, "{ "));
-
-      // Iterate elements in source order
-      tick_ast_node_t* elem = expr->array_init_expr.elements;
-      bool first = true;
-      while (elem) {
-        if (!first) {
-          CHECK_OK(write_str(ctx->writer, ", "));
-        }
-        first = false;
-
-        CHECK_OK(codegen_expr(elem, ctx));
-        elem = elem->next;
-      }
-
-      CHECK_OK(write_str(ctx->writer, " }"));
-      return TICK_OK;
-    }
-
-    default:
-      CHECK(0, "unsupported expression kind");
-  }
-}
-
 // ============================================================================
 // Statement Generation
 // ============================================================================
@@ -642,19 +556,50 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
                                int indent);
 
-static tick_err_t codegen_block_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
-                                     int indent) {
-  CHECK_OK(write_indent(ctx->writer, indent));
-  CHECK_OK(write_str(ctx->writer, "{\n"));
+// Block formatting styles
+typedef struct {
+  bool emit_braces;       // Whether to emit { and }
+  bool inline_opening;    // Whether opening brace goes on same line (no indent)
+  bool trailing_newline;  // Whether to emit \n after closing brace
+} block_style_t;
 
+// Standard block formatting configurations
+static const block_style_t BLOCK_STD = {
+    true, false, true};  // Standard block: indented braces with newline
+static const block_style_t BLOCK_IF = {
+    true, true, false};  // If-block: inline braces, no trailing newline
+static const block_style_t BLOCK_ELSE = {
+    true, true, true};  // Else-block: inline braces, with trailing newline
+static const block_style_t BLOCK_FOR = {
+    false, false, false};  // For-block: no braces (emit statements only)
+
+static tick_err_t codegen_block_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                                     int indent, block_style_t style) {
+  // Emit opening brace if requested
+  if (style.emit_braces) {
+    if (!style.inline_opening) {
+      CHECK_OK(write_indent(ctx->writer, indent));
+    }
+    CHECK_OK(write_str(ctx->writer, "{\n"));
+  }
+
+  // Emit statements
   tick_ast_node_t* stmt = node->block_stmt.stmts;
   while (stmt) {
     CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
     stmt = stmt->next;
   }
 
-  CHECK_OK(write_indent(ctx->writer, indent));
-  CHECK_OK(write_str(ctx->writer, "}\n"));
+  // Emit closing brace if requested
+  if (style.emit_braces) {
+    CHECK_OK(write_indent(ctx->writer, indent));
+    if (style.trailing_newline) {
+      CHECK_OK(write_str(ctx->writer, "}\n"));
+    } else {
+      CHECK_OK(write_str(ctx->writer, "}"));
+    }
+  }
+
   return TICK_OK;
 }
 
@@ -671,8 +616,8 @@ static tick_err_t codegen_return_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   return TICK_OK;
 }
 
-static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
-                                          codegen_ctx_t* ctx, int indent) {
+static tick_err_t codegen_decl(tick_ast_node_t* node, codegen_ctx_t* ctx,
+                               int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
 
@@ -687,18 +632,10 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
   }
 
   // Use pre-computed codegen hints from analysis pass
-  bool is_static_string = node->decl.is_static_string;
   bool is_ptr_to_array = node->decl.is_ptr_to_array;
 
-  // Emit type (for static strings, emit pointee type only)
-  if (is_static_string) {
-    // String literals have type *u8, so we need to emit just u8 (the pointee
-    // type)
-    tick_ast_node_t* type = node->decl.type;
-    CHECK(type && type->kind == TICK_AST_TYPE_POINTER,
-          "static string should have pointer type");
-    CHECK_OK(codegen_type(type->type_pointer.pointee_type, ctx->writer));
-  } else if (is_ptr_to_array) {
+  // Emit type
+  if (is_ptr_to_array) {
     // For pointer-to-array, emit the element type
     tick_ast_node_t* array_type = node->decl.type->type_pointer.pointee_type;
     CHECK_OK(codegen_type(array_type->type_array.element_type, ctx->writer));
@@ -717,10 +654,8 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
     CHECK_OK(write_decl_name(ctx->writer, node));
   }
 
-  if (is_static_string) {
-    // Emit array suffix for static strings
-    CHECK_OK(write_str(ctx->writer, "[]"));
-  } else if (is_ptr_to_array) {
+  // Emit array suffix
+  if (is_ptr_to_array) {
     // For pointer-to-array, emit the array dimensions
     tick_ast_node_t* array_type = node->decl.type->type_pointer.pointee_type;
     CHECK_OK(write_array_suffix(ctx->writer, array_type));
@@ -728,34 +663,36 @@ static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
     CHECK_OK(write_array_suffix(ctx->writer, node->decl.type));
   }
 
-  // Emit initializer if present and not undefined
+  // Emit initializer if present
+  // Note: undefined literals are removed by analysis pass (init set to NULL)
   if (node->decl.init) {
-    // Check if init is undefined literal
-    bool is_undefined = (node->decl.init->kind == TICK_AST_LITERAL &&
-                         node->decl.init->literal.kind == TICK_LIT_UNDEFINED);
+    CHECK_OK(write_str(ctx->writer, " = "));
 
-    if (!is_undefined) {
-      CHECK_OK(write_str(ctx->writer, " = "));
+    // Check if this is a static string literal with array type
+    // Analysis transforms static strings to u8[N] arrays, so we emit byte array
+    bool is_static_string_array =
+        node->decl.quals.is_static && node->decl.type &&
+        node->decl.type->kind == TICK_AST_TYPE_ARRAY &&
+        node->decl.init->kind == TICK_AST_LITERAL &&
+        node->decl.init->literal.kind == TICK_LIT_STRING;
 
-      if (is_static_string) {
-        // For static const string temporaries, emit as u8 array without cast
-        // This makes it a compile-time constant
-        tick_buf_t str = node->decl.init->literal.data.string_value;
-        CHECK_OK(write_str(ctx->writer, "{"));
-        for (usz i = 0; i < str.sz; i++) {
-          if (i > 0) {
-            CHECK_OK(write_str(ctx->writer, ", "));
-          }
-          CHECK_OK(write_fmt(ctx->writer, "%u", (unsigned int)str.buf[i]));
-        }
-        // Add null terminator
-        if (str.sz > 0) {
+    if (is_static_string_array) {
+      // Emit as u8 array: {byte1, byte2, ..., 0}
+      tick_buf_t str = node->decl.init->literal.data.string_value;
+      CHECK_OK(write_str(ctx->writer, "{"));
+      for (usz i = 0; i < str.sz; i++) {
+        if (i > 0) {
           CHECK_OK(write_str(ctx->writer, ", "));
         }
-        CHECK_OK(write_str(ctx->writer, "0}"));
-      } else {
-        CHECK_OK(codegen_expr(node->decl.init, ctx));
+        CHECK_OK(write_fmt(ctx->writer, "%u", (unsigned int)str.buf[i]));
       }
+      // Add null terminator
+      if (str.sz > 0) {
+        CHECK_OK(write_str(ctx->writer, ", "));
+      }
+      CHECK_OK(write_str(ctx->writer, "0}"));
+    } else {
+      CHECK_OK(codegen_expr(node->decl.init, ctx));
     }
   }
 
@@ -800,46 +737,10 @@ static tick_err_t codegen_if_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(write_str(ctx->writer, "if ("));
   CHECK_OK(codegen_expr(node->if_stmt.condition, ctx));
   CHECK_OK(write_str(ctx->writer, ") "));
-
-  // Then block (strip outer braces, we add them)
-  if (node->if_stmt.then_block->kind == TICK_AST_BLOCK_STMT) {
-    CHECK_OK(write_str(ctx->writer, "{\n"));
-    tick_ast_node_t* stmt = node->if_stmt.then_block->block_stmt.stmts;
-    while (stmt) {
-      CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
-      stmt = stmt->next;
-    }
-    CHECK_OK(write_indent(ctx->writer, indent));
-    CHECK_OK(write_str(ctx->writer, "}"));
-  } else {
-    CHECK_OK(write_str(ctx->writer, "\n"));
-    CHECK_OK(codegen_stmt(node->if_stmt.then_block, ctx, indent + 1));
-    CHECK_OK(write_indent(ctx->writer, indent));
-  }
-
-  // Else block if present
-  if (node->if_stmt.else_block) {
-    CHECK_OK(write_str(ctx->writer, " else "));
-    if (node->if_stmt.else_block->kind == TICK_AST_IF_STMT) {
-      // else if - no braces
-      CHECK_OK(codegen_stmt(node->if_stmt.else_block, ctx, 0));
-    } else if (node->if_stmt.else_block->kind == TICK_AST_BLOCK_STMT) {
-      CHECK_OK(write_str(ctx->writer, "{\n"));
-      tick_ast_node_t* stmt = node->if_stmt.else_block->block_stmt.stmts;
-      while (stmt) {
-        CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
-        stmt = stmt->next;
-      }
-      CHECK_OK(write_indent(ctx->writer, indent));
-      CHECK_OK(write_str(ctx->writer, "}\n"));
-    } else {
-      CHECK_OK(write_str(ctx->writer, "\n"));
-      CHECK_OK(codegen_stmt(node->if_stmt.else_block, ctx, indent + 1));
-    }
-  } else {
-    CHECK_OK(write_str(ctx->writer, "\n"));
-  }
-
+  CHECK_OK(codegen_block_stmt(node->if_stmt.then_block, ctx, indent, BLOCK_IF));
+  CHECK_OK(write_str(ctx->writer, " else "));
+  CHECK_OK(
+      codegen_block_stmt(node->if_stmt.else_block, ctx, indent, BLOCK_ELSE));
   return TICK_OK;
 }
 
@@ -881,48 +782,23 @@ static tick_err_t codegen_label_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
 static tick_err_t codegen_for_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
                                    int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
-
-  // Emit init statement before the loop (if present)
   if (node->for_stmt.init_stmt) {
     CHECK_OK(codegen_stmt(node->for_stmt.init_stmt, ctx, indent));
   }
-
-  // All for loops become while (1)
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "while (1) {\n"));
-
-  // Emit condition check as if (!condition) break; (if present)
   if (node->for_stmt.condition) {
     CHECK_OK(write_indent(ctx->writer, indent + 1));
     CHECK_OK(write_str(ctx->writer, "if (!("));
     CHECK_OK(codegen_expr(node->for_stmt.condition, ctx));
     CHECK_OK(write_str(ctx->writer, ")) break;\n"));
   }
-
-  // Emit loop body
-  if (node->for_stmt.body) {
-    if (node->for_stmt.body->kind == TICK_AST_BLOCK_STMT) {
-      // Emit statements directly without extra braces
-      tick_ast_node_t* stmt = node->for_stmt.body->block_stmt.stmts;
-      while (stmt) {
-        CHECK_OK(codegen_stmt(stmt, ctx, indent + 1));
-        stmt = stmt->next;
-      }
-    } else {
-      // Single statement body
-      CHECK_OK(codegen_stmt(node->for_stmt.body, ctx, indent + 1));
-    }
-  }
-
-  // Emit step statement at end of loop (if present)
+  CHECK_OK(codegen_block_stmt(node->for_stmt.body, ctx, indent, BLOCK_FOR));
   if (node->for_stmt.step_stmt) {
     CHECK_OK(codegen_stmt(node->for_stmt.step_stmt, ctx, indent + 1));
   }
-
-  // Close while loop
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "}\n"));
-
   return TICK_OK;
 }
 
@@ -934,7 +810,6 @@ static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
   CHECK_OK(codegen_expr(node->switch_stmt.value, ctx));
   CHECK_OK(write_str(ctx->writer, ") {\n"));
 
-  // Iterate through cases
   tick_ast_node_t* case_node = node->switch_stmt.cases;
   while (case_node) {
     if (case_node->switch_case.values == NULL) {
@@ -953,92 +828,21 @@ static tick_err_t codegen_switch_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
       }
     }
 
-    // Open block for case statements (prevents variable declaration conflicts)
+    // Emit case block (analysis ensures it's a BLOCK_STMT)
+    CHECK_OK(codegen_block_stmt(case_node->switch_case.stmts, ctx, indent + 1,
+                                BLOCK_STD));
+
+    // Always emit break after the block (harmless even after
+    // return/break/continue)
     CHECK_OK(write_indent(ctx->writer, indent + 1));
-    CHECK_OK(write_str(ctx->writer, "{\n"));
-
-    // Emit case statements
-    tick_ast_node_t* stmt = case_node->switch_case.stmts;
-    while (stmt) {
-      CHECK_OK(codegen_stmt(stmt, ctx, indent + 2));
-      stmt = stmt->next;
-    }
-
-    // Always emit break (harmless even after return/break/continue)
-    CHECK_OK(write_indent(ctx->writer, indent + 2));
     CHECK_OK(write_str(ctx->writer, "break;\n"));
-
-    // Close block
-    CHECK_OK(write_indent(ctx->writer, indent + 1));
-    CHECK_OK(write_str(ctx->writer, "}\n"));
 
     case_node = case_node->next;
   }
 
-  // Close switch
   CHECK_OK(write_indent(ctx->writer, indent));
   CHECK_OK(write_str(ctx->writer, "}\n"));
-
   return TICK_OK;
-}
-
-static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
-                               int indent) {
-  if (!stmt) return TICK_OK;
-
-  switch (stmt->kind) {
-    case TICK_AST_BLOCK_STMT:
-      return codegen_block_stmt(stmt, ctx, indent);
-    case TICK_AST_RETURN_STMT:
-      return codegen_return_stmt(stmt, ctx, indent);
-    case TICK_AST_LET_STMT:
-    case TICK_AST_VAR_STMT:
-      return codegen_let_or_var_stmt(stmt, ctx, indent);
-    case TICK_AST_ASSIGN_STMT:
-      return codegen_assign_stmt(stmt, ctx, indent);
-    case TICK_AST_UNUSED_STMT:
-      return codegen_unused_stmt(stmt, ctx, indent);
-    case TICK_AST_EXPR_STMT:
-      return codegen_expr_stmt(stmt, ctx, indent);
-    case TICK_AST_IF_STMT:
-      return codegen_if_stmt(stmt, ctx, indent);
-    case TICK_AST_FOR_STMT:
-      return codegen_for_stmt(stmt, ctx, indent);
-    case TICK_AST_SWITCH_STMT:
-      return codegen_switch_stmt(stmt, ctx, indent);
-    case TICK_AST_BREAK_STMT:
-      return codegen_break_stmt(stmt, ctx, indent);
-    case TICK_AST_CONTINUE_STMT:
-      return codegen_continue_stmt(stmt, ctx, indent);
-    case TICK_AST_GOTO_STMT:
-      return codegen_goto_stmt(stmt, ctx, indent);
-    case TICK_AST_LABEL_STMT:
-      return codegen_label_stmt(stmt, ctx, indent);
-    case TICK_AST_DECL:
-      // Declaration as statement (let/var)
-      return codegen_let_or_var_stmt(stmt, ctx, indent);
-
-    // High-level statements that must be lowered before codegen
-    case TICK_AST_DEFER_STMT:
-      CHECK(0, "defer must be lowered before codegen (use goto/label)");
-    case TICK_AST_ERRDEFER_STMT:
-      CHECK(0, "errdefer must be lowered before codegen (use goto/label)");
-    case TICK_AST_SUSPEND_STMT:
-      CHECK(0,
-            "suspend must be lowered before codegen (use async state machine)");
-    case TICK_AST_RESUME_STMT:
-      CHECK(0,
-            "resume must be lowered before codegen (use async state machine)");
-    case TICK_AST_TRY_CATCH_STMT:
-      CHECK(0, "try/catch must be lowered before codegen");
-    case TICK_AST_FOR_SWITCH_STMT:
-      CHECK(0, "for-switch must be lowered before codegen");
-    case TICK_AST_CONTINUE_SWITCH_STMT:
-      CHECK(0, "continue-switch must be lowered before codegen");
-
-    default:
-      CHECK(0, "unsupported statement kind");
-  }
 }
 
 // ============================================================================
@@ -1268,7 +1072,7 @@ static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
   CHECK_OK(codegen_function_signature(decl, ctx, /*include_param_names=*/true));
   CHECK_OK(write_str(ctx->writer, " "));
   if (func->function.body) {
-    CHECK_OK(codegen_block_stmt(func->function.body, ctx, 0));
+    CHECK_OK(codegen_block_stmt(func->function.body, ctx, 0, BLOCK_STD));
   } else {
     CHECK_OK(write_str(ctx->writer, ";\n"));
   }
@@ -1423,6 +1227,72 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
 
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
+}
+
+static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
+  if (!expr) return TICK_OK;
+
+  switch (expr->kind) {
+    case TICK_AST_LITERAL:
+      return codegen_literal(expr, ctx);
+    case TICK_AST_IDENTIFIER_EXPR:
+      return codegen_identifier(expr, ctx);
+    case TICK_AST_BINARY_EXPR:
+      return codegen_binary_expr(expr, ctx);
+    case TICK_AST_UNARY_EXPR:
+      return codegen_unary_expr(expr, ctx);
+    case TICK_AST_CALL_EXPR:
+      return codegen_call_expr(expr, ctx);
+    case TICK_AST_FIELD_ACCESS_EXPR:
+      return codegen_field_access(expr, ctx);
+    case TICK_AST_INDEX_EXPR:
+      return codegen_index_expr(expr, ctx);
+    case TICK_AST_CAST_EXPR:
+      return codegen_cast_expr(expr, ctx);
+    case TICK_AST_ENUM_VALUE:
+      return codegen_enum_value(expr, ctx);
+    case TICK_AST_STRUCT_INIT_EXPR:
+      return codegen_struct_init_expr(expr, ctx);
+    case TICK_AST_ARRAY_INIT_EXPR:
+      return codegen_array_init_expr(expr, ctx);
+    default:
+      CHECK(0, "unsupported expression kind");
+  }
+}
+
+static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
+                               int indent) {
+  if (!stmt) return TICK_OK;
+  switch (stmt->kind) {
+    case TICK_AST_DECL:
+      return codegen_decl(stmt, ctx, indent);
+    case TICK_AST_ASSIGN_STMT:
+      return codegen_assign_stmt(stmt, ctx, indent);
+    case TICK_AST_UNUSED_STMT:
+      return codegen_unused_stmt(stmt, ctx, indent);
+    case TICK_AST_EXPR_STMT:
+      return codegen_expr_stmt(stmt, ctx, indent);
+    case TICK_AST_BLOCK_STMT:
+      return codegen_block_stmt(stmt, ctx, indent, BLOCK_STD);
+    case TICK_AST_IF_STMT:
+      return codegen_if_stmt(stmt, ctx, indent);
+    case TICK_AST_FOR_STMT:
+      return codegen_for_stmt(stmt, ctx, indent);
+    case TICK_AST_SWITCH_STMT:
+      return codegen_switch_stmt(stmt, ctx, indent);
+    case TICK_AST_RETURN_STMT:
+      return codegen_return_stmt(stmt, ctx, indent);
+    case TICK_AST_BREAK_STMT:
+      return codegen_break_stmt(stmt, ctx, indent);
+    case TICK_AST_CONTINUE_STMT:
+      return codegen_continue_stmt(stmt, ctx, indent);
+    case TICK_AST_GOTO_STMT:
+      return codegen_goto_stmt(stmt, ctx, indent);
+    case TICK_AST_LABEL_STMT:
+      return codegen_label_stmt(stmt, ctx, indent);
+    default:
+      CHECK(0, "unsupported statement kind");
+  }
 }
 
 // ============================================================================

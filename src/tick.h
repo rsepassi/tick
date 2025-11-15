@@ -557,8 +557,6 @@ typedef enum {
   TICK_AST_RETURN_STMT,
   TICK_AST_BLOCK_STMT,
   TICK_AST_EXPR_STMT,
-  TICK_AST_LET_STMT,
-  TICK_AST_VAR_STMT,
   TICK_AST_ASSIGN_STMT,
   TICK_AST_UNUSED_STMT,
   TICK_AST_IF_STMT,
@@ -836,10 +834,8 @@ struct tick_ast_node_s {
       u8 analysis_state;             // tick_analysis_state_t
       tick_ast_node_t* next_queued;  // Intrusive linked list for work queue /
                                      // dependency tracking
-      bool in_pending_deps;   // True if currently in pending_deps list (O(1)
-                              // duplicate check)
-      bool is_static_string;  // True if static const string literal (codegen
-                              // hint)
+      bool in_pending_deps;  // True if currently in pending_deps list (O(1)
+                             // duplicate check)
       bool
           is_ptr_to_array;  // True if type is *[N]T (codegen hint for C syntax)
     } decl;

@@ -606,15 +606,6 @@ static bool identifier_needs_user_prefix(tick_ast_node_t* identifier) {
   return true;
 }
 
-// Check if declaration is static const string literal
-static bool is_decl_static_string(tick_ast_node_t* decl) {
-  CHECK(decl && decl->kind == TICK_AST_DECL, "must be decl");
-
-  return decl->decl.quals.is_static && decl->decl.init &&
-         decl->decl.init->kind == TICK_AST_LITERAL &&
-         decl->decl.init->literal.kind == TICK_LIT_STRING;
-}
-
 // Check if type is pointer-to-array (*[N]T)
 static bool is_type_ptr_to_array(tick_ast_node_t* type) {
   if (!type || type->kind != TICK_AST_TYPE_POINTER) {
@@ -862,6 +853,65 @@ __attribute__((unused)) static const char* tick_analysis_state_str(
 // Note: The canonical query API functions (tick_node_is_*, tick_type_is_*,
 // etc.) are now defined in tick.c and declared in tick.h for use across all
 // files.
+
+// Transform static string declarations from *u8 to u8[N] array type
+// This normalizes the representation so codegen doesn't need special handling
+static tick_ast_node_t* transform_static_string_decl(tick_ast_node_t* decl,
+                                                     tick_alloc_t alloc) {
+  CHECK(decl && decl->kind == TICK_AST_DECL, "must be decl");
+
+  // Check if this is a static string literal
+  if (!decl->decl.quals.is_static || !decl->decl.init ||
+      decl->decl.init->kind != TICK_AST_LITERAL ||
+      decl->decl.init->literal.kind != TICK_LIT_STRING) {
+    return decl;
+  }
+
+  // Get string length
+  tick_buf_t str = decl->decl.init->literal.data.string_value;
+  usz array_size = str.sz + 1;  // +1 for null terminator
+
+  // Create u8 element type
+  tick_ast_node_t* u8_type;
+  ALLOC_AST_NODE(alloc, u8_type);
+  u8_type->kind = TICK_AST_TYPE_NAMED;
+  u8_type->type_named.name = (tick_buf_t){(u8*)"u8", 2};
+  u8_type->type_named.builtin_type = TICK_TYPE_U8;
+  u8_type->type_named.type_entry = NULL;
+  u8_type->loc = decl->decl.type->loc;
+
+  // Create array size literal
+  tick_ast_node_t* size_lit;
+  ALLOC_AST_NODE(alloc, size_lit);
+  size_lit->kind = TICK_AST_LITERAL;
+  size_lit->literal.kind = TICK_LIT_UINT;
+  size_lit->literal.data.uint_value = array_size;
+  size_lit->loc = decl->decl.type->loc;
+
+  // Create array type: u8[N]
+  tick_ast_node_t* array_type;
+  ALLOC_AST_NODE(alloc, array_type);
+  array_type->kind = TICK_AST_TYPE_ARRAY;
+  array_type->type_array.element_type = u8_type;
+  array_type->type_array.size = size_lit;
+  array_type->loc = decl->decl.type->loc;
+
+  // Replace the pointer type with array type
+  decl->decl.type = array_type;
+  return decl;
+}
+
+// Remove undefined literal initializers
+// This normalizes undefined to init = NULL so codegen doesn't need special
+// handling
+static void remove_undefined_init(tick_ast_node_t* decl) {
+  CHECK(decl && decl->kind == TICK_AST_DECL, "must be decl");
+
+  if (decl->decl.init && decl->decl.init->kind == TICK_AST_LITERAL &&
+      decl->decl.init->literal.kind == TICK_LIT_UNDEFINED) {
+    decl->decl.init = NULL;
+  }
+}
 
 // Helper to allocate a type node
 static tick_ast_node_t* alloc_type_node(tick_alloc_t alloc,
@@ -1178,9 +1228,12 @@ static tick_ast_node_t* create_temp_decl(tick_alloc_t alloc, u32 tmpid,
     decl->decl.quals.is_static = true;
   }
 
+  // Transform AST to normalize for codegen
+  transform_static_string_decl(decl, alloc);
+  remove_undefined_init(decl);
+
   // Annotate with codegen hints
-  decl->decl.is_static_string = is_decl_static_string(decl);
-  decl->decl.is_ptr_to_array = is_type_ptr_to_array(type);
+  decl->decl.is_ptr_to_array = is_type_ptr_to_array(decl->decl.type);
 
   decl->decl.analysis_state =
       TICK_ANALYSIS_STATE_COMPLETED;  // Already analyzed
@@ -1554,6 +1607,20 @@ static tick_ast_node_t* create_assign_stmt_node(tick_alloc_t alloc,
   node->kind = TICK_AST_ASSIGN_STMT;
   node->assign_stmt.lhs = lhs;
   node->assign_stmt.rhs = rhs;
+  node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  node->loc = loc;
+  node->next = NULL;
+  node->prev = NULL;
+  return node;
+}
+
+// Helper: Create an empty block statement node
+static tick_ast_node_t* create_empty_block_stmt(tick_alloc_t alloc,
+                                                tick_ast_loc_t loc) {
+  tick_ast_node_t* node;
+  ALLOC_AST_NODE(alloc, node);
+  node->kind = TICK_AST_BLOCK_STMT;
+  node->block_stmt.stmts = NULL;  // Empty block
   node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
   node->loc = loc;
   node->next = NULL;
@@ -2009,6 +2076,9 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
         ptr_type->type_pointer.pointee_type = u8_type;
         return ptr_type;
       } else if (expr->literal.kind == TICK_LIT_BOOL) {
+        // Transform bool literal to uint: true -> 1, false -> 0
+        expr->literal.kind = TICK_LIT_UINT;
+        expr->literal.data.uint_value = expr->literal.data.bool_value ? 1 : 0;
         return alloc_type_node(ctx->alloc, TICK_TYPE_BOOL);
       } else if (expr->literal.kind == TICK_LIT_INT) {
         // Signed integer literals: use smallest type that fits
@@ -2819,8 +2889,6 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       return TICK_ANALYZE_OK;
     }
 
-    case TICK_AST_LET_STMT:
-    case TICK_AST_VAR_STMT:
     case TICK_AST_DECL: {
       ALOG_ENTER("%.*s", (int)stmt->decl.name.sz, stmt->decl.name.buf);
 
@@ -2870,8 +2938,11 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
         return err;
       }
 
+      // Transform AST to normalize for codegen
+      transform_static_string_decl(stmt, ctx->alloc);
+      remove_undefined_init(stmt);
+
       // Annotate with codegen hints
-      stmt->decl.is_static_string = is_decl_static_string(stmt);
       stmt->decl.is_ptr_to_array = is_type_ptr_to_array(stmt->decl.type);
 
       // Register symbol in current scope
@@ -2936,7 +3007,23 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
         return TICK_ANALYZE_ERR;
       }
 
-      // Analyze then and else blocks
+      // Normalize else block to ensure codegen assumptions:
+      // 1. If else_block is NULL, create an empty BLOCK_STMT
+      // 2. If else_block is an IF_STMT (else-if), wrap it in a BLOCK_STMT
+      if (stmt->if_stmt.else_block == NULL) {
+        // Create empty block for missing else clause
+        stmt->if_stmt.else_block =
+            create_empty_block_stmt(ctx->alloc, stmt->loc);
+      } else if (stmt->if_stmt.else_block->kind == TICK_AST_IF_STMT) {
+        // Wrap else-if in a block statement
+        tick_ast_node_t* wrapper =
+            create_empty_block_stmt(ctx->alloc, stmt->if_stmt.else_block->loc);
+        wrapper->block_stmt.stmts = stmt->if_stmt.else_block;
+        stmt->if_stmt.else_block = wrapper;
+      }
+
+      // Analyze then and else blocks (else_block now guaranteed to be non-NULL
+      // BLOCK_STMT)
       tick_analyze_error_t err = analyze_stmt(stmt->if_stmt.then_block, ctx);
       if (err != TICK_ANALYZE_OK) return err;
       err = analyze_stmt(stmt->if_stmt.else_block, ctx);
@@ -2950,6 +3037,40 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       if (analyze_has_error(ctx)) {
         return TICK_ANALYZE_ERR;
       }
+      return TICK_ANALYZE_OK;
+    }
+
+    case TICK_AST_SWITCH_STMT: {
+      // Analyze the switch value expression
+      analyze_expr(stmt->switch_stmt.value, ctx);
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
+
+      // Normalize each case's statements to be wrapped in a BLOCK_STMT
+      tick_ast_node_t* case_node = stmt->switch_stmt.cases;
+      while (case_node) {
+        // If stmts is not already a BLOCK_STMT, wrap it
+        if (case_node->switch_case.stmts == NULL) {
+          // Empty case - create empty block
+          case_node->switch_case.stmts =
+              create_empty_block_stmt(ctx->alloc, case_node->loc);
+        } else if (case_node->switch_case.stmts->kind != TICK_AST_BLOCK_STMT) {
+          // Wrap the statement list in a BLOCK_STMT
+          tick_ast_node_t* wrapper =
+              create_empty_block_stmt(ctx->alloc, case_node->loc);
+          wrapper->block_stmt.stmts = case_node->switch_case.stmts;
+          case_node->switch_case.stmts = wrapper;
+        }
+
+        // Analyze the case block
+        tick_analyze_error_t err =
+            analyze_stmt(case_node->switch_case.stmts, ctx);
+        if (err != TICK_ANALYZE_OK) return err;
+
+        case_node = case_node->next;
+      }
+
       return TICK_ANALYZE_OK;
     }
 
@@ -3597,13 +3718,16 @@ static tick_analyze_error_t analyze_decl_with_init(tick_ast_node_t* decl,
         }
       }
 
+      // Transform AST to normalize for codegen
+      transform_static_string_decl(decl, ctx->alloc);
+      remove_undefined_init(decl);
+
       // Annotate with codegen hints
-      decl->decl.is_static_string = is_decl_static_string(decl);
       decl->decl.is_ptr_to_array = is_type_ptr_to_array(decl->decl.type);
 
       ALOG_EXIT("%.*s: %s = %s", (int)decl->decl.name.sz, decl->decl.name.buf,
                 tick_type_str(decl->decl.type),
-                init->kind == TICK_AST_LITERAL ? "literal" : "expr");
+                init && init->kind == TICK_AST_LITERAL ? "literal" : "expr");
       return TICK_ANALYZE_OK;
   }
 }
