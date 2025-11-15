@@ -48,28 +48,56 @@ for test_file in $RUN_TESTS; do
     output_err="$BUILD_DIR/gen/$base_name.err"
 
     # Step 1: Transpile Tick to C
-    if ! "$COMPILER" emitc "$test_file" -o "$output_c_base" 2> "$output_err"; then
-        printf "\033[31mERROR: Tick compilation failed for %s\033[0m\n" "$test_file"
-        cat "$output_err"
-        exit 1
+    if [ -n "$SINGLE_TEST" ]; then
+        # For single test, show compilation output directly
+        if ! "$COMPILER" emitc "$test_file" -o "$output_c_base" 2>&1; then
+            printf "\033[31mERROR: Tick compilation failed for %s\033[0m\n" "$test_file"
+            exit 1
+        fi
+    else
+        # For batch tests, redirect to error file
+        if ! "$COMPILER" emitc "$test_file" -o "$output_c_base" 2> "$output_err"; then
+            printf "\033[31mERROR: Tick compilation failed for %s\033[0m\n" "$test_file"
+            cat "$output_err"
+            exit 1
+        fi
     fi
 
     # Step 2: Compile C to executable
     # Check if test defines main, if not use the C wrapper
     if ! grep -q "pub let main" "$test_file"; then
         # Use the C wrapper that provides main() and calls test()
-        if ! "$CC" $CFLAGS $LDFLAGS -I"$BUILD_DIR/test/run" -o "$output_exe" \
-            "script/test_main.c" "$output_c" "$STD_LIB" "$PLATFORM_LIB" 2>> "$output_err"; then
-            printf "\033[31mERROR: C compilation/linking failed for %s\033[0m\n" "$test_file"
-            cat "$output_err"
-            exit 1
+        if [ -n "$SINGLE_TEST" ]; then
+            # For single test, show compilation output directly
+            if ! "$CC" $CFLAGS $LDFLAGS -I"$BUILD_DIR/test/run" -o "$output_exe" \
+                "script/test_main.c" "$output_c" "$STD_LIB" "$PLATFORM_LIB" 2>&1; then
+                printf "\033[31mERROR: C compilation/linking failed for %s\033[0m\n" "$test_file"
+                exit 1
+            fi
+        else
+            # For batch tests, redirect to error file
+            if ! "$CC" $CFLAGS $LDFLAGS -I"$BUILD_DIR/test/run" -o "$output_exe" \
+                "script/test_main.c" "$output_c" "$STD_LIB" "$PLATFORM_LIB" 2>> "$output_err"; then
+                printf "\033[31mERROR: C compilation/linking failed for %s\033[0m\n" "$test_file"
+                cat "$output_err"
+                exit 1
+            fi
         fi
     else
         # Test has its own main, compile normally
-        if ! "$CC" $CFLAGS $LDFLAGS -o "$output_exe" "$output_c" "$STD_LIB" "$PLATFORM_LIB" 2>> "$output_err"; then
-            printf "\033[31mERROR: C compilation/linking failed for %s\033[0m\n" "$test_file"
-            cat "$output_err"
-            exit 1
+        if [ -n "$SINGLE_TEST" ]; then
+            # For single test, show compilation output directly
+            if ! "$CC" $CFLAGS $LDFLAGS -o "$output_exe" "$output_c" "$STD_LIB" "$PLATFORM_LIB" 2>&1; then
+                printf "\033[31mERROR: C compilation/linking failed for %s\033[0m\n" "$test_file"
+                exit 1
+            fi
+        else
+            # For batch tests, redirect to error file
+            if ! "$CC" $CFLAGS $LDFLAGS -o "$output_exe" "$output_c" "$STD_LIB" "$PLATFORM_LIB" 2>> "$output_err"; then
+                printf "\033[31mERROR: C compilation/linking failed for %s\033[0m\n" "$test_file"
+                cat "$output_err"
+                exit 1
+            fi
         fi
     fi
 
