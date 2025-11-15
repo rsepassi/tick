@@ -92,9 +92,17 @@ int main(int argc, char** argv) {
   // codegen
   tick_writer_t out_writer_h = tick_file_writer(f_h);
   tick_writer_t out_writer_c = tick_file_writer(f_c);
-  if (tick_codegen(&root, (const char*)args.emitc.input.buf,
-                   (const char*)output_h.buf, out_writer_h,
-                   out_writer_c) != TICK_OK) {
+
+  // Extract basename from header path for #include directive
+  const char* header_basename = (const char*)output_h.buf;
+  for (const char* p = (const char*)output_h.buf; *p; p++) {
+    if (*p == '/' || *p == '\\') {
+      header_basename = p + 1;
+    }
+  }
+
+  if (tick_codegen(&root, (const char*)args.emitc.input.buf, header_basename,
+                   out_writer_h, out_writer_c) != TICK_OK) {
     TICK_USER_LOGE("failed to write to output files");
     exit(1);
   }

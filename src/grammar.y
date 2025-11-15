@@ -516,13 +516,10 @@ expr_stmt(S) ::= expr(E) SEMICOLON. {
 assign_stmt(S) ::= expr(L) EQ(T) expr(R) SEMICOLON. { ASSIGN_RULE(S, L, T, R, ASSIGN_EQ); }
 
 // Unused statement (discard pattern)
-unused_stmt(S) ::= UNDERSCORE(T) EQ name(N) SEMICOLON. {
+unused_stmt(S) ::= UNDERSCORE(T) EQ expr(E) SEMICOLON. {
     PLOG("Parsing unused statement");
     S = ast_alloc(parse, TICK_AST_UNUSED_STMT, T.line, T.col);
-    tick_ast_node_t* ident = ast_alloc(parse, TICK_AST_IDENTIFIER_EXPR, N.line, N.col);
-    ident->identifier_expr.name = N.text;
-    ident->identifier_expr.at_builtin = TICK_AT_BUILTIN_UNKNOWN;
-    S->unused_stmt.expr = ident;
+    S->unused_stmt.expr = E;
 }
 
 // If statements

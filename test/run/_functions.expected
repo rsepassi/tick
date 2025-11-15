@@ -19,6 +19,9 @@ sum_to_n(10) = 55
 is_even(4) = 1, is_odd(4) = 0
 is_even(7) = 0, is_odd(7) = 1
 
+=== External C Function Tests ===
+Calling putchar: Hi
+
 === Function Pointer Tests ===
 apply_op(6, 7, multiply) = 42
 apply_op(20, 8, subtract) = 12

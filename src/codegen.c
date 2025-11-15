@@ -1,3 +1,11 @@
+// C Code Generation
+//
+// This module generates C code from a type-analyzed and lowered Tick AST.
+//
+// IMPORTANT: See tick.h "AST Pipeline and Lowering Target" for the complete
+// specification of what codegen expects from the analysis and lowering passes.
+// Codegen must be fast and dumb.
+
 #include <stdarg.h>
 #include <string.h>
 
@@ -5,29 +13,14 @@
 #include "tick_runtime_embedded.h"
 
 // ============================================================================
-// Code Generation
+// Codegen Debug Logging
 // ============================================================================
-//
-// This module generates C code from a type-analyzed and lowered Tick AST.
-//
-// IMPORTANT: See tick.h "AST Pipeline and Lowering Target" for the complete
-// specification of what codegen expects from the analysis and lowering passes.
-//
-// Summary:
-// - Codegen performs ZERO semantic analysis (pure structural translation)
-// - All types must be resolved (no TICK_TYPE_UNKNOWN)
-// - All operation nodes must have resolved_type set
-// - High-level types must be lowered (when implemented)
-//
-// Codegen maps operations to runtime functions:
-//   (BINOP_ADD, i32) → tick_checked_add_i32
-//   (BINOP_WRAP_ADD, i32) → tick_wrap_add_i32
-//   (BINOP_SAT_ADD, u64) → tick_sat_add_u64
-//   etc.
-//
-// See tick.h for full details on the lowering target and codegen contract.
-//
-// ============================================================================
+
+#ifdef TICK_DEBUG_CODEGEN
+#define CLOG DLOG
+#else
+#define CLOG(fmt, ...) (void)(0)
+#endif
 
 // Codegen context for tracking state during generation
 typedef struct {
@@ -42,6 +35,9 @@ typedef struct {
 
 static tick_err_t write_str(tick_writer_t* w, const char* str) {
   tick_buf_t buf = {(u8*)str, strlen(str)};
+#ifdef TICK_DEBUG_CODEGEN
+  fprintf(stderr, "%s", str);
+#endif
   return w->write(w->ctx, &buf);
 }
 
@@ -55,6 +51,10 @@ static tick_err_t write_fmt(tick_writer_t* w, const char* fmt, ...) {
   if (len < 0 || len >= (int)sizeof(buf)) {
     return TICK_ERR;
   }
+
+#ifdef TICK_DEBUG_CODEGEN
+  fprintf(stderr, "%s", buf);
+#endif
 
   tick_buf_t tbuf = {(u8*)buf, (usz)len};
   return w->write(w->ctx, &tbuf);
@@ -71,6 +71,9 @@ static tick_err_t write_indent(tick_writer_t* w, int indent) {
 
 static tick_err_t write_ident(tick_writer_t* w, tick_buf_t name) {
   tick_buf_t buf = {name.buf, name.sz};
+#ifdef TICK_DEBUG_CODEGEN
+  fprintf(stderr, "%.*s", (int)name.sz, (char*)name.buf);
+#endif
   return w->write(w->ctx, &buf);
 }
 
@@ -490,11 +493,6 @@ static tick_err_t codegen_field_access(tick_ast_node_t* node,
   const char* op = node->field_access_expr.is_arrow ? "->" : ".";
   CHECK_OK(write_str(ctx->writer, op));
 
-  // Handle union field access: prepend "data."
-  if (node->field_access_expr.is_union_field) {
-    CHECK_OK(write_str(ctx->writer, "data."));
-  }
-
   CHECK_OK(write_ident(ctx->writer, node->field_access_expr.field_name));
   return TICK_OK;
 }
@@ -577,21 +575,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
 
     case TICK_AST_STRUCT_INIT_EXPR: {
       // Emit: (TypeName) { .field1 = val1, .field2 = val2 }
-      // For unions: (UnionType) { .data.field1 = val1 }
       // Requires: All field values must be LITERAL or IDENTIFIER_EXPR (lowering
       // decomposed complex expressions)
-
-      // Check if this is a union type by looking at the type entry
-      bool is_union_init = false;
-      if (expr->struct_init_expr.type &&
-          expr->struct_init_expr.type->kind == TICK_AST_TYPE_NAMED &&
-          expr->struct_init_expr.type->type_named.type_entry) {
-        tick_type_entry_t* entry =
-            expr->struct_init_expr.type->type_named.type_entry;
-        if (entry->decl && entry->decl->kind == TICK_AST_UNION_DECL) {
-          is_union_init = true;
-        }
-      }
 
       CHECK_OK(write_str(ctx->writer, "("));
       CHECK_OK(codegen_type(expr->struct_init_expr.type, ctx->writer));
@@ -610,11 +595,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
         }
         first = false;
 
-        // Emit: .fieldname = value (or .data.fieldname for unions)
+        // Emit: .fieldname = value
         CHECK_OK(write_str(ctx->writer, "."));
-        if (is_union_init) {
-          CHECK_OK(write_str(ctx->writer, "data."));
-        }
         CHECK_OK(write_ident(ctx->writer, field->struct_init_field.field_name));
         CHECK_OK(write_str(ctx->writer, " = "));
         CHECK_OK(codegen_expr(value, ctx));
@@ -690,9 +672,7 @@ static tick_err_t codegen_return_stmt(tick_ast_node_t* node, codegen_ctx_t* ctx,
 }
 
 static tick_err_t codegen_let_or_var_stmt(tick_ast_node_t* node,
-                                          codegen_ctx_t* ctx, int indent,
-                                          bool is_var) {
-  UNUSED(is_var);  // In C, both let and var are just regular variables
+                                          codegen_ctx_t* ctx, int indent) {
   CHECK_OK(write_line_directive(ctx, node->loc.line));
   CHECK_OK(write_indent(ctx->writer, indent));
 
@@ -1012,9 +992,8 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
     case TICK_AST_RETURN_STMT:
       return codegen_return_stmt(stmt, ctx, indent);
     case TICK_AST_LET_STMT:
-      return codegen_let_or_var_stmt(stmt, ctx, indent, false);
     case TICK_AST_VAR_STMT:
-      return codegen_let_or_var_stmt(stmt, ctx, indent, true);
+      return codegen_let_or_var_stmt(stmt, ctx, indent);
     case TICK_AST_ASSIGN_STMT:
       return codegen_assign_stmt(stmt, ctx, indent);
     case TICK_AST_UNUSED_STMT:
@@ -1037,8 +1016,7 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
       return codegen_label_stmt(stmt, ctx, indent);
     case TICK_AST_DECL:
       // Declaration as statement (let/var)
-      return codegen_let_or_var_stmt(stmt, ctx, indent,
-                                     stmt->decl.quals.is_var);
+      return codegen_let_or_var_stmt(stmt, ctx, indent);
 
     // High-level statements that must be lowered before codegen
     case TICK_AST_DEFER_STMT:
@@ -1071,7 +1049,37 @@ static tick_err_t codegen_stmt(tick_ast_node_t* stmt, codegen_ctx_t* ctx,
 // Type Declaration Generation
 // ============================================================================
 
-// Emit struct declaration to header or C file
+// Helper to emit fields for struct/union declarations
+static tick_err_t codegen_fields(tick_ast_node_t* first_field, tick_writer_t* w,
+                                 int indent_level, bool emit_alignment_attr,
+                                 const char* context_name) {
+  tick_ast_node_t* field = first_field;
+  while (field) {
+    CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in %s",
+          context_name);
+
+    CHECK_OK(write_indent(w, indent_level));
+    CHECK_OK(codegen_type(field->field.type, w));
+    CHECK_OK(write_str(w, " "));
+    CHECK_OK(write_ident(w, field->field.name));
+    CHECK_OK(write_array_suffix(w, field->field.type));
+
+    // Handle per-field alignment if enabled
+    if (emit_alignment_attr && field->field.alignment) {
+      CHECK(field->field.alignment->kind == TICK_AST_LITERAL,
+            "field alignment must be literal (analysis didn't evaluate "
+            "constant)");
+      uint64_t align_val = field->field.alignment->literal.data.uint_value;
+      CHECK_OK(write_fmt(w, " __attribute__((aligned(%llu)))",
+                         (unsigned long long)align_val));
+    }
+
+    CHECK_OK(write_str(w, ";\n"));
+    field = field->next;
+  }
+  return TICK_OK;
+}
+
 static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
                                       bool full_definition) {
   tick_ast_node_t* struct_node = decl->decl.init;
@@ -1079,7 +1087,6 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
         "expected STRUCT_DECL");
 
   if (!full_definition) {
-    // Forward declaration
     CHECK_OK(write_str(w, "typedef struct "));
     CHECK_OK(write_str(w, "__u_"));
     CHECK_OK(write_ident(w, decl->decl.name));
@@ -1090,16 +1097,10 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
     return TICK_OK;
   }
 
-  // Full definition - use "struct __u_Name { ... };" to avoid typedef
-  // redefinition
   CHECK_OK(write_str(w, "struct "));
-
-  // Handle packed attribute
   if (struct_node->struct_decl.is_packed) {
     CHECK_OK(write_str(w, "__attribute__((packed)) "));
   }
-
-  // Handle struct-level alignment
   if (struct_node->struct_decl.alignment) {
     CHECK(struct_node->struct_decl.alignment->kind == TICK_AST_LITERAL,
           "alignment must be literal (analysis didn't evaluate constant)");
@@ -1112,102 +1113,61 @@ static tick_err_t codegen_struct_decl(tick_ast_node_t* decl, tick_writer_t* w,
   CHECK_OK(write_str(w, "__u_"));
   CHECK_OK(write_ident(w, decl->decl.name));
   CHECK_OK(write_str(w, " {\n"));
-
-  // Emit fields in source order
-  tick_ast_node_t* field = struct_node->struct_decl.fields;
-  while (field) {
-    CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in struct");
-
-    CHECK_OK(write_str(w, "  "));
-    CHECK_OK(codegen_type(field->field.type, w));
-    CHECK_OK(write_str(w, " "));
-    CHECK_OK(write_ident(w, field->field.name));
-    // Emit array dimensions after field name (C syntax requires it)
-    CHECK_OK(write_array_suffix(w, field->field.type));
-
-    // Handle per-field alignment
-    if (field->field.alignment) {
-      CHECK(field->field.alignment->kind == TICK_AST_LITERAL,
-            "field alignment must be literal (analysis didn't evaluate "
-            "constant)");
-      uint64_t align_val = field->field.alignment->literal.data.uint_value;
-      CHECK_OK(write_fmt(w, " __attribute__((aligned(%llu)))",
-                         (unsigned long long)align_val));
-    }
-
-    CHECK_OK(write_str(w, ";\n"));
-    field = field->next;
-  }
-
+  CHECK_OK(
+      codegen_fields(struct_node->struct_decl.fields, w, 1, true, "struct"));
   CHECK_OK(write_str(w, "};\n\n"));
 
   return TICK_OK;
 }
 
-// Emit enum declaration to header or C file
 static tick_err_t codegen_enum_decl(tick_ast_node_t* decl, tick_writer_t* w) {
   tick_ast_node_t* enum_node = decl->decl.init;
   CHECK(enum_node && enum_node->kind == TICK_AST_ENUM_DECL,
         "expected ENUM_DECL");
 
-  // Emit enum with underlying type
-  CHECK_OK(write_str(w, "typedef enum {\n"));
+  // Emit typedef for the enum type using its underlying type
+  CHECK_OK(write_str(w, "typedef "));
+  CHECK_OK(codegen_type(enum_node->enum_decl.underlying_type, w));
+  CHECK_OK(write_str(w, " __u_"));
+  CHECK_OK(write_ident(w, decl->decl.name));
+  CHECK_OK(write_str(w, ";\n"));
 
-  // Emit values (already in correct order from lowering pass)
+  // Emit each enum value as a static const with the correct type
   tick_ast_node_t* value = enum_node->enum_decl.values;
-  bool first = true;
   while (value) {
-    CHECK(value->kind == TICK_AST_ENUM_VALUE,
-          "expected ENUM_VALUE node in enum");
-
-    if (!first) {
-      CHECK_OK(write_str(w, ",\n"));
-    }
-    first = false;
-
-    CHECK_OK(write_str(w, "  "));
-    CHECK_OK(write_str(w, "__u_"));
+    CHECK_OK(write_str(w, "static const __u_"));
+    CHECK_OK(write_ident(w, decl->decl.name));
+    CHECK_OK(write_str(w, " __u_"));
     CHECK_OK(write_ident(w, decl->decl.name));
     CHECK_OK(write_str(w, "_"));
     CHECK_OK(write_ident(w, value->enum_value.name));
 
-    // Value must be a literal (analysis calculated auto-increment)
-    if (value->enum_value.value) {
-      CHECK(value->enum_value.value->kind == TICK_AST_LITERAL,
-            "enum value must be literal (analysis didn't calculate "
-            "auto-increment)");
-      uint64_t val = value->enum_value.value->literal.data.uint_value;
-      CHECK_OK(write_fmt(w, " = %llu", (unsigned long long)val));
+    CHECK_OK(write_str(w, " = "));
+    if (value->enum_value.value->literal.kind == TICK_LIT_INT) {
+      int64_t val = value->enum_value.value->literal.data.int_value;
+      CHECK_OK(write_fmt(w, "%lld", (long long)val));
     } else {
-      CHECK(0, "enum value is NULL (analysis didn't calculate auto-increment)");
+      uint64_t val = value->enum_value.value->literal.data.uint_value;
+      CHECK_OK(write_fmt(w, "%llu", (unsigned long long)val));
     }
+    CHECK_OK(write_str(w, ";\n"));
 
     value = value->next;
   }
 
-  CHECK_OK(write_str(w, "\n} "));
-
-  // Cast to underlying type
-  CHECK_OK(write_str(w, "__u_"));
-  CHECK_OK(write_ident(w, decl->decl.name));
-  CHECK_OK(write_str(w, ";\n\n"));
-
+  CHECK_OK(write_str(w, "\n"));
   return TICK_OK;
 }
 
-// Emit union declaration to header or C file
 static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
                                      bool full_definition) {
   tick_ast_node_t* union_node = decl->decl.init;
   CHECK(union_node && union_node->kind == TICK_AST_UNION_DECL,
         "expected UNION_DECL");
-
-  // Unions must have explicit tag type (lowering generates it if auto)
   CHECK(union_node->union_decl.tag_type != NULL,
         "union has NULL tag_type (lowering didn't generate tag enum)");
 
   if (!full_definition) {
-    // Forward declaration
     CHECK_OK(write_str(w, "typedef struct "));
     CHECK_OK(write_str(w, "__u_"));
     CHECK_OK(write_ident(w, decl->decl.name));
@@ -1218,11 +1178,7 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
     return TICK_OK;
   }
 
-  // Full definition - emit tagged union structure using "struct __u_Name { ...
-  // };"
   CHECK_OK(write_str(w, "struct "));
-
-  // Handle alignment
   if (union_node->union_decl.alignment) {
     CHECK(union_node->union_decl.alignment->kind == TICK_AST_LITERAL,
           "alignment must be literal (analysis didn't evaluate constant)");
@@ -1236,29 +1192,13 @@ static tick_err_t codegen_union_decl(tick_ast_node_t* decl, tick_writer_t* w,
   CHECK_OK(write_ident(w, decl->decl.name));
   CHECK_OK(write_str(w, " {\n"));
 
-  // Emit tag field
   CHECK_OK(write_str(w, "  "));
   CHECK_OK(codegen_type(union_node->union_decl.tag_type, w));
   CHECK_OK(write_str(w, " tag;\n"));
 
-  // Emit data union
   CHECK_OK(write_str(w, "  union {\n"));
-
-  // Emit fields in source order
-  tick_ast_node_t* field = union_node->union_decl.fields;
-  while (field) {
-    CHECK(field->kind == TICK_AST_FIELD, "expected FIELD node in union");
-
-    CHECK_OK(write_str(w, "    "));
-    CHECK_OK(codegen_type(field->field.type, w));
-    CHECK_OK(write_str(w, " "));
-    CHECK_OK(write_ident(w, field->field.name));
-    CHECK_OK(write_str(w, ";\n"));
-
-    field = field->next;
-  }
-
-  CHECK_OK(write_str(w, "  } data;\n"));
+  CHECK_OK(codegen_fields(union_node->union_decl.fields, w, 2, false, "union"));
+  CHECK_OK(write_str(w, "  };\n"));
   CHECK_OK(write_str(w, "};\n\n"));
 
   return TICK_OK;
@@ -1316,32 +1256,22 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl,
 static tick_err_t codegen_function_decl_h(tick_ast_node_t* decl,
                                           codegen_ctx_t* ctx) {
   CHECK_OK(codegen_function_signature(decl, ctx,
-                                      false));  // No parameter names in header
+                                      /*include_param_names=*/false));
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
 
 static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
                                           codegen_ctx_t* ctx) {
-  tick_ast_node_t* func = decl->decl.init;
-
-  // Emit #line directive for function start
   CHECK_OK(write_line_directive(ctx, decl->loc.line));
-
-  // Function signature
-  CHECK_OK(codegen_function_signature(
-      decl, ctx, true));  // Include parameter names in implementation
+  tick_ast_node_t* func = decl->decl.init;
+  CHECK_OK(codegen_function_signature(decl, ctx, /*include_param_names=*/true));
   CHECK_OK(write_str(ctx->writer, " "));
-
-  // Function body
   if (func->function.body) {
-    CHECK(func->function.body->kind == TICK_AST_BLOCK_STMT,
-          "function body is not a block statement");
     CHECK_OK(codegen_block_stmt(func->function.body, ctx, 0));
   } else {
     CHECK_OK(write_str(ctx->writer, ";\n"));
   }
-
   CHECK_OK(write_str(ctx->writer, "\n"));
   return TICK_OK;
 }
@@ -1350,14 +1280,96 @@ static tick_err_t codegen_function_decl_c(tick_ast_node_t* decl,
 // Global Variable Generation
 // ============================================================================
 
-static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
-                                       codegen_ctx_t* ctx) {
-  // Emit extern declaration in header
-  bool is_volatile = decl->decl.quals.is_volatile;
-  bool is_extern = decl->decl.quals.is_extern;
-  UNUSED(is_extern);  // Both extern and non-extern emit the same in header
+// Helper to emit extern function declaration from TYPE_FUNCTION
+// Emits: extern return_type name(params);
+static tick_err_t codegen_extern_function_decl(tick_ast_node_t* decl,
+                                               codegen_ctx_t* ctx) {
+  tick_ast_node_t* fn_type = decl->decl.type;
+  CHECK(fn_type && fn_type->kind == TICK_AST_TYPE_FUNCTION,
+        "expected TYPE_FUNCTION for extern function declaration");
 
   CHECK_OK(write_str(ctx->writer, "extern "));
+
+  // Return type
+  CHECK_OK(codegen_type(fn_type->type_function.return_type, ctx->writer));
+  CHECK_OK(write_str(ctx->writer, " "));
+
+  // Function name (with __u_ prefix handling - extern skips prefix)
+  CHECK_OK(write_decl_name(ctx->writer, decl));
+
+  // Parameters
+  CHECK_OK(write_str(ctx->writer, "("));
+  tick_ast_node_t* param = fn_type->type_function.params;
+  if (!param) {
+    CHECK_OK(write_str(ctx->writer, "void"));
+  } else {
+    bool first = true;
+    while (param) {
+      if (!first) {
+        CHECK_OK(write_str(ctx->writer, ", "));
+      }
+      first = false;
+      CHECK_OK(codegen_type(param->param.type, ctx->writer));
+      param = param->next;
+    }
+  }
+  CHECK_OK(write_str(ctx->writer, ")"));
+
+  CHECK_OK(write_str(ctx->writer, ";\n"));
+  return TICK_OK;
+}
+
+// Helper to emit function pointer variable declaration
+// Emits: [extern] [volatile] return_type (*name)(params)
+static tick_err_t codegen_function_pointer_var(tick_ast_node_t* decl,
+                                               codegen_ctx_t* ctx,
+                                               tick_ast_node_t* fn_type,
+                                               bool is_extern,
+                                               bool is_volatile) {
+  if (is_extern) {
+    CHECK_OK(write_str(ctx->writer, "extern "));
+  }
+  if (is_volatile) {
+    CHECK_OK(write_str(ctx->writer, "volatile "));
+  }
+
+  // Emit return type
+  CHECK_OK(codegen_type(fn_type->type_function.return_type, ctx->writer));
+  CHECK_OK(write_str(ctx->writer, " (*"));
+  CHECK_OK(write_decl_name(ctx->writer, decl));
+  CHECK_OK(write_str(ctx->writer, ")("));
+
+  // Emit parameter types
+  tick_ast_node_t* param = fn_type->type_function.params;
+  if (!param) {
+    CHECK_OK(write_str(ctx->writer, "void"));
+  } else {
+    bool first = true;
+    while (param) {
+      if (!first) {
+        CHECK_OK(write_str(ctx->writer, ", "));
+      }
+      first = false;
+      CHECK_OK(codegen_type(param->param.type, ctx->writer));
+      param = param->next;
+    }
+  }
+
+  CHECK_OK(write_str(ctx->writer, ")"));
+  return TICK_OK;
+}
+
+static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
+                                       codegen_ctx_t* ctx) {
+  tick_ast_node_t* type = decl->decl.type;
+
+  // Special case: extern function declaration (bare function type)
+  if (type && type->kind == TICK_AST_TYPE_FUNCTION) {
+    return codegen_extern_function_decl(decl, ctx);
+  }
+
+  CHECK_OK(write_str(ctx->writer, "extern "));
+  bool is_volatile = decl->decl.quals.is_volatile;
   if (is_volatile) {
     CHECK_OK(write_str(ctx->writer, "volatile "));
   }
@@ -1366,7 +1378,6 @@ static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
   CHECK_OK(write_decl_name(ctx->writer, decl));
   CHECK_OK(write_array_suffix(ctx->writer, decl->decl.type));
   CHECK_OK(write_str(ctx->writer, ";\n"));
-
   return TICK_OK;
 }
 
@@ -1374,80 +1385,43 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
                                        codegen_ctx_t* ctx) {
   bool is_volatile = decl->decl.quals.is_volatile;
   bool is_extern = decl->decl.quals.is_extern;
-  tick_ast_node_t* type = decl->decl.type;
 
   CHECK_OK(write_line_directive(ctx, decl->loc.line));
 
-  // Special case: function pointer (pointer to function type)
-  // In C: return_type (*name)(params)
+  tick_ast_node_t* type = decl->decl.type;
+
+  // Special case: extern function declaration (bare function type)
+  if (is_extern && type && type->kind == TICK_AST_TYPE_FUNCTION) {
+    return codegen_extern_function_decl(decl, ctx);
+  }
+
   if (type && type->kind == TICK_AST_TYPE_POINTER &&
       type->type_pointer.pointee_type &&
       type->type_pointer.pointee_type->kind == TICK_AST_TYPE_FUNCTION) {
-    tick_ast_node_t* fn_type = type->type_pointer.pointee_type;
-
+    // Function pointer
+    CHECK_OK(codegen_function_pointer_var(
+        decl, ctx, type->type_pointer.pointee_type, is_extern, is_volatile));
+  } else {
+    // Normal variable declaration
     if (is_extern) {
       CHECK_OK(write_str(ctx->writer, "extern "));
     }
     if (is_volatile) {
       CHECK_OK(write_str(ctx->writer, "volatile "));
     }
-
-    // Emit return type
-    CHECK_OK(codegen_type(fn_type->type_function.return_type, ctx->writer));
-    CHECK_OK(write_str(ctx->writer, " (*"));
+    CHECK_OK(codegen_type(type, ctx->writer));
+    CHECK_OK(write_str(ctx->writer, " "));
     CHECK_OK(write_decl_name(ctx->writer, decl));
-    CHECK_OK(write_str(ctx->writer, ")("));
-
-    // Emit parameter types
-    tick_ast_node_t* param = fn_type->type_function.params;
-    // In C, empty parameter list should be (void) not ()
-    if (!param) {
-      CHECK_OK(write_str(ctx->writer, "void"));
-    } else {
-      bool first = true;
-      while (param) {
-        if (!first) {
-          CHECK_OK(write_str(ctx->writer, ", "));
-        }
-        first = false;
-        CHECK_OK(codegen_type(param->param.type, ctx->writer));
-        param = param->next;
-      }
-    }
-
-    CHECK_OK(write_str(ctx->writer, ")"));
-    goto finish_decl;
+    CHECK_OK(write_array_suffix(ctx->writer, type));
   }
 
-  // Normal variable declaration
-  if (is_extern) {
-    CHECK_OK(write_str(ctx->writer, "extern "));
-  }
-
-  if (is_volatile) {
-    CHECK_OK(write_str(ctx->writer, "volatile "));
-  }
-  CHECK_OK(codegen_type(type, ctx->writer));
-  CHECK_OK(write_str(ctx->writer, " "));
-  CHECK_OK(write_decl_name(ctx->writer, decl));
-  CHECK_OK(write_array_suffix(ctx->writer, type));
-
-finish_decl:
-
-  // Emit initializer only if not extern and if present and not undefined
-  if (!is_extern && decl->decl.init) {
-    // Check if init is undefined literal
-    bool is_undefined = (decl->decl.init->kind == TICK_AST_LITERAL &&
-                         decl->decl.init->literal.kind == TICK_LIT_UNDEFINED);
-
-    if (!is_undefined) {
-      CHECK_OK(write_str(ctx->writer, " = "));
-      CHECK_OK(codegen_expr(decl->decl.init, ctx));
-    }
+  // Emit initializer
+  if (decl->decl.init) {
+    CHECK_OK(write_str(ctx->writer, " = "));
+    CHECK_OK(codegen_expr(decl->decl.init, ctx));
   }
 
   CHECK_OK(write_str(ctx->writer, ";\n"));
-
   return TICK_OK;
 }
 
@@ -1455,122 +1429,56 @@ finish_decl:
 // Main Entry Points
 // ============================================================================
 
-static tick_err_t codegen_header_prologue(tick_writer_t* w) {
-  CHECK_OK(write_str(w, "// Generated by tick compiler\n"));
-  CHECK_OK(write_str(w, "#pragma once\n\n"));
-
-  // Write embedded runtime header as a string
-  tick_buf_t runtime_buf = {.buf = (u8*)tick_runtime_header,
-                            .sz = tick_runtime_header_len};
-  CHECK_OK(w->write(w->ctx, &runtime_buf));
-  CHECK_OK(write_str(w, "\n"));
-
-  return TICK_OK;
-}
-
-static tick_err_t codegen_c_prologue(tick_writer_t* w,
-                                     const char* header_name) {
-  CHECK_OK(write_str(w, "// Generated by tick compiler\n"));
-  CHECK_OK(write_fmt(w, "#include \"%s\"\n\n", header_name));
-  return TICK_OK;
-}
-
 tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
                         const char* header_filename, tick_writer_t writer_h,
                         tick_writer_t writer_c) {
+  // Standard header
+  CHECK_OK(write_str(&writer_h, "// Generated by tick compiler\n"));
+  CHECK_OK(write_str(&writer_h, "#pragma once\n\n"));
+  tick_buf_t runtime_buf = {.buf = (u8*)tick_runtime_header,
+                            .sz = tick_runtime_header_len};
+  CHECK_OK(writer_h.write(writer_h.ctx, &runtime_buf));
+  CHECK_OK(write_str(&writer_h, "\n"));
+
+  // Header include
+  CHECK_OK(write_fmt(&writer_c, "#include \"%s\"\n\n", header_filename));
+
   codegen_ctx_t ctx_h = {&writer_h, source_filename, 0};
   codegen_ctx_t ctx_c = {&writer_c, source_filename, 0};
-
-  CHECK_OK(codegen_header_prologue(&writer_h));
-
-  // Extract basename from header_filename for #include directive
-  // Find the last '/' or '\\' to get just the filename
-  const char* basename = header_filename;
-  for (const char* p = header_filename; *p; p++) {
-    if (*p == '/' || *p == '\\') {
-      basename = p + 1;
-    }
-  }
-
-  CHECK_OK(codegen_c_prologue(&writer_c, basename));
-
-  tick_ast_node_t* module = ast->root;
-
-  // Single pass: Emit declarations in order
-  // Lowering is responsible for inserting forward declarations and ordering
-  for (tick_ast_node_t* decl = module->module.decls; decl; decl = decl->next) {
-    if (decl->kind != TICK_AST_DECL) {
-      continue;
-    }
-
+  for (tick_ast_node_t* decl = ast->root->module.decls; decl;
+       decl = decl->next) {
+    CHECK(decl->kind == TICK_AST_DECL, "top-level must be decls");
     bool is_pub = decl->decl.quals.is_pub;
-    bool is_extern = decl->decl.quals.is_extern;
     bool is_forward = decl->decl.quals.is_forward_decl;
-
-    // Skip declarations without init unless they're extern
-    if (!decl->decl.init && !is_extern) {
-      continue;
-    }
-
     tick_ast_node_kind_t init_kind =
         decl->decl.init ? decl->decl.init->kind : TICK_AST_DECL;
-
     switch (init_kind) {
-      case TICK_AST_STRUCT_DECL:
-        // Emit to header if pub
-        if (is_pub) {
-          CHECK_OK(codegen_struct_decl(decl, &writer_h, !is_forward));
-        } else {
-          // Only emit to C file if not pub
-          CHECK_OK(codegen_struct_decl(decl, &writer_c, !is_forward));
-        }
-        break;
-
       case TICK_AST_ENUM_DECL:
-        // Enums don't have forward declarations
-        CHECK(!is_forward, "enum cannot have forward declaration");
-        // Emit to header if pub
-        if (is_pub) {
-          CHECK_OK(codegen_enum_decl(decl, &writer_h));
-        } else {
-          // Only emit to C file if not pub
-          CHECK_OK(codegen_enum_decl(decl, &writer_c));
-        }
+        CHECK_OK(codegen_enum_decl(decl, is_pub ? &writer_h : &writer_c));
         break;
-
+      case TICK_AST_STRUCT_DECL:
+        CHECK_OK(codegen_struct_decl(decl, is_pub ? &writer_h : &writer_c,
+                                     !is_forward));
+        break;
       case TICK_AST_UNION_DECL:
-        // Emit to header if pub
-        if (is_pub) {
-          CHECK_OK(codegen_union_decl(decl, &writer_h, !is_forward));
-        } else {
-          // Only emit to C file if not pub
-          CHECK_OK(codegen_union_decl(decl, &writer_c, !is_forward));
-        }
+        CHECK_OK(codegen_union_decl(decl, is_pub ? &writer_h : &writer_c,
+                                    !is_forward));
         break;
-
       case TICK_AST_FUNCTION:
-        // Functions don't have forward declarations (yet)
-        CHECK(!is_forward, "function cannot have forward declaration");
-        // Emit to header if pub
         if (is_pub) {
           CHECK_OK(codegen_function_decl_h(decl, &ctx_h));
         }
-        // Always emit to C file
         CHECK_OK(codegen_function_decl_c(decl, &ctx_c));
         break;
-
-      default:
-        // Global variable (let/var at module level)
-        CHECK(!is_forward, "global variable cannot have forward declaration");
-        // Emit extern in header if pub
+      case TICK_AST_DECL:
         if (is_pub) {
           CHECK_OK(codegen_global_var_h(decl, &ctx_h));
         }
-        // Always emit definition in C file
         CHECK_OK(codegen_global_var_c(decl, &ctx_c));
         break;
+      default:
+        CHECK(0, "unhandled decl type");
     }
   }
-
   return TICK_OK;
 }

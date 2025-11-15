@@ -2,6 +2,7 @@
 Color.Red=0 Color.Green=1 Color.Blue=2
 Status.Idle=0 Status.Running=10 Status.Stopped=21
 Priority.Low=1 Priority.High=10
+Direction.Left=-1 Direction.Center=0 Direction.Right=1
 
 === Struct Tests ===
 Point: x=10 y=20

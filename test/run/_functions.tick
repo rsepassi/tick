@@ -80,9 +80,6 @@ let sum_to_n = fn (n: i32) i32 {
 # Mutual Recursion
 # ============================================================================
 
-# Forward declaration for mutual recursion
-extern let is_odd = fn (n: i32) bool;
-
 let is_even = fn (n: i32) bool {
   if n == 0 {
     return true;
@@ -102,6 +99,13 @@ let is_odd = fn (n: i32) bool {
   }
   return is_even(n - 1);
 };
+
+# ============================================================================
+# External C Functions
+# ============================================================================
+
+# Declare external C function
+extern let putchar: fn(i32) i32;
 
 # ============================================================================
 # Function Pointers
@@ -213,6 +217,14 @@ pub let test = fn () i32 {
   let odd7: bool = is_odd(7);
   @dbg("is_even(4) = %d, is_odd(4) = %d\n", even4, odd4);
   @dbg("is_even(7) = %d, is_odd(7) = %d\n", even7, odd7);
+
+  @dbg("\n=== External C Function Tests ===\n");
+
+  # Call external C function (putchar)
+  @dbg("Calling putchar: ");
+  _ = putchar(72);   # 'H'
+  _ = putchar(105);  # 'i'
+  _ = putchar(10);   # '\n'
 
   @dbg("\n=== Function Pointer Tests ===\n");
 

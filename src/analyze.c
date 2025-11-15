@@ -1272,6 +1272,33 @@ static inline bool analyze_has_error(tick_analyze_ctx_t* ctx) {
   return ctx->errbuf.buf[0] != '\0';
 }
 
+// Check if a function signature (TYPE_FUNCTION) is fully resolved
+// Returns true if all parameter types and return type are resolved
+// UNUSED: Temporarily disabled to debug dependency issues
+/*
+static bool is_function_signature_resolved(tick_ast_node_t* fn_type) {
+  if (!fn_type || fn_type->kind != TICK_AST_TYPE_FUNCTION) {
+    return false;
+  }
+
+  // Check return type
+  if (fn_type->type_function.return_type &&
+      tick_type_is_unresolved(fn_type->type_function.return_type)) {
+    return false;
+  }
+
+  // Check parameter types
+  for (tick_ast_node_t* param = fn_type->type_function.params; param;
+       param = param->next) {
+    if (param->param.type && tick_type_is_unresolved(param->param.type)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+*/
+
 // Resolve a named type via type table lookup
 // Optionally tracks dependencies for user-defined types
 static void resolve_named_type(tick_ast_node_t* type_node,
@@ -2314,6 +2341,10 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
         } else if (tick_type_is_unresolved(result_type)) {
           // Type is UNKNOWN - needs to be analyzed
           needs_dependency = true;
+        } else if (decl->decl.analysis_state ==
+                   TICK_ANALYSIS_STATE_NOT_STARTED) {
+          // Declaration not analyzed yet
+          needs_dependency = true;
         }
 
         // Only add module-level declarations to the work queue if we need type
@@ -2910,6 +2941,15 @@ static tick_analyze_error_t analyze_stmt(tick_ast_node_t* stmt,
       if (err != TICK_ANALYZE_OK) return err;
       err = analyze_stmt(stmt->if_stmt.else_block, ctx);
       if (err != TICK_ANALYZE_OK) return err;
+      return TICK_ANALYZE_OK;
+    }
+
+    case TICK_AST_UNUSED_STMT: {
+      // Analyze the expression being discarded
+      analyze_expr(stmt->unused_stmt.expr, ctx);
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
       return TICK_ANALYZE_OK;
     }
 
@@ -3641,6 +3681,7 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
   while (!tick_work_queue_empty(&ctx->work_queue)) {
     tick_ast_node_t* decl = tick_work_queue_dequeue(&ctx->work_queue);
     CHECK(decl, "NULL decl");
+
     if (decl->decl.analysis_state == TICK_ANALYSIS_STATE_COMPLETED ||
         decl->decl.analysis_state == TICK_ANALYSIS_STATE_FAILED) {
       continue;
@@ -3665,6 +3706,7 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
     if (ctx->pending_deps.head != NULL) {
       ALOG_EXIT("has dependencies, re-enqueueing");
       decl->decl.analysis_state = TICK_ANALYSIS_STATE_NOT_STARTED;
+
       if (!ctx->work_queue.head) {
         ctx->work_queue.head = ctx->pending_deps.head;
         ctx->work_queue.tail = ctx->pending_deps.tail;
@@ -3672,6 +3714,15 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
         ctx->work_queue.tail->decl.next_queued = ctx->pending_deps.head;
         ctx->work_queue.tail = ctx->pending_deps.tail;
       }
+
+      // Clear in_pending_deps flags
+      for (tick_ast_node_t* dep = ctx->pending_deps.head; dep;
+           dep = dep->decl.next_queued) {
+        dep->decl.in_pending_deps = false;
+      }
+      ctx->pending_deps.head = NULL;
+      ctx->pending_deps.tail = NULL;
+
       tick_work_queue_enqueue(&ctx->work_queue, decl);
     } else {
       ALOG_EXIT("OK");

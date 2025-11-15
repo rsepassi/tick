@@ -4,6 +4,7 @@
 RELEASE ?= 0
 DEBUG_PARSE ?= 0
 DEBUG_ANALYZE ?= 0
+DEBUG_CODEGEN ?= 0
 
 # Build directory
 BUILD_DIR := build
@@ -32,6 +33,11 @@ endif
 # Debug analyze flag
 ifeq ($(DEBUG_ANALYZE),1)
 	CFLAGS += -DTICK_DEBUG_ANALYZE
+endif
+
+# Debug codegen flag
+ifeq ($(DEBUG_CODEGEN),1)
+	CFLAGS += -DTICK_DEBUG_CODEGEN
 endif
 
 .PHONY: all grammar clean format tests runtime compile-lib compile-exe

@@ -26,6 +26,13 @@ let Priority = enum(u8) {
   High = 10,
 };
 
+# Enum with negative values
+let Direction = enum(i8) {
+  Left = -1,
+  Center = 0,
+  Right = 1,
+};
+
 # ============================================================================
 # Structs
 # ============================================================================
@@ -109,6 +116,11 @@ pub let test = fn () i32 {
   let low: Priority = Priority.Low;
   let high: Priority = Priority.High;
   @dbg("Priority.Low=%u Priority.High=%u\n", low, high);
+
+  let left: Direction = Direction.Left;
+  let center: Direction = Direction.Center;
+  let right: Direction = Direction.Right;
+  @dbg("Direction.Left=%d Direction.Center=%d Direction.Right=%d\n", left, center, right);
 
   # Test simple struct
   @dbg("\n=== Struct Tests ===\n");
