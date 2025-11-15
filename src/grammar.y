@@ -857,7 +857,6 @@ expr(E) ::= expr(Obj) DOT(T) name(Field). {
     E = ast_alloc(parse, TICK_AST_FIELD_ACCESS_EXPR, T.line, T.col);
     E->field_access_expr.object = Obj;
     E->field_access_expr.field_name = Field.text;
-    E->field_access_expr.is_arrow = false;
 }
 
 // Unwrap panic: a.? (unwrap optional or panic)

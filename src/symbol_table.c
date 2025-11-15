@@ -231,7 +231,8 @@ tick_symbol_t* tick_scope_lookup_local(tick_scope_t* scope, tick_buf_t name) {
 tick_err_t tick_types_insert(struct hashmap* types, tick_buf_t name,
                              tick_ast_node_t* decl,
                              tick_builtin_type_t builtin_type,
-                             tick_ast_node_t* parent_decl, tick_alloc_t alloc) {
+                             tick_ast_node_t* parent_decl, bool is_pub,
+                             tick_alloc_t alloc) {
   UNUSED(alloc);  // Allocator passed as ctx to hashmap
   if (!types) return TICK_ERR;
 
@@ -255,6 +256,7 @@ tick_err_t tick_types_insert(struct hashmap* types, tick_buf_t name,
       .decl = decl,  // NULL for builtin types
       .builtin_type = builtin_type,
       .parent_decl = parent_decl,  // Back-pointer to parent DECL node
+      .is_pub = is_pub,
   };
 
   // Insert into hashmap
@@ -287,7 +289,8 @@ static tick_err_t register_builtin_type(struct hashmap* types, const char* name,
                                         tick_builtin_type_t builtin_type,
                                         tick_alloc_t alloc) {
   tick_buf_t name_buf = {.buf = (u8*)name, .sz = strlen(name)};
-  return tick_types_insert(types, name_buf, NULL, builtin_type, NULL, alloc);
+  return tick_types_insert(types, name_buf, NULL, builtin_type, NULL, false,
+                           alloc);
 }
 
 // ============================================================================

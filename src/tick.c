@@ -599,3 +599,28 @@ bool tick_types_equal(tick_ast_node_t* t1, tick_ast_node_t* t2) {
       return t1 == t2;
   }
 }
+
+// Check if a DECL represents a function declaration (not a function pointer
+// var) Returns true for:
+//   - Function implementations: let f = fn() {...}
+//   - Extern function declarations: extern let f: fn(...)
+// Returns false for:
+//   - Function pointer variables: let fp: *fn(...)
+bool tick_decl_is_function_declaration(tick_ast_node_t* decl) {
+  if (!decl || decl->kind != TICK_AST_DECL) {
+    return false;
+  }
+
+  // Function implementation: has FUNCTION init
+  if (decl->decl.init && decl->decl.init->kind == TICK_AST_FUNCTION) {
+    return true;
+  }
+
+  // Extern function declaration: type is bare TYPE_FUNCTION (not wrapped in
+  // pointer)
+  if (decl->decl.type && decl->decl.type->kind == TICK_AST_TYPE_FUNCTION) {
+    return true;
+  }
+
+  return false;
+}

@@ -747,6 +747,7 @@ struct tick_type_entry_s {
   tick_builtin_type_t
       builtin_type;  // Resolved builtin type or TICK_TYPE_USER_DEFINED
   tick_ast_node_t* parent_decl;  // Back-pointer to parent DECL node
+  bool is_pub;  // True if type is marked pub (for C name mangling)
 };
 
 // Scope structure for symbol lookups
@@ -836,8 +837,6 @@ struct tick_ast_node_s {
                                      // dependency tracking
       bool in_pending_deps;  // True if currently in pending_deps list (O(1)
                              // duplicate check)
-      bool
-          is_ptr_to_array;  // True if type is *[N]T (codegen hint for C syntax)
     } decl;
     struct {
       tick_ast_node_t* params;
@@ -900,17 +899,15 @@ struct tick_ast_node_s {
       tick_ast_node_t* left;
       tick_ast_node_t* right;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
-      const char*
-          runtime_func;  // Filled by analysis pass (e.g.,
-                         // "tick_checked_add_i32" or NULL for direct C ops)
+      tick_builtin_t
+          builtin;  // Filled by analysis pass (semantic operation category)
     } binary_expr;
     struct {
       tick_unop_t op;
       tick_ast_node_t* operand;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
-      const char*
-          runtime_func;  // Filled by analysis pass (e.g.,
-                         // "tick_checked_neg_i32" or NULL for direct C ops)
+      tick_builtin_t
+          builtin;  // Filled by analysis pass (semantic operation category)
     } unary_expr;
     struct {
       tick_ast_node_t* callee;
@@ -925,10 +922,8 @@ struct tick_ast_node_s {
     struct {
       tick_ast_node_t* object;
       tick_buf_t field_name;
-      bool is_arrow;
-      bool
-          is_union_field;  // true if accessing union field (needs .data prefix)
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
+      bool object_is_pointer;  // True if object type is pointer (use ->)
     } field_access_expr;
     struct {
       tick_ast_node_t* array;
@@ -946,11 +941,6 @@ struct tick_ast_node_s {
       tick_ast_node_t* type;
       tick_ast_node_t* expr;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass (result type)
-      tick_cast_strategy_t
-          strategy;  // Filled by analysis pass (codegen strategy)
-      const char*
-          runtime_func;  // Filled by analysis pass (e.g.,
-                         // "tick_checked_cast_i32_u8" or NULL for bare casts)
     } cast_expr;
     struct {
       tick_ast_node_t* operand;
@@ -962,7 +952,8 @@ struct tick_ast_node_s {
           at_builtin;  // Resolved AT builtin (UNKNOWN if not a builtin)
       tick_symbol_t*
           symbol;  // Cached symbol lookup (NULL until first resolution)
-      bool needs_user_prefix;  // Filled by analysis (true if needs __u_ prefix)
+      bool
+          needs_user_prefix;  // Filled by codegen (C-specific: use __u_ prefix)
     } identifier_expr;
     struct {
       tick_ast_node_t* call;   // Function call expression
@@ -1015,6 +1006,13 @@ struct tick_ast_node_s {
       tick_ast_node_t* error_type;  // NULL for !T shorthand
       tick_ast_node_t* value_type;
     } type_error_union;
+    // TYPE_FUNCTION semantics:
+    // - Bare TYPE_FUNCTION (not wrapped in pointer) = function declaration
+    //   Used for: extern let f: fn(...), or let f = fn(...) {...}
+    //   Emits as: return_type name(params) in C
+    // - TYPE_POINTER(TYPE_FUNCTION) = function pointer variable
+    //   Used for: let fp: *fn(...)
+    //   Emits as: return_type (*name)(params) in C
     struct {
       tick_ast_node_t* params;  // Linked list of params (may have NULL names)
       tick_ast_node_t* return_type;  // NULL = void
@@ -1112,6 +1110,9 @@ tick_ast_node_t* tick_type_get_pointee(tick_ast_node_t* type);
 tick_ast_node_t* tick_type_get_element(tick_ast_node_t* type);
 bool tick_types_equal(tick_ast_node_t* t1, tick_ast_node_t* t2);
 
+// Declaration queries
+bool tick_decl_is_function_declaration(tick_ast_node_t* decl);
+
 // AST list helpers
 void tick_ast_list_init(tick_ast_node_t* node);
 tick_ast_node_t* tick_ast_list_append(tick_ast_node_t* head,
@@ -1127,7 +1128,8 @@ tick_symbol_t* tick_scope_lookup_local(tick_scope_t* scope, tick_buf_t name);
 tick_err_t tick_types_insert(struct hashmap* types, tick_buf_t name,
                              tick_ast_node_t* decl,
                              tick_builtin_type_t builtin_type,
-                             tick_ast_node_t* parent_decl, tick_alloc_t alloc);
+                             tick_ast_node_t* parent_decl, bool is_pub,
+                             tick_alloc_t alloc);
 tick_type_entry_t* tick_types_lookup(struct hashmap* types, tick_buf_t name);
 void tick_dependency_list_init(tick_dependency_list_t* list);
 void tick_dependency_list_clear(tick_dependency_list_t* list);

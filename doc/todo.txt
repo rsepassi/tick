@@ -1,3 +1,4 @@
+- codegen: erase arrays to pointers
 - test
 - build
 - feature: methods
