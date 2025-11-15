@@ -40,7 +40,7 @@ ifeq ($(DEBUG_CODEGEN),1)
 	CFLAGS += -DTICK_DEBUG_CODEGEN
 endif
 
-.PHONY: all grammar clean format tests runtime compile-lib compile-exe
+.PHONY: all grammar clean format cloc tests runtime compile-lib compile-exe
 COMPILER := $(BUILD_DIR)/tick
 all: $(COMPILER)
 
@@ -212,6 +212,9 @@ clean:
 
 format:
 	clang-format -i -style=google $(SRCS) $(HDRS)
+
+cloc:
+	cloc --by-file src
 
 tests: $(COMPILER) runtime
 	@echo "Running Tick test suite..."
