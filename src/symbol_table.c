@@ -6,43 +6,6 @@
 // Analysis debug logging (same pattern as analyze.c)
 #ifdef TICK_DEBUG_ANALYZE
 #define ALOG DLOG
-
-// Helper for logging builtin types (only needed when ALOG is active)
-static const char* tick_builtin_type_str(tick_builtin_type_t type) {
-  switch (type) {
-    case TICK_TYPE_UNKNOWN:
-      return "UNKNOWN";
-    case TICK_TYPE_I8:
-      return "i8";
-    case TICK_TYPE_I16:
-      return "i16";
-    case TICK_TYPE_I32:
-      return "i32";
-    case TICK_TYPE_I64:
-      return "i64";
-    case TICK_TYPE_ISZ:
-      return "isz";
-    case TICK_TYPE_U8:
-      return "u8";
-    case TICK_TYPE_U16:
-      return "u16";
-    case TICK_TYPE_U32:
-      return "u32";
-    case TICK_TYPE_U64:
-      return "u64";
-    case TICK_TYPE_USZ:
-      return "usz";
-    case TICK_TYPE_BOOL:
-      return "bool";
-    case TICK_TYPE_VOID:
-      return "void";
-    case TICK_TYPE_USER_DEFINED:
-      return "USER_DEFINED";
-    default:
-      return "<?>";
-  }
-}
-
 #else
 #define ALOG(fmt, ...) (void)(0)
 #endif

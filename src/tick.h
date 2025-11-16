@@ -579,6 +579,7 @@ typedef enum {
   TICK_AST_BUILTIN_CALL,
   TICK_AST_FIELD_ACCESS_EXPR,
   TICK_AST_INDEX_EXPR,
+  TICK_AST_SLICE_EXPR,
   TICK_AST_UNWRAP_PANIC_EXPR,
   TICK_AST_STRUCT_INIT_EXPR,
   TICK_AST_ARRAY_INIT_EXPR,
@@ -940,7 +941,22 @@ struct tick_ast_node_s {
     struct {
       tick_ast_node_t* array;
       tick_ast_node_t* index;
+      tick_ast_node_t* resolved_type;  // Filled by analysis pass (element type)
+      bool is_slice_index;  // True if this is indexing into a slice (needs
+                            // bounds check + cast)
     } index_expr;
+    struct {
+      tick_ast_node_t* array;          // Array/pointer/slice to slice
+      tick_ast_node_t* start;          // Start index (NULL = beginning)
+      tick_ast_node_t* end;            // End index (NULL = end)
+      tick_ast_node_t* resolved_type;  // Filled by analysis pass (slice type)
+      enum {
+        TICK_SLICE_SOURCE_UNKNOWN = 0,
+        TICK_SLICE_SOURCE_ARRAY,
+        TICK_SLICE_SOURCE_SLICE,
+        TICK_SLICE_SOURCE_POINTER
+      } source_kind;  // Filled by analysis pass
+    } slice_expr;
     struct {
       tick_ast_node_t* type;
       tick_ast_node_t*
@@ -1102,6 +1118,12 @@ void tick_format_error_with_context(tick_buf_t errbuf, tick_buf_t source,
 
 // AST functions
 const char* tick_ast_kind_str(tick_ast_node_kind_t kind);
+const char* tick_builtin_type_str(tick_builtin_type_t type);
+const char* tick_type_str(tick_ast_node_t* type);
+const char* tick_binop_str(tick_binop_t op);
+const char* tick_unop_str(tick_unop_t op);
+const char* tick_analyze_error_str(tick_analyze_error_t err);
+const char* tick_analysis_state_str(tick_analysis_state_t state);
 tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
                             tick_buf_t errbuf, tick_buf_t source);
 
@@ -1117,6 +1139,8 @@ bool tick_type_is_unresolved(tick_ast_node_t* type);
 bool tick_type_is_resolved(tick_ast_node_t* type);
 bool tick_type_is_named(tick_ast_node_t* type);
 bool tick_type_is_pointer(tick_ast_node_t* type);
+bool tick_type_is_array(tick_ast_node_t* type);
+bool tick_type_is_slice(tick_ast_node_t* type);
 bool tick_type_is_user_defined(tick_ast_node_t* type);
 bool tick_type_is_builtin(tick_ast_node_t* type);
 bool tick_type_is_integer(tick_ast_node_t* type);

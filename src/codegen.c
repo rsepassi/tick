@@ -662,27 +662,29 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
   switch (type->kind) {
     case TICK_AST_TYPE_NAMED: {
       // Map builtin types to C types using enum
+      // Use the runtime aliases (i8, u32, etc.) for consistency with slice
+      // types
       switch (type->type_named.builtin_type) {
         case TICK_TYPE_I8:
-          return write_str(w, "int8_t");
+          return write_str(w, "i8");
         case TICK_TYPE_I16:
-          return write_str(w, "int16_t");
+          return write_str(w, "i16");
         case TICK_TYPE_I32:
-          return write_str(w, "int32_t");
+          return write_str(w, "i32");
         case TICK_TYPE_I64:
-          return write_str(w, "int64_t");
+          return write_str(w, "i64");
         case TICK_TYPE_ISZ:
-          return write_str(w, "ptrdiff_t");
+          return write_str(w, "isz");
         case TICK_TYPE_U8:
-          return write_str(w, "uint8_t");
+          return write_str(w, "u8");
         case TICK_TYPE_U16:
-          return write_str(w, "uint16_t");
+          return write_str(w, "u16");
         case TICK_TYPE_U32:
-          return write_str(w, "uint32_t");
+          return write_str(w, "u32");
         case TICK_TYPE_U64:
-          return write_str(w, "uint64_t");
+          return write_str(w, "u64");
         case TICK_TYPE_USZ:
-          return write_str(w, "size_t");
+          return write_str(w, "usz");
         case TICK_TYPE_BOOL:
           return write_str(w, "bool");
         case TICK_TYPE_VOID:
@@ -781,6 +783,19 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
       return write_str(w, ")");
     }
 
+    case TICK_AST_TYPE_SLICE: {
+      // Emit slice as generic tick_slice_t type
+      // Type safety maintained by casting ptr to correct type at use site
+      CHECK_OK(write_str(w, "tick_slice_t"));
+      return TICK_OK;
+    }
+
+    case TICK_AST_TYPE_OPTIONAL:
+      CHECK(0, "TICK_AST_TYPE_OPTIONAL should be lowered before codegen");
+
+    case TICK_AST_TYPE_ERROR_UNION:
+      CHECK(0, "TICK_AST_TYPE_ERROR_UNION should be lowered before codegen");
+
     default:
       CHECK(0, "unhandled type kind");
   }
@@ -802,6 +817,52 @@ static tick_err_t codegen_literal(tick_ast_node_t* node, codegen_ctx_t* ctx) {
     case TICK_LIT_INT:
       return write_fmt(ctx->writer, "%lld",
                        (long long)node->literal.data.int_value);
+
+    case TICK_LIT_STRING: {
+      // Emit string literal as C string literal (arrays, not slices)
+      // String literals are now [N]u8 arrays, not []u8 slices
+      tick_buf_t str = node->literal.data.string_value;
+      usz str_len = str.sz;
+
+      // Emit just the string (no cast needed for array initialization)
+      CHECK_OK(write_str(ctx->writer, "\""));
+
+      // Emit escaped string
+      for (usz i = 0; i < str_len; i++) {
+        char c = str.buf[i];
+        switch (c) {
+          case '\n':
+            CHECK_OK(write_str(ctx->writer, "\\n"));
+            break;
+          case '\r':
+            CHECK_OK(write_str(ctx->writer, "\\r"));
+            break;
+          case '\t':
+            CHECK_OK(write_str(ctx->writer, "\\t"));
+            break;
+          case '\\':
+            CHECK_OK(write_str(ctx->writer, "\\\\"));
+            break;
+          case '"':
+            CHECK_OK(write_str(ctx->writer, "\\\""));
+            break;
+          case '\0':
+            CHECK_OK(write_str(ctx->writer, "\\0"));
+            break;
+          default:
+            if (c >= 32 && c <= 126) {
+              CHECK_OK(write_fmt(ctx->writer, "%c", c));
+            } else {
+              CHECK_OK(write_fmt(ctx->writer, "\\x%02x", (unsigned char)c));
+            }
+            break;
+        }
+      }
+
+      CHECK_OK(write_str(ctx->writer, "\""));
+      return TICK_OK;
+    }
+
     default:
       CHECK(0, "unhandled literal kind");
   }
@@ -895,6 +956,36 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
     return TICK_OK;
   }
 
+  // Special handling for address-of slice/array index: emit pointer without
+  // dereference
+  if (node->unary_expr.op == UNOP_ADDR &&
+      node->unary_expr.operand->kind == TICK_AST_INDEX_EXPR) {
+    tick_ast_node_t* index_node = node->unary_expr.operand;
+
+    if (index_node->index_expr.is_slice_index) {
+      // Address of slice element: (T*)tick_slice_index_ptr(slice, index,
+      // sizeof(T))
+      CHECK(index_node->index_expr.resolved_type,
+            "slice index must have resolved element type");
+
+      CHECK_OK(write_str(ctx->writer, "("));
+      CHECK_OK(codegen_type(index_node->index_expr.resolved_type, ctx->writer));
+      CHECK_OK(write_str(ctx->writer, "*)tick_slice_index_ptr("));
+      CHECK_OK(codegen_expr(index_node->index_expr.array, ctx));
+      CHECK_OK(write_str(ctx->writer, ", "));
+      CHECK_OK(codegen_expr(index_node->index_expr.index, ctx));
+      CHECK_OK(write_str(ctx->writer, ", sizeof("));
+      CHECK_OK(codegen_type(index_node->index_expr.resolved_type, ctx->writer));
+      CHECK_OK(write_str(ctx->writer, "))"));
+      return TICK_OK;
+    } else {
+      // Address of array element: &array[index]
+      CHECK_OK(write_str(ctx->writer, "&"));
+      CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
+      return TICK_OK;
+    }
+  }
+
   // Direct C operator
   CHECK_OK(write_str(ctx->writer, unop_to_c(node->unary_expr.op)));
   CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
@@ -949,6 +1040,27 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
 static tick_err_t codegen_field_access(tick_ast_node_t* node,
                                        codegen_ctx_t* ctx) {
+  tick_buf_t field_name = node->field_access_expr.field_name;
+  tick_ast_node_t* resolved_type = node->field_access_expr.resolved_type;
+
+  // Special handling for slice.ptr - needs cast from void* to T*
+  // We detect this by checking if the resolved type is a pointer and field is
+  // "ptr"
+  if (resolved_type && resolved_type->kind == TICK_AST_TYPE_POINTER &&
+      field_name.sz == 3 && memcmp(field_name.buf, "ptr", 3) == 0) {
+    // Emit: (T*)slice.ptr
+    CHECK_OK(write_str(ctx->writer, "("));
+    CHECK_OK(codegen_type(resolved_type, ctx->writer));
+    CHECK_OK(write_str(ctx->writer, ")("));
+    CHECK_OK(codegen_expr(node->field_access_expr.object, ctx));
+    const char* op = node->field_access_expr.object_is_pointer ? "->" : ".";
+    CHECK_OK(write_str(ctx->writer, op));
+    CHECK_OK(write_ident(ctx->writer, field_name));
+    CHECK_OK(write_str(ctx->writer, ")"));
+    return TICK_OK;
+  }
+
+  // Regular field access
   CHECK_OK(write_str(ctx->writer, "("));
   CHECK_OK(codegen_expr(node->field_access_expr.object, ctx));
   CHECK_OK(write_str(ctx->writer, ")"));
@@ -961,12 +1073,118 @@ static tick_err_t codegen_field_access(tick_ast_node_t* node,
 
 static tick_err_t codegen_index_expr(tick_ast_node_t* node,
                                      codegen_ctx_t* ctx) {
-  CHECK_OK(write_str(ctx->writer, "("));
-  CHECK_OK(codegen_expr(node->index_expr.array, ctx));
-  CHECK_OK(write_str(ctx->writer, ")"));
-  CHECK_OK(write_str(ctx->writer, "["));
-  CHECK_OK(codegen_expr(node->index_expr.index, ctx));
-  CHECK_OK(write_str(ctx->writer, "]"));
+  // Check if this is a slice index (needs bounds checking + cast)
+  if (node->index_expr.is_slice_index) {
+    // Emit slice indexing using tick_slice_index_ptr helper
+    // Pattern: *(T*)tick_slice_index_ptr(slice, index, sizeof(T))
+    CHECK(node->index_expr.resolved_type,
+          "slice index must have resolved element type");
+
+    // Dereference the returned pointer
+    CHECK_OK(write_str(ctx->writer, "*("));
+
+    // Cast to element type pointer
+    CHECK_OK(codegen_type(node->index_expr.resolved_type, ctx->writer));
+    CHECK_OK(write_str(ctx->writer, "*)tick_slice_index_ptr("));
+
+    // Emit slice argument
+    CHECK_OK(codegen_expr(node->index_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ", "));
+
+    // Emit index argument
+    CHECK_OK(codegen_expr(node->index_expr.index, ctx));
+    CHECK_OK(write_str(ctx->writer, ", "));
+
+    // Emit element size
+    CHECK_OK(write_str(ctx->writer, "sizeof("));
+    CHECK_OK(codegen_type(node->index_expr.resolved_type, ctx->writer));
+    CHECK_OK(write_str(ctx->writer, "))"));
+  } else {
+    // Regular array/pointer indexing
+    CHECK_OK(write_str(ctx->writer, "("));
+    CHECK_OK(codegen_expr(node->index_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ")"));
+    CHECK_OK(write_str(ctx->writer, "["));
+    CHECK_OK(codegen_expr(node->index_expr.index, ctx));
+    CHECK_OK(write_str(ctx->writer, "]"));
+  }
+  return TICK_OK;
+}
+
+static tick_err_t codegen_slice_expr(tick_ast_node_t* node,
+                                     codegen_ctx_t* ctx) {
+  // Emit slice expression using runtime helper functions
+  // Replaces statement expressions with tick_slice_from_* functions
+
+  CHECK(node->slice_expr.resolved_type, "slice expr must have resolved type");
+  CHECK(node->slice_expr.resolved_type->kind == TICK_AST_TYPE_SLICE,
+        "slice expr resolved_type must be SLICE");
+
+  // Get element type for sizeof()
+  tick_ast_node_t* elem_type =
+      node->slice_expr.resolved_type->type_array.element_type;
+  CHECK(elem_type, "slice must have element type");
+
+  // Dispatch based on source kind (set by analysis pass)
+  if (node->slice_expr.source_kind == TICK_SLICE_SOURCE_ARRAY) {
+    // Slicing an array: tick_slice_from_array(arr, arr_len, start, end,
+    // elem_size)
+    CHECK_OK(write_str(ctx->writer, "tick_slice_from_array("));
+    CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ", sizeof("));
+    CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ")/sizeof(("));
+    CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ")[0]), "));
+  } else if (node->slice_expr.source_kind == TICK_SLICE_SOURCE_SLICE) {
+    // Re-slicing: tick_slice_from_slice(src, start, end, elem_size)
+    CHECK_OK(write_str(ctx->writer, "tick_slice_from_slice("));
+    CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ", "));
+  } else if (node->slice_expr.source_kind == TICK_SLICE_SOURCE_POINTER) {
+    // Slicing a pointer: tick_slice_from_ptr(ptr, start, end, elem_size)
+    CHECK_OK(write_str(ctx->writer, "tick_slice_from_ptr("));
+    CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+    CHECK_OK(write_str(ctx->writer, ", "));
+  } else {
+    CHECK(false, "slice source_kind must be set by analysis pass");
+  }
+
+  // Emit start index (0 if omitted)
+  if (node->slice_expr.start) {
+    CHECK_OK(codegen_expr(node->slice_expr.start, ctx));
+  } else {
+    CHECK_OK(write_str(ctx->writer, "0"));
+  }
+  CHECK_OK(write_str(ctx->writer, ", "));
+
+  // Emit end index (length if omitted)
+  if (node->slice_expr.end) {
+    CHECK_OK(codegen_expr(node->slice_expr.end, ctx));
+  } else {
+    // For arrays, use sizeof; for slices, use .len; for pointers, must be
+    // explicit
+    if (node->slice_expr.source_kind == TICK_SLICE_SOURCE_ARRAY) {
+      CHECK_OK(write_str(ctx->writer, "sizeof("));
+      CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+      CHECK_OK(write_str(ctx->writer, ")/sizeof(("));
+      CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+      CHECK_OK(write_str(ctx->writer, ")[0])"));
+    } else if (node->slice_expr.source_kind == TICK_SLICE_SOURCE_SLICE) {
+      CHECK_OK(write_str(ctx->writer, "("));
+      CHECK_OK(codegen_expr(node->slice_expr.array, ctx));
+      CHECK_OK(write_str(ctx->writer, ").len"));
+    } else {
+      CHECK(false, "pointer slicing requires explicit end index");
+    }
+  }
+  CHECK_OK(write_str(ctx->writer, ", "));
+
+  // Emit element size
+  CHECK_OK(write_str(ctx->writer, "sizeof("));
+  CHECK_OK(codegen_type(elem_type, ctx->writer));
+  CHECK_OK(write_str(ctx->writer, "))"));
+
   return TICK_OK;
 }
 
@@ -1794,6 +2012,8 @@ static tick_err_t codegen_expr(tick_ast_node_t* expr, codegen_ctx_t* ctx) {
       return codegen_field_access(expr, ctx);
     case TICK_AST_INDEX_EXPR:
       return codegen_index_expr(expr, ctx);
+    case TICK_AST_SLICE_EXPR:
+      return codegen_slice_expr(expr, ctx);
     case TICK_AST_CAST_EXPR:
       return codegen_cast_expr(expr, ctx);
     case TICK_AST_ENUM_VALUE:

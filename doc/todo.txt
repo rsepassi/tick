@@ -1,6 +1,13 @@
+- codegen: null pointer check
+- codegen: alignment check
 - codegen: erase arrays to pointers
+- codegen: signed bitwise ops cast to unsigned
+- analysis: uninitialized memory
+- analysis: all paths return
+- analysis: struct/union comparison field by field
 - test
 - build
+- fmt
 - feature: methods
 - feature: switch union, enum
 - feature: for array, slice, optional

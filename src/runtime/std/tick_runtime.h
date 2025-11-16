@@ -30,6 +30,13 @@ typedef struct {
   usz len;
 } tick_str_t;
 
+// Generic slice type (for all slice types []T)
+// Uses void* for type-erased pointer, cast to correct type at use site
+typedef struct {
+  void* ptr;
+  usz len;
+} tick_slice_t;
+
 // ============================================================================
 // Runtime Functions (platform-defined)
 // ============================================================================
@@ -1451,6 +1458,65 @@ static inline isz tick_checked_cast_usz_isz(usz val) {
   if (val > (usz)PTRDIFF_MAX)
     tick_panic("cast out of range: %zu > %td", val, PTRDIFF_MAX);
   return (isz)val;
+}
+
+// ============================================================================
+// Bounds Checking (Arrays and Slices)
+// ============================================================================
+// Panics on: index out of bounds
+
+static inline void tick_index_check_bounds(usz index, usz len) {
+  if (index >= len) {
+    tick_panic("index out of bounds: %zu >= %zu", index, len);
+  }
+}
+
+static inline void tick_slice_check_bounds(usz start, usz end, usz len) {
+  if (start > end) {
+    tick_panic("slice start > end: %zu > %zu", start, end);
+  }
+  if (end > len) {
+    tick_panic("slice end out of bounds: %zu > %zu", end, len);
+  }
+}
+
+// ============================================================================
+// Slice Operations
+// ============================================================================
+
+// Create a slice from an array with bounds checking
+// elem_size is used for portable pointer arithmetic
+static inline tick_slice_t tick_slice_from_array(void* arr, usz arr_len,
+                                                 usz start, usz end,
+                                                 usz elem_size) {
+  tick_slice_check_bounds(start, end, arr_len);
+  return (tick_slice_t){.ptr = (char*)arr + start * elem_size,
+                        .len = end - start};
+}
+
+// Create a slice from another slice (re-slicing) with bounds checking
+static inline tick_slice_t tick_slice_from_slice(tick_slice_t src, usz start,
+                                                 usz end, usz elem_size) {
+  tick_slice_check_bounds(start, end, src.len);
+  return (tick_slice_t){.ptr = (char*)src.ptr + start * elem_size,
+                        .len = end - start};
+}
+
+// Create a slice from a pointer with explicit bounds
+// Used when slicing raw pointers where length must be specified
+static inline tick_slice_t tick_slice_from_ptr(void* ptr, usz start, usz end,
+                                               usz elem_size) {
+  tick_slice_check_bounds(start, end, end);  // end is the max valid index
+  return (tick_slice_t){.ptr = (char*)ptr + start * elem_size,
+                        .len = end - start};
+}
+
+// Get pointer to slice element with bounds checking
+// Returns void* which codegen will cast to the appropriate type
+static inline void* tick_slice_index_ptr(tick_slice_t slice, usz index,
+                                         usz elem_size) {
+  tick_index_check_bounds(index, slice.len);
+  return (char*)slice.ptr + index * elem_size;
 }
 
 #endif  // TICK_RUNTIME_H_

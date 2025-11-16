@@ -875,7 +875,43 @@ expr(E) ::= expr(Operand) DOT_QUESTION(T). {
 expr(E) ::= expr(Arr) LBRACKET(T) expr(Idx) RBRACKET. {
     PLOG("Parsing array index");
     E = ast_alloc(parse, TICK_AST_INDEX_EXPR, T.line, T.col);
-    E->index_expr.array = Arr; E->index_expr.index = Idx;
+    E->index_expr.array = Arr;
+    E->index_expr.index = Idx;
+    E->index_expr.resolved_type = NULL;
+    E->index_expr.is_slice_index = false;
+}
+
+// Slice expressions: arr[start:end], arr[:end], arr[start:], arr[:]
+expr(E) ::= expr(Arr) LBRACKET(T) expr(Start) COLON expr(End) RBRACKET. {
+    PLOG("Parsing slice with start and end");
+    E = ast_alloc(parse, TICK_AST_SLICE_EXPR, T.line, T.col);
+    E->slice_expr.array = Arr;
+    E->slice_expr.start = Start;
+    E->slice_expr.end = End;
+}
+
+expr(E) ::= expr(Arr) LBRACKET(T) COLON expr(End) RBRACKET. {
+    PLOG("Parsing slice with end only");
+    E = ast_alloc(parse, TICK_AST_SLICE_EXPR, T.line, T.col);
+    E->slice_expr.array = Arr;
+    E->slice_expr.start = NULL;
+    E->slice_expr.end = End;
+}
+
+expr(E) ::= expr(Arr) LBRACKET(T) expr(Start) COLON RBRACKET. {
+    PLOG("Parsing slice with start only");
+    E = ast_alloc(parse, TICK_AST_SLICE_EXPR, T.line, T.col);
+    E->slice_expr.array = Arr;
+    E->slice_expr.start = Start;
+    E->slice_expr.end = NULL;
+}
+
+expr(E) ::= expr(Arr) LBRACKET(T) COLON RBRACKET. {
+    PLOG("Parsing full slice");
+    E = ast_alloc(parse, TICK_AST_SLICE_EXPR, T.line, T.col);
+    E->slice_expr.array = Arr;
+    E->slice_expr.start = NULL;
+    E->slice_expr.end = NULL;
 }
 
 // Struct literal: Point@{ field: value, ... }

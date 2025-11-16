@@ -615,6 +615,181 @@ tick_writer_t tick_file_writer(FILE* f) {
 // AST Helper Functions (Canonical Query API)
 // ============================================================================
 
+// Convert builtin type to string (for logging and error messages)
+const char* tick_builtin_type_str(tick_builtin_type_t type) {
+  switch (type) {
+    case TICK_TYPE_UNKNOWN:
+      return "UNKNOWN";
+    case TICK_TYPE_I8:
+      return "i8";
+    case TICK_TYPE_I16:
+      return "i16";
+    case TICK_TYPE_I32:
+      return "i32";
+    case TICK_TYPE_I64:
+      return "i64";
+    case TICK_TYPE_ISZ:
+      return "isz";
+    case TICK_TYPE_U8:
+      return "u8";
+    case TICK_TYPE_U16:
+      return "u16";
+    case TICK_TYPE_U32:
+      return "u32";
+    case TICK_TYPE_U64:
+      return "u64";
+    case TICK_TYPE_USZ:
+      return "usz";
+    case TICK_TYPE_BOOL:
+      return "bool";
+    case TICK_TYPE_VOID:
+      return "void";
+    case TICK_TYPE_USER_DEFINED:
+      return "USER_DEFINED";
+    default:
+      return "<?>";
+  }
+}
+
+// Convert type node to string for logging and error messages
+const char* tick_type_str(tick_ast_node_t* type) {
+  if (!type) return "null";
+  switch (type->kind) {
+    case TICK_AST_TYPE_NAMED:
+      return tick_builtin_type_str(type->type_named.builtin_type);
+    case TICK_AST_TYPE_POINTER:
+      return "pointer";
+    case TICK_AST_TYPE_ARRAY:
+      return "array";
+    case TICK_AST_TYPE_FUNCTION:
+      return "function";
+    case TICK_AST_TYPE_OPTIONAL:
+      return "optional";
+    case TICK_AST_TYPE_ERROR_UNION:
+      return "error_union";
+    default:
+      return "?";
+  }
+}
+
+// Convert binary operator to string
+const char* tick_binop_str(tick_binop_t op) {
+  switch (op) {
+    case BINOP_ADD:
+      return "+";
+    case BINOP_SUB:
+      return "-";
+    case BINOP_MUL:
+      return "*";
+    case BINOP_DIV:
+      return "/";
+    case BINOP_MOD:
+      return "%";
+    case BINOP_EQ:
+      return "==";
+    case BINOP_NE:
+      return "!=";
+    case BINOP_LT:
+      return "<";
+    case BINOP_GT:
+      return ">";
+    case BINOP_LE:
+      return "<=";
+    case BINOP_GE:
+      return ">=";
+    case BINOP_AND:
+      return "&";
+    case BINOP_OR:
+      return "|";
+    case BINOP_XOR:
+      return "^";
+    case BINOP_LSHIFT:
+      return "<<";
+    case BINOP_RSHIFT:
+      return ">>";
+    case BINOP_LOGICAL_AND:
+      return "&&";
+    case BINOP_LOGICAL_OR:
+      return "||";
+    case BINOP_SAT_ADD:
+      return "+|";
+    case BINOP_SAT_SUB:
+      return "-|";
+    case BINOP_SAT_MUL:
+      return "*|";
+    case BINOP_SAT_DIV:
+      return "/|";
+    case BINOP_WRAP_ADD:
+      return "+%";
+    case BINOP_WRAP_SUB:
+      return "-%";
+    case BINOP_WRAP_MUL:
+      return "*%";
+    case BINOP_WRAP_DIV:
+      return "/%";
+    case BINOP_ORELSE:
+      return "orelse";
+    default:
+      return "<?>";
+  }
+}
+
+// Convert unary operator to string
+const char* tick_unop_str(tick_unop_t op) {
+  switch (op) {
+    case UNOP_NEG:
+      return "-";
+    case UNOP_NOT:
+      return "!";
+    case UNOP_BIT_NOT:
+      return "~";
+    case UNOP_ADDR:
+      return "&";
+    case UNOP_DEREF:
+      return "*";
+    default:
+      return "<?>";
+  }
+}
+
+// Convert analysis error to string
+const char* tick_analyze_error_str(tick_analyze_error_t err) {
+  switch (err) {
+    case TICK_ANALYZE_OK:
+      return "OK";
+    case TICK_ANALYZE_ERR:
+      return "ERR";
+    case TICK_ANALYZE_ERR_UNKNOWN_TYPE:
+      return "UNKNOWN_TYPE";
+    case TICK_ANALYZE_ERR_UNKNOWN_SYMBOL:
+      return "UNKNOWN_SYMBOL";
+    case TICK_ANALYZE_ERR_DUPLICATE_NAME:
+      return "DUPLICATE_NAME";
+    case TICK_ANALYZE_ERR_TYPE_MISMATCH:
+      return "TYPE_MISMATCH";
+    case TICK_ANALYZE_ERR_CIRCULAR_DEPENDENCY:
+      return "CIRCULAR_DEPENDENCY";
+    default:
+      return "<?>";
+  }
+}
+
+// Convert analysis state to string
+const char* tick_analysis_state_str(tick_analysis_state_t state) {
+  switch (state) {
+    case TICK_ANALYSIS_STATE_NOT_STARTED:
+      return "NOT_STARTED";
+    case TICK_ANALYSIS_STATE_IN_PROGRESS:
+      return "IN_PROGRESS";
+    case TICK_ANALYSIS_STATE_COMPLETED:
+      return "COMPLETED";
+    case TICK_ANALYSIS_STATE_FAILED:
+      return "FAILED";
+    default:
+      return "<?>";
+  }
+}
+
 // Check if a node was compiler-generated (not from source)
 bool tick_node_is_synthetic(tick_ast_node_t* node) {
   return node && (node->node_flags & TICK_NODE_FLAG_SYNTHETIC);
@@ -662,6 +837,17 @@ bool tick_type_is_named(tick_ast_node_t* type) {
 // Check if a type is a pointer type
 bool tick_type_is_pointer(tick_ast_node_t* type) {
   return type && type->kind == TICK_AST_TYPE_POINTER;
+}
+
+// Check if a type is an array type
+bool tick_type_is_array(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_ARRAY &&
+         type->type_array.size != NULL;
+}
+
+// Check if a type is a slice type
+bool tick_type_is_slice(tick_ast_node_t* type) {
+  return type && type->kind == TICK_AST_TYPE_SLICE;
 }
 
 // Check if a type is a user-defined type (struct/enum/union)
@@ -718,10 +904,14 @@ tick_ast_node_t* tick_type_get_pointee(tick_ast_node_t* type) {
   return type->type_pointer.pointee_type;
 }
 
-// Get the element type from an array type
+// Get the element type from an array or slice type
 tick_ast_node_t* tick_type_get_element(tick_ast_node_t* type) {
-  if (!type || type->kind != TICK_AST_TYPE_ARRAY) return NULL;
-  return type->type_array.element_type;
+  if (!type) return NULL;
+  if (type->kind == TICK_AST_TYPE_ARRAY || type->kind == TICK_AST_TYPE_SLICE) {
+    return type->type_array
+        .element_type;  // Both array and slice use same field
+  }
+  return NULL;
 }
 
 // Check if two types are structurally equal
@@ -739,6 +929,10 @@ bool tick_types_equal(tick_ast_node_t* t1, tick_ast_node_t* t2) {
                               t2->type_pointer.pointee_type);
 
     case TICK_AST_TYPE_ARRAY:
+      return tick_types_equal(t1->type_array.element_type,
+                              t2->type_array.element_type);
+
+    case TICK_AST_TYPE_SLICE:
       return tick_types_equal(t1->type_array.element_type,
                               t2->type_array.element_type);
 

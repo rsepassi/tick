@@ -44,67 +44,16 @@
 #define ALOG_SECTION(fmt, ...) \
   DLOG("\n[DEBUG]%*s=== " fmt " ===", (ctx->log_depth * 2), "", ##__VA_ARGS__)
 
+#else
+#define ALOG(fmt, ...) (void)(0)
+#define ALOG_ENTER(fmt, ...) (void)(0)
+#define ALOG_EXIT(fmt, ...) (void)(0)
+#define ALOG_SECTION(fmt, ...) (void)(0)
 #endif  // TICK_DEBUG_ANALYZE
 
 // ============================================================================
-// Type to String Helpers (available in all builds for error messages)
+// Analysis Helper Functions
 // ============================================================================
-
-static const char* tick_builtin_type_str(tick_builtin_type_t type) {
-  switch (type) {
-    case TICK_TYPE_UNKNOWN:
-      return "UNKNOWN";
-    case TICK_TYPE_I8:
-      return "i8";
-    case TICK_TYPE_I16:
-      return "i16";
-    case TICK_TYPE_I32:
-      return "i32";
-    case TICK_TYPE_I64:
-      return "i64";
-    case TICK_TYPE_ISZ:
-      return "isz";
-    case TICK_TYPE_U8:
-      return "u8";
-    case TICK_TYPE_U16:
-      return "u16";
-    case TICK_TYPE_U32:
-      return "u32";
-    case TICK_TYPE_U64:
-      return "u64";
-    case TICK_TYPE_USZ:
-      return "usz";
-    case TICK_TYPE_BOOL:
-      return "bool";
-    case TICK_TYPE_VOID:
-      return "void";
-    case TICK_TYPE_USER_DEFINED:
-      return "USER_DEFINED";
-    default:
-      return "<?>";
-  }
-}
-
-// Convert type node to string for logging and error messages
-static const char* tick_type_str(tick_ast_node_t* type) {
-  if (!type) return "null";
-  switch (type->kind) {
-    case TICK_AST_TYPE_NAMED:
-      return tick_builtin_type_str(type->type_named.builtin_type);
-    case TICK_AST_TYPE_POINTER:
-      return "pointer";
-    case TICK_AST_TYPE_ARRAY:
-      return "array";
-    case TICK_AST_TYPE_FUNCTION:
-      return "function";
-    case TICK_AST_TYPE_OPTIONAL:
-      return "optional";
-    case TICK_AST_TYPE_ERROR_UNION:
-      return "error_union";
-    default:
-      return "?";
-  }
-}
 
 // Helper function to map binary operation + type to builtin enum
 // Returns the builtin enum, or 0 if no runtime function needed
@@ -193,134 +142,6 @@ static bool identifier_needs_user_prefix(tick_ast_node_t* identifier) {
   // Default: needs __u_ prefix
   return true;
 }
-
-// ============================================================================
-// Debug-only String Helpers
-// ============================================================================
-
-#ifdef TICK_DEBUG_ANALYZE
-
-static const char* tick_binop_str(tick_binop_t op) {
-  switch (op) {
-    case BINOP_ADD:
-      return "+";
-    case BINOP_SUB:
-      return "-";
-    case BINOP_MUL:
-      return "*";
-    case BINOP_DIV:
-      return "/";
-    case BINOP_MOD:
-      return "%";
-    case BINOP_EQ:
-      return "==";
-    case BINOP_NE:
-      return "!=";
-    case BINOP_LT:
-      return "<";
-    case BINOP_GT:
-      return ">";
-    case BINOP_LE:
-      return "<=";
-    case BINOP_GE:
-      return ">=";
-    case BINOP_AND:
-      return "&";
-    case BINOP_OR:
-      return "|";
-    case BINOP_XOR:
-      return "^";
-    case BINOP_LSHIFT:
-      return "<<";
-    case BINOP_RSHIFT:
-      return ">>";
-    case BINOP_LOGICAL_AND:
-      return "&&";
-    case BINOP_LOGICAL_OR:
-      return "||";
-    case BINOP_SAT_ADD:
-      return "+|";
-    case BINOP_SAT_SUB:
-      return "-|";
-    case BINOP_SAT_MUL:
-      return "*|";
-    case BINOP_SAT_DIV:
-      return "/|";
-    case BINOP_WRAP_ADD:
-      return "+%";
-    case BINOP_WRAP_SUB:
-      return "-%";
-    case BINOP_WRAP_MUL:
-      return "*%";
-    case BINOP_WRAP_DIV:
-      return "/%";
-    case BINOP_ORELSE:
-      return "orelse";
-    default:
-      return "<?>";
-  }
-}
-
-static const char* tick_unop_str(tick_unop_t op) {
-  switch (op) {
-    case UNOP_NEG:
-      return "-";
-    case UNOP_NOT:
-      return "!";
-    case UNOP_BIT_NOT:
-      return "~";
-    case UNOP_ADDR:
-      return "&";
-    case UNOP_DEREF:
-      return "*";
-    default:
-      return "<?>";
-  }
-}
-
-static const char* tick_analyze_error_str(tick_analyze_error_t err) {
-  switch (err) {
-    case TICK_ANALYZE_OK:
-      return "OK";
-    case TICK_ANALYZE_ERR:
-      return "ERR";
-    case TICK_ANALYZE_ERR_UNKNOWN_TYPE:
-      return "UNKNOWN_TYPE";
-    case TICK_ANALYZE_ERR_UNKNOWN_SYMBOL:
-      return "UNKNOWN_SYMBOL";
-    case TICK_ANALYZE_ERR_DUPLICATE_NAME:
-      return "DUPLICATE_NAME";
-    case TICK_ANALYZE_ERR_TYPE_MISMATCH:
-      return "TYPE_MISMATCH";
-    case TICK_ANALYZE_ERR_CIRCULAR_DEPENDENCY:
-      return "CIRCULAR_DEPENDENCY";
-    default:
-      return "<?>";
-  }
-}
-
-__attribute__((unused)) static const char* tick_analysis_state_str(
-    tick_analysis_state_t state) {
-  switch (state) {
-    case TICK_ANALYSIS_STATE_NOT_STARTED:
-      return "NOT_STARTED";
-    case TICK_ANALYSIS_STATE_IN_PROGRESS:
-      return "IN_PROGRESS";
-    case TICK_ANALYSIS_STATE_COMPLETED:
-      return "COMPLETED";
-    case TICK_ANALYSIS_STATE_FAILED:
-      return "FAILED";
-    default:
-      return "<?>";
-  }
-}
-
-#else
-#define ALOG(fmt, ...) (void)(0)
-#define ALOG_ENTER(fmt, ...) (void)(0)
-#define ALOG_EXIT(fmt, ...) (void)(0)
-#define ALOG_SECTION(fmt, ...) (void)(0)
-#endif
 
 // ============================================================================
 // Helper Macros
@@ -934,6 +755,8 @@ static tick_ast_node_t* analyze_call_expr(tick_ast_node_t* expr,
                                           tick_analyze_ctx_t* ctx);
 static tick_ast_node_t* analyze_index_expr(tick_ast_node_t* expr,
                                            tick_analyze_ctx_t* ctx);
+static tick_ast_node_t* analyze_slice_expr(tick_ast_node_t* expr,
+                                           tick_analyze_ctx_t* ctx);
 static tick_ast_node_t* analyze_unwrap_panic_expr(tick_ast_node_t* expr,
                                                   tick_analyze_ctx_t* ctx);
 static tick_ast_node_t* analyze_field_access_expr(tick_ast_node_t* expr,
@@ -1215,6 +1038,8 @@ static tick_ast_node_t* create_index_node(tick_alloc_t alloc,
   node->kind = TICK_AST_INDEX_EXPR;
   node->index_expr.array = array;
   node->index_expr.index = index;
+  node->index_expr.resolved_type = NULL;
+  node->index_expr.is_slice_index = false;
   node->node_flags = TICK_NODE_FLAG_SYNTHETIC;
   node->loc = loc;
   return node;
@@ -1671,6 +1496,11 @@ static tick_analyze_error_t analyze_type(tick_ast_node_t* type_node,
       }
       return analyze_type(type_node->type_array.element_type, ctx);
 
+    case TICK_AST_TYPE_SLICE:
+      // For slice types, just analyze the element type
+      // Lowering will transform []T to struct { T* ptr; usz len; }
+      return analyze_type(type_node->type_array.element_type, ctx);
+
     case TICK_AST_TYPE_FUNCTION: {
       // Analyze return type
       tick_analyze_error_t err =
@@ -1724,6 +1554,9 @@ static tick_ast_node_t* analyze_expr(tick_ast_node_t* expr,
 
     case TICK_AST_INDEX_EXPR:
       return analyze_index_expr(expr, ctx);
+
+    case TICK_AST_SLICE_EXPR:
+      return analyze_slice_expr(expr, ctx);
 
     case TICK_AST_UNWRAP_PANIC_EXPR:
       return analyze_unwrap_panic_expr(expr, ctx);
@@ -1786,16 +1619,29 @@ static tick_ast_node_t* analyze_literal_expr(tick_ast_node_t* expr,
                                              tick_analyze_ctx_t* ctx) {
   // Infer type based on literal kind
   if (expr->literal.kind == TICK_LIT_STRING) {
-    // String literals are *u8 (pointer to u8)
+    // String literals are [_]u8 (inferred-length array of u8)
     tick_ast_node_t* u8_type = alloc_type_node(ctx->alloc, TICK_TYPE_U8);
     if (!u8_type) return NULL;
 
-    // Create pointer type node
-    tick_ast_node_t* ptr_type;
-    ALLOC_AST_NODE(ctx->alloc, ptr_type);
-    ptr_type->kind = TICK_AST_TYPE_POINTER;
-    ptr_type->type_pointer.pointee_type = u8_type;
-    return ptr_type;
+    // Create array size literal with string length
+    usz str_len = expr->literal.data.string_value.sz;
+    tick_ast_node_t* size_lit;
+    ALLOC_AST_NODE(ctx->alloc, size_lit);
+    size_lit->kind = TICK_AST_LITERAL;
+    size_lit->literal.kind = TICK_LIT_UINT;
+    size_lit->literal.data.uint_value = str_len;
+    size_lit->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+    size_lit->loc = expr->loc;
+
+    // Create array type node [N]u8
+    tick_ast_node_t* array_type;
+    ALLOC_AST_NODE(ctx->alloc, array_type);
+    array_type->kind = TICK_AST_TYPE_ARRAY;
+    array_type->type_array.element_type = u8_type;
+    array_type->type_array.size = size_lit;
+    array_type->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+    array_type->loc = expr->loc;
+    return array_type;
   } else if (expr->literal.kind == TICK_LIT_BOOL) {
     // Transform bool literal to uint: true -> 1, false -> 0
     expr->literal.kind = TICK_LIT_UINT;
@@ -2202,10 +2048,15 @@ static tick_ast_node_t* analyze_index_expr(tick_ast_node_t* expr,
     if (array_type->kind == TICK_AST_TYPE_POINTER) {
       // Pointer indexing: *T -> T
       result_type = array_type->type_pointer.pointee_type;
-    } else if (array_type->kind == TICK_AST_TYPE_ARRAY ||
-               array_type->kind == TICK_AST_TYPE_SLICE) {
-      // Array/Slice indexing: [N]T -> T or []T -> T
-      // (SLICE uses type_array with size=NULL)
+    } else if (array_type->kind == TICK_AST_TYPE_SLICE) {
+      // Slice indexing: []T -> T
+      // Mark for special codegen handling (bounds check + ptr cast)
+      result_type = array_type->type_array.element_type;
+      expr->index_expr.is_slice_index = true;
+
+      ALOG("marked as slice index for bounds-checked codegen");
+    } else if (array_type->kind == TICK_AST_TYPE_ARRAY) {
+      // Array indexing: [N]T -> T
       result_type = array_type->type_array.element_type;
     } else {
       ANALYSIS_ERROR(ctx, expr->loc, "cannot index into type %s",
@@ -2215,6 +2066,92 @@ static tick_ast_node_t* analyze_index_expr(tick_ast_node_t* expr,
     }
   }
 
+  expr->index_expr.resolved_type = result_type;
+  ALOG_EXIT("-> %s", tick_type_str(result_type));
+  return result_type;
+}
+
+static tick_ast_node_t* analyze_slice_expr(tick_ast_node_t* expr,
+                                           tick_analyze_ctx_t* ctx) {
+  ALOG_ENTER("slice");
+
+  // Decompose complex array, start, and end expressions
+  DECOMPOSE_FIELD(expr, slice_expr.array);
+  if (expr->slice_expr.start) {
+    DECOMPOSE_FIELD(expr, slice_expr.start);
+  }
+  if (expr->slice_expr.end) {
+    DECOMPOSE_FIELD(expr, slice_expr.end);
+  }
+
+  // Analyze array/pointer/slice expression
+  tick_ast_node_t* array_type = analyze_expr(expr->slice_expr.array, ctx);
+
+  // Analyze start expression (if present)
+  tick_ast_node_t* start_type = NULL;
+  if (expr->slice_expr.start) {
+    start_type = analyze_expr(expr->slice_expr.start, ctx);
+    if (start_type && !tick_type_is_numeric(start_type)) {
+      ANALYSIS_ERROR(ctx, expr->loc, "slice start must be numeric, got %s",
+                     tick_type_str(start_type));
+      ALOG_EXIT("FAILED");
+      return NULL;
+    }
+  }
+
+  // Analyze end expression (if present)
+  tick_ast_node_t* end_type = NULL;
+  if (expr->slice_expr.end) {
+    end_type = analyze_expr(expr->slice_expr.end, ctx);
+    if (end_type && !tick_type_is_numeric(end_type)) {
+      ANALYSIS_ERROR(ctx, expr->loc, "slice end must be numeric, got %s",
+                     tick_type_str(end_type));
+      ALOG_EXIT("FAILED");
+      return NULL;
+    }
+  }
+
+  // Validate operand type and determine element type
+  tick_ast_node_t* elem_type = NULL;
+  if (array_type) {
+    if (array_type->kind == TICK_AST_TYPE_POINTER) {
+      // Pointer slicing: both start and end must be provided
+      if (!expr->slice_expr.start || !expr->slice_expr.end) {
+        ANALYSIS_ERROR(ctx, expr->loc,
+                       "slicing a pointer requires both start and end bounds");
+        ALOG_EXIT("FAILED");
+        return NULL;
+      }
+      elem_type = array_type->type_pointer.pointee_type;
+      expr->slice_expr.source_kind = TICK_SLICE_SOURCE_POINTER;
+    } else if (array_type->kind == TICK_AST_TYPE_ARRAY) {
+      // Array slicing: get element type
+      elem_type = array_type->type_array.element_type;
+      expr->slice_expr.source_kind = TICK_SLICE_SOURCE_ARRAY;
+    } else if (array_type->kind == TICK_AST_TYPE_SLICE) {
+      // Slice slicing (re-slicing): get element type
+      elem_type = array_type->type_array.element_type;
+      expr->slice_expr.source_kind = TICK_SLICE_SOURCE_SLICE;
+    } else {
+      ANALYSIS_ERROR(ctx, expr->loc, "cannot slice type %s",
+                     tick_type_str(array_type));
+      ALOG_EXIT("FAILED");
+      return NULL;
+    }
+  }
+
+  // Create slice type []T
+  tick_ast_node_t* result_type = NULL;
+  if (elem_type) {
+    ALLOC_AST_NODE(ctx->alloc, result_type);
+    result_type->kind = TICK_AST_TYPE_SLICE;
+    result_type->type_array.element_type = elem_type;
+    result_type->type_array.size = NULL;  // Slices have no size
+    result_type->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+    result_type->loc = expr->loc;
+  }
+
+  expr->slice_expr.resolved_type = result_type;
   ALOG_EXIT("-> %s", tick_type_str(result_type));
   return result_type;
 }
@@ -2313,6 +2250,39 @@ static tick_ast_node_t* analyze_field_access_expr(tick_ast_node_t* expr,
     ALOG_EXIT("FAILED: null base type");
     expr->field_access_expr.resolved_type = NULL;
     return NULL;
+  }
+
+  // Handle slice field access specially (slices are struct { T* ptr; usz len;
+  // })
+  if (base_type->kind == TICK_AST_TYPE_SLICE) {
+    tick_buf_t field_name = expr->field_access_expr.field_name;
+    // Only allow .ptr and .len fields
+    if (field_name.sz == 3 && memcmp(field_name.buf, "ptr", 3) == 0) {
+      // .ptr returns *T
+      tick_ast_node_t* ptr_type;
+      ALLOC_AST_NODE(ctx->alloc, ptr_type);
+      ptr_type->kind = TICK_AST_TYPE_POINTER;
+      ptr_type->type_pointer.pointee_type = base_type->type_array.element_type;
+      ptr_type->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+      ptr_type->loc = expr->loc;
+      result_type = ptr_type;
+      expr->field_access_expr.resolved_type = result_type;
+      ALOG_EXIT("-> %s (slice.ptr)", tick_type_str(result_type));
+      return result_type;
+    } else if (field_name.sz == 3 && memcmp(field_name.buf, "len", 3) == 0) {
+      // .len returns usz
+      result_type = alloc_type_node(ctx->alloc, TICK_TYPE_USZ);
+      expr->field_access_expr.resolved_type = result_type;
+      ALOG_EXIT("-> usz (slice.len)");
+      return result_type;
+    } else {
+      ANALYSIS_ERROR(ctx, expr->loc,
+                     "slice only has 'ptr' and 'len' fields, got '%.*s'",
+                     (int)field_name.sz, field_name.buf);
+      ALOG_EXIT("FAILED: invalid slice field");
+      expr->field_access_expr.resolved_type = NULL;
+      return NULL;
+    }
   }
 
   // Base type must be a named user-defined type (struct/union/enum)
