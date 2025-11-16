@@ -41,7 +41,7 @@ mkdir -p "$OUTPUT_DIR"
 "$CC" -std=c11 -Wpedantic \
     -Wall -Wextra -Werror -Wvla \
     -g3 -O1 -fno-omit-frame-pointer \
-    -ffreestanding \
+    -ffreestanding -fwrapv -fno-strict-aliasing \
     -I "$INTERMEDIATE_DIR" \
     -o "$INTERMEDIATE_DIR/$BASENAME.o" \
     -c "$INTERMEDIATE_DIR/$BASENAME.c"
