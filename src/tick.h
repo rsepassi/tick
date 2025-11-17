@@ -1,3 +1,6 @@
+#ifndef TICK_H
+#define TICK_H
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -74,7 +77,6 @@ typedef enum {
   TICK_ANALYZE_ERR_UNKNOWN_SYMBOL,
   TICK_ANALYZE_ERR_DUPLICATE_NAME,
   TICK_ANALYZE_ERR_TYPE_MISMATCH,
-  TICK_ANALYZE_ERR_CIRCULAR_DEPENDENCY,
 } tick_analyze_error_t;
 
 typedef enum {
@@ -507,12 +509,6 @@ typedef struct {
 //    - Validated: alignment values are powers of 2
 //    - Validated: alignment values are within target limits
 //
-// 5. Circular dependency detection:
-//    - Circular value-embedding detected and reported as error:
-//      * struct A { b: B }; struct B { a: A };  → ERROR
-//    - Circular pointer references allowed (forward decl resolves):
-//      * struct A { b: *B }; struct B { a: *A };  → OK
-//
 // ANALYSIS MUST TRANSFORM:
 // 1. Auto-tagged unions:
 //    - union { x: i32, y: u64 } with tag_type=NULL
@@ -526,7 +522,6 @@ typedef struct {
 // 2. All alignment expressions are LITERAL nodes or NULL
 // 3. Types can be emitted in AST order with forward declarations
 // 4. All unions have explicit tag types (no tag_type=NULL)
-// 5. Type dependencies are valid (no circular value-embedding)
 //
 // ============================================================================
 
@@ -550,7 +545,6 @@ typedef enum {
   TICK_AST_DECL,
   TICK_AST_FUNCTION_DECL,
   TICK_AST_FUNCTION,
-  TICK_AST_PARAM,
   TICK_AST_STRUCT_DECL,
   TICK_AST_ENUM_DECL,
   TICK_AST_UNION_DECL,
@@ -717,9 +711,11 @@ typedef enum {
 
 // AT builtins (@ prefix functions)
 typedef enum {
-  TICK_AT_BUILTIN_UNKNOWN,  // Not yet resolved or invalid
-  TICK_AT_BUILTIN_DBG,      // @dbg - debug log
-  TICK_AT_BUILTIN_PANIC,    // @panic - panic with message
+  TICK_AT_BUILTIN_UNKNOWN,      // Not yet resolved or invalid
+  TICK_AT_BUILTIN_DBG,          // @dbg - debug log
+  TICK_AT_BUILTIN_PANIC,        // @panic - panic with message
+  TICK_AT_BUILTIN_CHECK_DEREF,  // tick_check_deref - null pointer check
+                                // (internal)
 } tick_at_builtin_t;
 
 // ============================================================================
@@ -846,10 +842,12 @@ struct tick_ast_node_s {
       u8 analysis_state;   // tick_analysis_state_t (overall completion state)
       u8 signature_state;  // tick_analysis_state_t (function signature only)
       u8 body_state;       // tick_analysis_state_t (function body only)
-      tick_ast_node_t* next_queued;  // Intrusive linked list for work queue /
-                                     // dependency tracking
+      tick_ast_node_t* next_queued;   // Intrusive linked list for work queue
+      tick_ast_node_t* next_pending;  // Intrusive linked list for pending_deps
       bool in_pending_deps;  // True if currently in pending_deps list (O(1)
                              // duplicate check)
+      bool in_work_queue;    // True if currently in work queue (O(1) duplicate
+                             // check)
     } decl;
     struct {
       tick_ast_node_t* params;
@@ -857,10 +855,6 @@ struct tick_ast_node_s {
       tick_ast_node_t* body;
       tick_qualifier_flags_t quals;
     } function;
-    struct {
-      tick_buf_t name;
-      tick_ast_node_t* type;
-    } param;
     struct {
       tick_ast_node_t* fields;  // Linked list of TICK_AST_FIELD nodes
       bool is_packed;
@@ -921,6 +915,7 @@ struct tick_ast_node_s {
       tick_ast_node_t* resolved_type;  // Filled by analysis pass
       tick_builtin_t
           builtin;  // Filled by analysis pass (semantic operation category)
+      bool needs_null_check;  // True if DEREF op needs null check
     } unary_expr;
     struct {
       tick_ast_node_t* callee;
@@ -935,15 +930,21 @@ struct tick_ast_node_s {
     struct {
       tick_ast_node_t* object;
       tick_buf_t field_name;
-      tick_ast_node_t* resolved_type;  // Filled by analysis pass
+      tick_ast_node_t* resolved_type;  // Filled by analysis pass (field type)
+      tick_ast_node_t*
+          object_type;  // Filled by analysis pass (object type, for casting)
       bool object_is_pointer;  // True if object type is pointer (use ->)
+      bool needs_null_check;   // True if object pointer needs null check
     } field_access_expr;
     struct {
       tick_ast_node_t* array;
       tick_ast_node_t* index;
       tick_ast_node_t* resolved_type;  // Filled by analysis pass (element type)
+      tick_ast_node_t*
+          array_type;       // Filled by analysis pass (array type, for casting)
       bool is_slice_index;  // True if this is indexing into a slice (needs
                             // bounds check + cast)
+      bool needs_null_check;  // True if array pointer needs null check
     } index_expr;
     struct {
       tick_ast_node_t* array;          // Array/pointer/slice to slice
@@ -1196,3 +1197,5 @@ tick_writer_t tick_file_writer(FILE* f);
 tick_err_t tick_codegen(tick_ast_t* ast, const char* source_filename,
                         const char* header_filename, tick_writer_t writer_h,
                         tick_writer_t writer_c);
+
+#endif

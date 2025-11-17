@@ -6,6 +6,11 @@ let ArrayContainer = struct {
   bytes: [8]u8,
 };
 
+let Point = struct {
+  x: i32,
+  y: i32,
+};
+
 pub let test = fn i32 {
   # Test arrays
   @dbg("=== Array Tests ===\n");
@@ -33,7 +38,7 @@ pub let test = fn i32 {
   var arr3: [3]i32 = [7, 8, 9];
   let arr_ptr: *[3]i32 = &arr3;
   @dbg("Array via pointer: [0]=%d [1]=%d [2]=%d\n",
-       (*arr_ptr)[0], (*arr_ptr)[1], (*arr_ptr)[2]);
+       (*(&arr3))[0], (*(&arr3))[1], (*(&arr3))[2]);
 
   # Address-of array element
   var arr4: [5]i32 = [100, 200, 300, 400, 500];
@@ -95,6 +100,32 @@ pub let test = fn i32 {
   # Test slice.ptr field access
   let slice_ptr: *i32 = nums[:].ptr;
   @dbg("Slice ptr access: first=%d\n", *slice_ptr);
+
+  # Test null pointer checks (runtime safety)
+  @dbg("\n=== Null Pointer Check Tests ===\n");
+
+  # Valid pointer dereference (should pass null check)
+  var check_val: i32 = 99;
+  let check_ptr: *i32 = &check_val;
+  @dbg("Valid deref with null check: %d\n", *check_ptr);
+
+  # Valid pointer field access (should pass null check)
+  var check_point: Point = Point @ { x: 55, y: 66 };
+  let check_point_ptr: *Point = &check_point;
+  @dbg("Valid field access with null check: x=%d y=%d\n", check_point_ptr.x, check_point_ptr.y);
+
+  # Valid pointer indexing (should pass null check)
+  var ptr_arr: [3]i32 = [11, 22, 33];
+  let ptr_arr_ptr: *i32 = &ptr_arr[0];
+  @dbg("ptr[0]=%d ptr[1]=%d\n", ptr_arr_ptr[0], ptr_arr_ptr[1]);
+
+  # Test smart checking: address-of operations skip null check
+  # These should compile to direct dereferences without tick_check_deref()
+  var smart_val: i32 = 777;
+  @dbg("Smart check (address-of deref): %d\n", *(&smart_val));
+
+  var smart_point: Point = Point @ { x: 88, y: 99 };
+  @dbg("Smart check (address-of field): x=%d\n", (&smart_point).x);
 
   @dbg("\n=== All Array and Slice Tests Passed ===\n");
   return 0;

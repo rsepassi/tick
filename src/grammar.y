@@ -332,8 +332,12 @@ param_list(L) ::= param_list(Head) COMMA. { L = Head; }  // Trailing comma
 
 // Parameter
 param(P) ::= name(Name) COLON type(T). {
-    P = ast_alloc(parse, TICK_AST_PARAM, Name.line, Name.col);
-    P->param.name = Name.text; P->param.type = T;
+    P = ast_alloc(parse, TICK_AST_DECL, Name.line, Name.col);
+    P->decl.name = Name.text;
+    P->decl.type = T;
+    P->decl.init = NULL;
+    P->decl.quals = (tick_qualifier_flags_t){0};
+    P->decl.tmpid = 0;
 }
 
 // Types
@@ -444,14 +448,20 @@ fn_type_param_list(L) ::= fn_type_param_list(Head) COMMA. { L = Head; }  // Trai
 
 // Function type parameter - can be "name: type" or just "type"
 fn_type_param(P) ::= name(Name) COLON type(T). {
-    P = ast_alloc(parse, TICK_AST_PARAM, Name.line, Name.col);
-    P->param.name = Name.text;
-    P->param.type = T;
+    P = ast_alloc(parse, TICK_AST_DECL, Name.line, Name.col);
+    P->decl.name = Name.text;
+    P->decl.type = T;
+    P->decl.init = NULL;
+    P->decl.quals = (tick_qualifier_flags_t){0};
+    P->decl.tmpid = 0;
 }
 fn_type_param(P) ::= type(T). {
-    P = ast_alloc(parse, TICK_AST_PARAM, T->loc.line, T->loc.col);
-    P->param.name = (tick_buf_t){.buf = NULL, .sz = 0};  // No name
-    P->param.type = T;
+    P = ast_alloc(parse, TICK_AST_DECL, T->loc.line, T->loc.col);
+    P->decl.name = (tick_buf_t){.buf = NULL, .sz = 0};  // No name
+    P->decl.type = T;
+    P->decl.init = NULL;
+    P->decl.quals = (tick_qualifier_flags_t){0};
+    P->decl.tmpid = 0;
 }
 
 // Statements

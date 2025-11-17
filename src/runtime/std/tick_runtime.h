@@ -1481,6 +1481,18 @@ static inline void tick_slice_check_bounds(usz start, usz end, usz len) {
 }
 
 // ============================================================================
+// Null Pointer Checking
+// ============================================================================
+// Panics on: null pointer dereference
+
+static inline void* tick_check_deref(void* ptr) {
+  if (ptr == NULL) {
+    tick_panic("null pointer dereference");
+  }
+  return ptr;
+}
+
+// ============================================================================
 // Slice Operations
 // ============================================================================
 

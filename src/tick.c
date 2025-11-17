@@ -767,8 +767,6 @@ const char* tick_analyze_error_str(tick_analyze_error_t err) {
       return "DUPLICATE_NAME";
     case TICK_ANALYZE_ERR_TYPE_MISMATCH:
       return "TYPE_MISMATCH";
-    case TICK_ANALYZE_ERR_CIRCULAR_DEPENDENCY:
-      return "CIRCULAR_DEPENDENCY";
     default:
       return "<?>";
   }

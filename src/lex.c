@@ -460,26 +460,35 @@ static char parse_escape_sequence(tick_lex_t* lex) {
 static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start,
                         usz token_line, usz token_col) {
   UNUSED(start);
-  // Build the string with escape sequences processed
-  tick_buf_t str_buf = {0};
-  usz capacity = 64;
-  usz length = 0;
 
+  // Pre-scan to find closing quote and calculate maximum length
+  usz scan_pos = lex->pos;
+  while (scan_pos < lex->input.sz && lex->input.buf[scan_pos] != '"' &&
+         lex->input.buf[scan_pos] != '\n') {
+    scan_pos++;
+  }
+
+  // Check for unterminated string
+  if (scan_pos >= lex->input.sz || lex->input.buf[scan_pos] == '\n') {
+    error_token(lex, tok, "Unterminated string literal", token_line, token_col);
+    return;
+  }
+
+  // Allocate buffer for maximum possible length (input length)
+  usz max_length = scan_pos - lex->pos;
+  tick_buf_t str_buf = {0};
   tick_allocator_config_t config = {0};
-  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, capacity, &config) !=
+
+  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, max_length + 1, &config) !=
       TICK_OK) {
     error_token(lex, tok, "Failed to allocate string buffer", token_line,
                 token_col);
     return;
   }
 
+  // Parse and fill buffer with escape sequences processed
+  usz length = 0;
   while (!is_at_end(lex) && peek(lex) != '"') {
-    if (peek(lex) == '\n') {
-      error_token(lex, tok, "Unterminated string literal", token_line,
-                  token_col);
-      return;
-    }
-
     char c;
     if (peek(lex) == '\\') {
       advance(lex);  // consume '\'
@@ -488,33 +497,14 @@ static void scan_string(tick_lex_t* lex, tick_tok_t* tok, usz start,
       c = advance(lex);
     }
 
-    // Grow buffer if needed
-    if (length >= capacity) {
-      capacity *= 2;
-      if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, capacity, &config) !=
-          TICK_OK) {
-        error_token(lex, tok, "Failed to grow string buffer", token_line,
-                    token_col);
-        return;
-      }
-    }
-
     str_buf.buf[length++] = c;
-  }
-
-  if (is_at_end(lex)) {
-    error_token(lex, tok, "Unterminated string literal", token_line, token_col);
-    return;
   }
 
   // Closing quote
   advance(lex);
 
-  // Null-terminate and shrink to fit
-  if (lex->alloc.realloc(lex->alloc.ctx, &str_buf, length + 1, &config) ==
-      TICK_OK) {
-    str_buf.buf[length] = '\0';
-  }
+  // Null-terminate
+  str_buf.buf[length] = '\0';
 
   tok->type = TICK_TOK_STRING_LITERAL;
   tok->text.buf = str_buf.buf;

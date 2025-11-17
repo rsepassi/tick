@@ -1,0 +1,6 @@
+# Test null pointer dereference (should panic)
+
+pub let test = fn i32 {
+  let null_ptr: *i32 = 0;
+  return *null_ptr;
+};

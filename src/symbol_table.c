@@ -271,7 +271,7 @@ void tick_dependency_list_clear(tick_dependency_list_t* list) {
 
   // Clear flags for all nodes in the list
   for (tick_ast_node_t* node = list->head; node;
-       node = node->decl.next_queued) {
+       node = node->decl.next_pending) {
     node->decl.in_pending_deps = false;
   }
 
@@ -291,10 +291,10 @@ void tick_dependency_list_add(tick_dependency_list_t* list,
   // Mark as added
   decl->decl.in_pending_deps = true;
 
-  // Append to tail
-  decl->decl.next_queued = NULL;
+  // Append to tail using next_pending (separate from work queue)
+  decl->decl.next_pending = NULL;
   if (list->tail) {
-    list->tail->decl.next_queued = decl;
+    list->tail->decl.next_pending = decl;
     list->tail = decl;
   } else {
     list->head = decl;
@@ -395,6 +395,14 @@ void tick_scope_pop(tick_analyze_ctx_t* ctx) {
 void tick_work_queue_enqueue(tick_work_queue_t* queue, tick_ast_node_t* decl) {
   if (!queue || !decl) return;
 
+  // O(1) duplicate check using flag
+  if (decl->decl.in_work_queue) {
+    return;  // Already in queue
+  }
+
+  // Mark as queued
+  decl->decl.in_work_queue = true;
+
   // Append to tail (O(1) intrusive list operation)
   decl->decl.next_queued = NULL;
   if (!queue->head) {
@@ -414,6 +422,9 @@ tick_ast_node_t* tick_work_queue_dequeue(tick_work_queue_t* queue) {
   if (!queue->head) {
     queue->tail = NULL;
   }
+
+  // Clear the queued flag
+  decl->decl.in_work_queue = false;
 
   return decl;
 }

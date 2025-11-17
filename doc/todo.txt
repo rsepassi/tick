@@ -39,6 +39,11 @@
 - feature: memcpy, memset, memmove
 - feature: @src for logging
 - feature: build modes
+- feature: math builtins (abs, sqrt, sin, cos, tan, exp, exp2, log, log2, log10)
 - std: allocators
 - std: concurrency
-- std: math (abs, sqrt, sin, cos, tan, exp, exp2, log, log2, log10)
+- machine: cancellation race (A cancels, completion comes in,
+  but cancellation may already be in B's cancellation queue,
+  and if B is cross-thread, A can't just remove from the queue)
+- machine: multi-writer doorbells
+- machine: capabilities

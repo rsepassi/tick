@@ -23,4 +23,11 @@ Address-of slice[2]: value=3
 After pointer write: mut_nums[2]=77
 Slice ptr access: first=10
 
+=== Null Pointer Check Tests ===
+Valid deref with null check: 99
+Valid field access with null check: x=55 y=66
+ptr[0]=11 ptr[1]=22
+Smart check (address-of deref): 777
+Smart check (address-of field): x=88
+
 === All Array and Slice Tests Passed ===

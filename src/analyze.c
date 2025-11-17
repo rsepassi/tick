@@ -790,7 +790,7 @@ static bool is_function_signature_resolved(tick_ast_node_t* fn_type) {
   // Check parameter types
   for (tick_ast_node_t* param = fn_type->type_function.params; param;
        param = param->next) {
-    if (param->param.type && tick_type_is_unresolved(param->param.type)) {
+    if (param->decl.type && tick_type_is_unresolved(param->decl.type)) {
       return false;
     }
   }
@@ -804,29 +804,31 @@ static bool is_function_signature_resolved(tick_ast_node_t* fn_type) {
 static void resolve_named_type(tick_ast_node_t* type_node,
                                tick_analyze_ctx_t* ctx,
                                bool track_dependencies) {
-  if (type_node->type_named.type_entry) return;
+  // Perform type lookup if not already cached
+  if (!type_node->type_named.type_entry) {
+    type_node->type_named.type_entry =
+        tick_types_lookup(ctx->types, type_node->type_named.name);
 
-  type_node->type_named.type_entry =
-      tick_types_lookup(ctx->types, type_node->type_named.name);
-
-  if (type_node->type_named.type_entry) {
-    type_node->type_named.builtin_type =
-        type_node->type_named.type_entry->builtin_type;
-
-    if (track_dependencies && tick_type_is_user_defined(type_node) &&
-        type_node->type_named.type_entry->parent_decl) {
-      tick_ast_node_t* type_decl =
-          type_node->type_named.type_entry->parent_decl;
-      if (type_decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED) {
-        tick_dependency_list_add(&ctx->pending_deps, type_decl);
-        ALOG("! dep: %.*s", (int)type_decl->decl.name.sz,
-             type_decl->decl.name.buf);
-      }
+    if (type_node->type_named.type_entry) {
+      type_node->type_named.builtin_type =
+          type_node->type_named.type_entry->builtin_type;
+    } else {
+      type_node->type_named.builtin_type = TICK_TYPE_UNKNOWN;
+      ALOG("type: %.*s -> NOT FOUND", (int)type_node->type_named.name.sz,
+           type_node->type_named.name.buf);
+      return;
     }
-  } else {
-    type_node->type_named.builtin_type = TICK_TYPE_UNKNOWN;
-    ALOG("type: %.*s -> NOT FOUND", (int)type_node->type_named.name.sz,
-         type_node->type_named.name.buf);
+  }
+
+  // Track type dependencies (even if type was already cached)
+  if (track_dependencies && tick_type_is_user_defined(type_node) &&
+      type_node->type_named.type_entry->parent_decl) {
+    tick_ast_node_t* type_decl = type_node->type_named.type_entry->parent_decl;
+    if (type_decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED) {
+      tick_dependency_list_add(&ctx->pending_deps, type_decl);
+      ALOG("! dep: %.*s", (int)type_decl->decl.name.sz,
+           type_decl->decl.name.buf);
+    }
   }
 }
 
@@ -840,9 +842,6 @@ static tick_ast_node_t* get_symbol_type(tick_symbol_t* sym) {
   switch (sym->decl->kind) {
     case TICK_AST_DECL:
       result_type = sym->decl->decl.type;
-      break;
-    case TICK_AST_PARAM:
-      result_type = sym->decl->param.type;
       break;
     default:
       CHECK(0, "unexpected symbol decl kind: %d", sym->decl->kind);
@@ -863,6 +862,10 @@ static tick_analyze_error_t analyze_field_types(tick_ast_node_t* fields,
       if (err != TICK_ANALYZE_OK) {
         return err;
       }
+      // Check if an error occurred during type resolution
+      if (analyze_has_error(ctx)) {
+        return TICK_ANALYZE_ERR;
+      }
     }
   }
   return TICK_ANALYZE_OK;
@@ -875,9 +878,8 @@ static tick_analyze_error_t ensure_user_type_set(tick_ast_node_t* decl,
   if (decl->decl.type == NULL) {
     decl->decl.type = alloc_user_type_node(ctx->alloc, decl->decl.name);
     // Don't call analyze_type here - it would add the declaration as a
-    // dependency of itself, creating a circular dependency. The type node is
-    // already set up correctly and will be resolved when other code references
-    // this type.
+    // dependency of itself. The type node is already set up correctly and
+    // will be resolved when other code references this type.
   }
   return TICK_ANALYZE_OK;
 }
@@ -1074,6 +1076,108 @@ static tick_ast_node_t* create_empty_block_stmt(tick_alloc_t alloc,
   node->next = NULL;
   node->prev = NULL;
   return node;
+}
+
+// Helper: Create a tick_check_deref() call expression
+// Wraps a pointer expression in a null check
+static tick_ast_node_t* create_check_deref_call(tick_alloc_t alloc,
+                                                tick_ast_node_t* ptr_expr,
+                                                tick_ast_loc_t loc) {
+  // Create identifier for tick_check_deref
+  tick_ast_node_t* callee;
+  ALLOC_AST_NODE(alloc, callee);
+  callee->kind = TICK_AST_IDENTIFIER_EXPR;
+  callee->identifier_expr.name = (tick_buf_t){
+      .buf = (u8*)"tick_check_deref",
+      .sz = 16,
+  };
+  callee->identifier_expr.at_builtin = TICK_AT_BUILTIN_CHECK_DEREF;
+  callee->identifier_expr.symbol = NULL;
+  callee->identifier_expr.needs_user_prefix = false;
+  callee->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  callee->loc = loc;
+
+  // Create call expression node
+  tick_ast_node_t* call;
+  ALLOC_AST_NODE(alloc, call);
+  call->kind = TICK_AST_CALL_EXPR;
+  call->call_expr.callee = callee;
+  call->call_expr.args = ptr_expr;  // Single argument
+  call->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  call->loc = loc;
+
+  // Ensure argument has no next pointer (single arg)
+  ptr_expr->next = NULL;
+
+  return call;
+}
+
+// Helper: Clone a simple expression node for use in null checks
+// Only handles simple expressions (identifiers, literals) after decomposition
+static tick_ast_node_t* clone_simple_expr(tick_ast_node_t* expr,
+                                          tick_alloc_t alloc) {
+  tick_ast_node_t* clone;
+  ALLOC_AST_NODE(alloc, clone);
+
+  // Copy the entire node (shallow copy)
+  *clone = *expr;
+
+  // Clear next/prev pointers (this is a new independent node)
+  clone->next = NULL;
+  clone->prev = NULL;
+
+  return clone;
+}
+
+// Helper: Insert a null check statement before the current statement
+// Creates: tick_check_deref(ptr_expr);
+// Only works when ctx->current_block exists (function-level only)
+static void insert_null_check_stmt(tick_ast_node_t* ptr_expr,
+                                   tick_analyze_ctx_t* ctx,
+                                   tick_ast_loc_t loc) {
+  // Can only insert if we have a current block (function-level only)
+  if (!ctx->current_block) {
+    ALOG("  cannot insert null check: no current_block (module-level)");
+    return;
+  }
+
+  // Clone the pointer expression for use in the check
+  // (original stays in the dereference/access/index operation)
+  tick_ast_node_t* ptr_expr_copy = clone_simple_expr(ptr_expr, ctx->alloc);
+  if (!ptr_expr_copy) {
+    return;  // Allocation failed
+  }
+
+  // Create tick_check_deref() call expression
+  tick_ast_node_t* check_call =
+      create_check_deref_call(ctx->alloc, ptr_expr_copy, loc);
+  if (!check_call) {
+    return;  // Allocation failed
+  }
+
+  // Wrap call in expression statement
+  tick_ast_node_t* expr_stmt;
+  {
+    tick_allocator_config_t config = {
+        .flags = TICK_ALLOCATOR_ZEROMEM,
+        .alignment2 = 0,
+    };
+    tick_buf_t buf = {0};
+    if (ctx->alloc.realloc(ctx->alloc.ctx, &buf, sizeof(tick_ast_node_t),
+                           &config) != TICK_OK) {
+      return;  // Allocation failed
+    }
+    expr_stmt = (tick_ast_node_t*)buf.buf;
+  }
+  expr_stmt->kind = TICK_AST_EXPR_STMT;
+  expr_stmt->expr_stmt.expr = check_call;
+  expr_stmt->node_flags = TICK_NODE_FLAG_SYNTHETIC;
+  expr_stmt->loc = loc;
+
+  // Insert before current statement using same mechanism as temporaries
+  insert_temp_in_block(ctx, expr_stmt);
+
+  ALOG("  inserted null check statement before current statement");
 }
 
 // Recursively flatten array initializers into index assignments
@@ -1510,7 +1614,7 @@ static tick_analyze_error_t analyze_type(tick_ast_node_t* type_node,
       // Analyze parameter types
       tick_ast_node_t* param = type_node->type_function.params;
       while (param) {
-        err = analyze_type(param->param.type, ctx);
+        err = analyze_type(param->decl.type, ctx);
         if (err != TICK_ANALYZE_OK) return err;
         param = param->next;
       }
@@ -1602,8 +1706,8 @@ static bool needs_type_dependency(tick_ast_node_t* decl,
     }
     for (tick_ast_node_t* param = type->type_function.params; param;
          param = param->next) {
-      if (param->kind == TICK_AST_PARAM && param->param.type &&
-          tick_type_is_unresolved(param->param.type)) {
+      if (param->kind == TICK_AST_DECL && param->decl.type &&
+          tick_type_is_unresolved(param->decl.type)) {
         return true;
       }
     }
@@ -1739,6 +1843,12 @@ static tick_ast_node_t* analyze_binary_expr(tick_ast_node_t* expr,
 
 static tick_ast_node_t* analyze_identifier_expr(tick_ast_node_t* expr,
                                                 tick_analyze_ctx_t* ctx) {
+  // Check if at_builtin is already set (for synthetic/compiler-generated nodes)
+  if (expr->identifier_expr.at_builtin != TICK_AT_BUILTIN_UNKNOWN) {
+    // Builtin already resolved, no symbol table lookup needed
+    return NULL;
+  }
+
   // Check if this is an AT builtin (@identifier)
   if (expr->identifier_expr.name.sz > 0 &&
       expr->identifier_expr.name.buf[0] == '@') {
@@ -1789,8 +1899,7 @@ static tick_ast_node_t* analyze_identifier_expr(tick_ast_node_t* expr,
     bool needs_dep = needs_type_dependency(decl, result_type);
 
     if (is_module_level && needs_dep &&
-        decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED &&
-        decl->decl.analysis_state != TICK_ANALYSIS_STATE_IN_PROGRESS) {
+        decl->decl.analysis_state != TICK_ANALYSIS_STATE_COMPLETED) {
       tick_dependency_list_add(&ctx->pending_deps, decl);
       ALOG("! dep: %.*s", (int)decl->decl.name.sz, decl->decl.name.buf);
     }
@@ -1854,6 +1963,15 @@ static tick_ast_node_t* analyze_unary_expr(tick_ast_node_t* expr,
             if (err != TICK_ANALYZE_OK) {
               result_type = NULL;
             }
+          }
+
+          // Insert null check statement - skip if operand is address-of (never
+          // null)
+          if (!(expr->unary_expr.operand->kind == TICK_AST_UNARY_EXPR &&
+                expr->unary_expr.operand->unary_expr.op == UNOP_ADDR)) {
+            insert_null_check_stmt(expr->unary_expr.operand, ctx, expr->loc);
+          } else {
+            ALOG("skipping null check for address-of dereference");
           }
         } else {
           ANALYSIS_ERROR(ctx, expr->loc,
@@ -2048,6 +2166,14 @@ static tick_ast_node_t* analyze_index_expr(tick_ast_node_t* expr,
     if (array_type->kind == TICK_AST_TYPE_POINTER) {
       // Pointer indexing: *T -> T
       result_type = array_type->type_pointer.pointee_type;
+
+      // Insert null check statement - skip if array is address-of (never null)
+      if (!(expr->index_expr.array->kind == TICK_AST_UNARY_EXPR &&
+            expr->index_expr.array->unary_expr.op == UNOP_ADDR)) {
+        insert_null_check_stmt(expr->index_expr.array, ctx, expr->loc);
+      } else {
+        ALOG("skipping null check for address-of indexing");
+      }
     } else if (array_type->kind == TICK_AST_TYPE_SLICE) {
       // Slice indexing: []T -> T
       // Mark for special codegen handling (bounds check + ptr cast)
@@ -2229,6 +2355,14 @@ static tick_ast_node_t* analyze_field_access_expr(tick_ast_node_t* expr,
     base_type = object_type->type_pointer.pointee_type;
     expr->field_access_expr.object_is_pointer = true;
     ALOG("dereferencing pointer to access field");
+
+    // Insert null check statement - skip if object is address-of (never null)
+    if (!(expr->field_access_expr.object->kind == TICK_AST_UNARY_EXPR &&
+          expr->field_access_expr.object->unary_expr.op == UNOP_ADDR)) {
+      insert_null_check_stmt(expr->field_access_expr.object, ctx, expr->loc);
+    } else {
+      ALOG("skipping null check for address-of field access");
+    }
 
     // Analyze the pointee type to ensure it's resolved and track
     // dependencies
@@ -2855,16 +2989,16 @@ static tick_analyze_error_t analyze_function_signature(
   // Analyze parameter types (don't need to enter scope for signature analysis)
   for (tick_ast_node_t* param = func->function.params; param;
        param = param->next) {
-    if (param->kind == TICK_AST_PARAM) {
-      err = analyze_type(param->param.type, ctx);
+    if (param->kind == TICK_AST_DECL) {
+      err = analyze_type(param->decl.type, ctx);
       if (err != TICK_ANALYZE_OK) {
         decl->decl.signature_state = TICK_ANALYSIS_STATE_FAILED;
         ALOG_EXIT("FAILED (param type)");
         return err;
       }
 
-      ALOG("param %.*s: %s", (int)param->param.name.sz, param->param.name.buf,
-           tick_type_str(param->param.type));
+      ALOG("param %.*s: %s", (int)param->decl.name.sz, param->decl.name.buf,
+           tick_type_str(param->decl.type));
     }
   }
 
@@ -2915,8 +3049,8 @@ static tick_analyze_error_t analyze_function_body(tick_ast_node_t* decl,
   // (Signature was already analyzed, so types are resolved)
   for (tick_ast_node_t* param = func->function.params; param;
        param = param->next) {
-    if (param->kind == TICK_AST_PARAM) {
-      tick_scope_insert_symbol(ctx->current_scope, param->param.name, param);
+    if (param->kind == TICK_AST_DECL) {
+      tick_scope_insert_symbol(ctx->current_scope, param->decl.name, param);
     }
   }
 
@@ -3599,12 +3733,6 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
         decl->decl.analysis_state == TICK_ANALYSIS_STATE_FAILED) {
       continue;
     }
-    if (decl->decl.analysis_state == TICK_ANALYSIS_STATE_IN_PROGRESS) {
-      ANALYSIS_ERROR(ctx, decl->loc,
-                     "circular dependency detected for declaration '%.*s'\n",
-                     (int)decl->decl.name.sz, decl->decl.name.buf);
-      goto fail;
-    }
 
     ALOG_ENTER("decl %.*s", (int)decl->decl.name.sz, decl->decl.name.buf);
     decl->decl.analysis_state = TICK_ANALYSIS_STATE_IN_PROGRESS;
@@ -3618,24 +3746,19 @@ tick_err_t tick_ast_analyze(tick_ast_t* ast, tick_alloc_t alloc,
 
     if (ctx->pending_deps.head != NULL) {
       ALOG_EXIT("has dependencies, re-enqueueing");
+
       decl->decl.analysis_state = TICK_ANALYSIS_STATE_NOT_STARTED;
 
-      if (!ctx->work_queue.head) {
-        ctx->work_queue.head = ctx->pending_deps.head;
-        ctx->work_queue.tail = ctx->pending_deps.tail;
-      } else {
-        ctx->work_queue.tail->decl.next_queued = ctx->pending_deps.head;
-        ctx->work_queue.tail = ctx->pending_deps.tail;
-      }
-
-      // Clear in_pending_deps flags
+      // Enqueue each dependency (with duplicate checking)
       for (tick_ast_node_t* dep = ctx->pending_deps.head; dep;
-           dep = dep->decl.next_queued) {
+           dep = dep->decl.next_pending) {
         dep->decl.in_pending_deps = false;
+        tick_work_queue_enqueue(&ctx->work_queue, dep);
       }
       ctx->pending_deps.head = NULL;
       ctx->pending_deps.tail = NULL;
 
+      // Re-enqueue this declaration (with duplicate checking)
       tick_work_queue_enqueue(&ctx->work_queue, decl);
     } else {
       ALOG_EXIT("OK");

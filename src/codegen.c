@@ -9,6 +9,8 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "codegen_helpers.h"
+#include "codegen_runtime_tables.h"
 #include "tick.h"
 #include "tick_runtime_embedded.h"
 
@@ -169,488 +171,6 @@ static tick_err_t write_line_directive(codegen_ctx_t* ctx, usz line) {
 }
 
 // ============================================================================
-// C-Specific Runtime Function Lookup Tables
-// ============================================================================
-// These tables map semantic operations (builtin enums) and types to C runtime
-// function names. This is C11 backend-specific logic - other backends would
-// have different implementations.
-
-#define NUM_BUILTINS 17
-#define NUM_TYPES 14
-
-// Runtime function names indexed by [builtin][type]
-// Returns function name string or NULL if not applicable
-static const char* RUNTIME_FUNCS[NUM_BUILTINS][NUM_TYPES] = {
-    // TICK_BUILTIN_SAT_ADD
-    [TICK_BUILTIN_SAT_ADD] =
-        {
-            [TICK_TYPE_I8] = "tick_sat_add_i8",
-            [TICK_TYPE_I16] = "tick_sat_add_i16",
-            [TICK_TYPE_I32] = "tick_sat_add_i32",
-            [TICK_TYPE_I64] = "tick_sat_add_i64",
-            [TICK_TYPE_ISZ] = "tick_sat_add_isz",
-            [TICK_TYPE_U8] = "tick_sat_add_u8",
-            [TICK_TYPE_U16] = "tick_sat_add_u16",
-            [TICK_TYPE_U32] = "tick_sat_add_u32",
-            [TICK_TYPE_U64] = "tick_sat_add_u64",
-            [TICK_TYPE_USZ] = "tick_sat_add_usz",
-        },
-    // TICK_BUILTIN_SAT_SUB
-    [TICK_BUILTIN_SAT_SUB] =
-        {
-            [TICK_TYPE_I8] = "tick_sat_sub_i8",
-            [TICK_TYPE_I16] = "tick_sat_sub_i16",
-            [TICK_TYPE_I32] = "tick_sat_sub_i32",
-            [TICK_TYPE_I64] = "tick_sat_sub_i64",
-            [TICK_TYPE_ISZ] = "tick_sat_sub_isz",
-            [TICK_TYPE_U8] = "tick_sat_sub_u8",
-            [TICK_TYPE_U16] = "tick_sat_sub_u16",
-            [TICK_TYPE_U32] = "tick_sat_sub_u32",
-            [TICK_TYPE_U64] = "tick_sat_sub_u64",
-            [TICK_TYPE_USZ] = "tick_sat_sub_usz",
-        },
-    // TICK_BUILTIN_SAT_MUL
-    [TICK_BUILTIN_SAT_MUL] =
-        {
-            [TICK_TYPE_I8] = "tick_sat_mul_i8",
-            [TICK_TYPE_I16] = "tick_sat_mul_i16",
-            [TICK_TYPE_I32] = "tick_sat_mul_i32",
-            [TICK_TYPE_I64] = "tick_sat_mul_i64",
-            [TICK_TYPE_ISZ] = "tick_sat_mul_isz",
-            [TICK_TYPE_U8] = "tick_sat_mul_u8",
-            [TICK_TYPE_U16] = "tick_sat_mul_u16",
-            [TICK_TYPE_U32] = "tick_sat_mul_u32",
-            [TICK_TYPE_U64] = "tick_sat_mul_u64",
-            [TICK_TYPE_USZ] = "tick_sat_mul_usz",
-        },
-    // TICK_BUILTIN_SAT_DIV
-    [TICK_BUILTIN_SAT_DIV] =
-        {
-            [TICK_TYPE_I8] = "tick_sat_div_i8",
-            [TICK_TYPE_I16] = "tick_sat_div_i16",
-            [TICK_TYPE_I32] = "tick_sat_div_i32",
-            [TICK_TYPE_I64] = "tick_sat_div_i64",
-            [TICK_TYPE_ISZ] = "tick_sat_div_isz",
-            [TICK_TYPE_U8] = "tick_sat_div_u8",
-            [TICK_TYPE_U16] = "tick_sat_div_u16",
-            [TICK_TYPE_U32] = "tick_sat_div_u32",
-            [TICK_TYPE_U64] = "tick_sat_div_u64",
-            [TICK_TYPE_USZ] = "tick_sat_div_usz",
-        },
-    // TICK_BUILTIN_WRAP_ADD
-    [TICK_BUILTIN_WRAP_ADD] =
-        {
-            [TICK_TYPE_I8] = "tick_wrap_add_i8",
-            [TICK_TYPE_I16] = "tick_wrap_add_i16",
-            [TICK_TYPE_I32] = "tick_wrap_add_i32",
-            [TICK_TYPE_I64] = "tick_wrap_add_i64",
-            [TICK_TYPE_ISZ] = "tick_wrap_add_isz",
-            // Unsigned types use native C wrapping - no runtime function needed
-        },
-    // TICK_BUILTIN_WRAP_SUB
-    [TICK_BUILTIN_WRAP_SUB] =
-        {
-            [TICK_TYPE_I8] = "tick_wrap_sub_i8",
-            [TICK_TYPE_I16] = "tick_wrap_sub_i16",
-            [TICK_TYPE_I32] = "tick_wrap_sub_i32",
-            [TICK_TYPE_I64] = "tick_wrap_sub_i64",
-            [TICK_TYPE_ISZ] = "tick_wrap_sub_isz",
-        },
-    // TICK_BUILTIN_WRAP_MUL
-    [TICK_BUILTIN_WRAP_MUL] =
-        {
-            [TICK_TYPE_I8] = "tick_wrap_mul_i8",
-            [TICK_TYPE_I16] = "tick_wrap_mul_i16",
-            [TICK_TYPE_I32] = "tick_wrap_mul_i32",
-            [TICK_TYPE_I64] = "tick_wrap_mul_i64",
-            [TICK_TYPE_ISZ] = "tick_wrap_mul_isz",
-        },
-    // TICK_BUILTIN_WRAP_DIV
-    [TICK_BUILTIN_WRAP_DIV] =
-        {
-            [TICK_TYPE_I8] = "tick_wrap_div_i8",
-            [TICK_TYPE_I16] = "tick_wrap_div_i16",
-            [TICK_TYPE_I32] = "tick_wrap_div_i32",
-            [TICK_TYPE_I64] = "tick_wrap_div_i64",
-            [TICK_TYPE_ISZ] = "tick_wrap_div_isz",
-        },
-    // TICK_BUILTIN_CHECKED_ADD
-    [TICK_BUILTIN_CHECKED_ADD] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_add_i8",
-            [TICK_TYPE_I16] = "tick_checked_add_i16",
-            [TICK_TYPE_I32] = "tick_checked_add_i32",
-            [TICK_TYPE_I64] = "tick_checked_add_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_add_isz",
-            [TICK_TYPE_U8] = "tick_wrap_add_u8",
-            [TICK_TYPE_U16] = "tick_wrap_add_u16",
-            [TICK_TYPE_U32] = "tick_wrap_add_u32",
-            [TICK_TYPE_U64] = "tick_wrap_add_u64",
-            [TICK_TYPE_USZ] = "tick_wrap_add_usz",
-        },
-    // TICK_BUILTIN_CHECKED_SUB
-    [TICK_BUILTIN_CHECKED_SUB] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_sub_i8",
-            [TICK_TYPE_I16] = "tick_checked_sub_i16",
-            [TICK_TYPE_I32] = "tick_checked_sub_i32",
-            [TICK_TYPE_I64] = "tick_checked_sub_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_sub_isz",
-            [TICK_TYPE_U8] = "tick_wrap_sub_u8",
-            [TICK_TYPE_U16] = "tick_wrap_sub_u16",
-            [TICK_TYPE_U32] = "tick_wrap_sub_u32",
-            [TICK_TYPE_U64] = "tick_wrap_sub_u64",
-            [TICK_TYPE_USZ] = "tick_wrap_sub_usz",
-        },
-    // TICK_BUILTIN_CHECKED_MUL
-    [TICK_BUILTIN_CHECKED_MUL] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_mul_i8",
-            [TICK_TYPE_I16] = "tick_checked_mul_i16",
-            [TICK_TYPE_I32] = "tick_checked_mul_i32",
-            [TICK_TYPE_I64] = "tick_checked_mul_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_mul_isz",
-            [TICK_TYPE_U8] = "tick_wrap_mul_u8",
-            [TICK_TYPE_U16] = "tick_wrap_mul_u16",
-            [TICK_TYPE_U32] = "tick_wrap_mul_u32",
-            [TICK_TYPE_U64] = "tick_wrap_mul_u64",
-            [TICK_TYPE_USZ] = "tick_wrap_mul_usz",
-        },
-    // TICK_BUILTIN_CHECKED_DIV
-    [TICK_BUILTIN_CHECKED_DIV] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_div_i8",
-            [TICK_TYPE_I16] = "tick_checked_div_i16",
-            [TICK_TYPE_I32] = "tick_checked_div_i32",
-            [TICK_TYPE_I64] = "tick_checked_div_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_div_isz",
-            [TICK_TYPE_U8] = "tick_checked_div_u8",
-            [TICK_TYPE_U16] = "tick_checked_div_u16",
-            [TICK_TYPE_U32] = "tick_checked_div_u32",
-            [TICK_TYPE_U64] = "tick_checked_div_u64",
-            [TICK_TYPE_USZ] = "tick_checked_div_usz",
-        },
-    // TICK_BUILTIN_CHECKED_MOD
-    [TICK_BUILTIN_CHECKED_MOD] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_mod_i8",
-            [TICK_TYPE_I16] = "tick_checked_mod_i16",
-            [TICK_TYPE_I32] = "tick_checked_mod_i32",
-            [TICK_TYPE_I64] = "tick_checked_mod_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_mod_isz",
-            [TICK_TYPE_U8] = "tick_checked_mod_u8",
-            [TICK_TYPE_U16] = "tick_checked_mod_u16",
-            [TICK_TYPE_U32] = "tick_checked_mod_u32",
-            [TICK_TYPE_U64] = "tick_checked_mod_u64",
-            [TICK_TYPE_USZ] = "tick_checked_mod_usz",
-        },
-    // TICK_BUILTIN_CHECKED_SHL
-    [TICK_BUILTIN_CHECKED_SHL] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_shl_i8",
-            [TICK_TYPE_I16] = "tick_checked_shl_i16",
-            [TICK_TYPE_I32] = "tick_checked_shl_i32",
-            [TICK_TYPE_I64] = "tick_checked_shl_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_shl_isz",
-            [TICK_TYPE_U8] = "tick_checked_shl_u8",
-            [TICK_TYPE_U16] = "tick_checked_shl_u16",
-            [TICK_TYPE_U32] = "tick_checked_shl_u32",
-            [TICK_TYPE_U64] = "tick_checked_shl_u64",
-            [TICK_TYPE_USZ] = "tick_checked_shl_usz",
-        },
-    // TICK_BUILTIN_CHECKED_SHR
-    [TICK_BUILTIN_CHECKED_SHR] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_shr_i8",
-            [TICK_TYPE_I16] = "tick_checked_shr_i16",
-            [TICK_TYPE_I32] = "tick_checked_shr_i32",
-            [TICK_TYPE_I64] = "tick_checked_shr_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_shr_isz",
-            [TICK_TYPE_U8] = "tick_checked_shr_u8",
-            [TICK_TYPE_U16] = "tick_checked_shr_u16",
-            [TICK_TYPE_U32] = "tick_checked_shr_u32",
-            [TICK_TYPE_U64] = "tick_checked_shr_u64",
-            [TICK_TYPE_USZ] = "tick_checked_shr_usz",
-        },
-    // TICK_BUILTIN_CHECKED_NEG
-    [TICK_BUILTIN_CHECKED_NEG] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_neg_i8",
-            [TICK_TYPE_I16] = "tick_checked_neg_i16",
-            [TICK_TYPE_I32] = "tick_checked_neg_i32",
-            [TICK_TYPE_I64] = "tick_checked_neg_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_neg_isz",
-            // Unsigned types cannot be negated
-        },
-    // TICK_BUILTIN_CHECKED_CAST handled separately via CAST_FUNCS table
-};
-
-// Cast function names indexed by [src_type][dst_type]
-// Returns function name string or NULL if bare cast is sufficient
-static const char* CAST_FUNCS[NUM_TYPES][NUM_TYPES] = {
-    // From I8
-    [TICK_TYPE_I8] =
-        {
-            [TICK_TYPE_I8] = NULL,   // Same type - bare cast
-            [TICK_TYPE_I16] = NULL,  // Widening - bare cast
-            [TICK_TYPE_I32] = NULL,
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = "tick_checked_cast_i8_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_i8_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_i8_u32",
-            [TICK_TYPE_U64] = "tick_checked_cast_i8_u64",
-            [TICK_TYPE_USZ] = "tick_checked_cast_i8_usz",
-        },
-    // From I16
-    [TICK_TYPE_I16] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_i16_i8",
-            [TICK_TYPE_I16] = NULL,
-            [TICK_TYPE_I32] = NULL,
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = "tick_checked_cast_i16_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_i16_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_i16_u32",
-            [TICK_TYPE_U64] = "tick_checked_cast_i16_u64",
-            [TICK_TYPE_USZ] = "tick_checked_cast_i16_usz",
-        },
-    // From I32
-    [TICK_TYPE_I32] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_i32_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_i32_i16",
-            [TICK_TYPE_I32] = NULL,
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = "tick_checked_cast_i32_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_i32_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_i32_u32",
-            [TICK_TYPE_U64] = "tick_checked_cast_i32_u64",
-            [TICK_TYPE_USZ] = "tick_checked_cast_i32_usz",
-        },
-    // From I64
-    [TICK_TYPE_I64] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_i64_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_i64_i16",
-            [TICK_TYPE_I32] = "tick_checked_cast_i64_i32",
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = "tick_checked_cast_i64_isz",
-            [TICK_TYPE_U8] = "tick_checked_cast_i64_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_i64_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_i64_u32",
-            [TICK_TYPE_U64] = "tick_checked_cast_i64_u64",
-            [TICK_TYPE_USZ] = "tick_checked_cast_i64_usz",
-        },
-    // From ISZ
-    [TICK_TYPE_ISZ] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_isz_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_isz_i16",
-            [TICK_TYPE_I32] = "tick_checked_cast_isz_i32",
-            [TICK_TYPE_I64] = "tick_checked_cast_isz_i64",
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = "tick_checked_cast_isz_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_isz_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_isz_u32",
-            [TICK_TYPE_U64] = "tick_checked_cast_isz_u64",
-            [TICK_TYPE_USZ] = "tick_checked_cast_isz_usz",
-        },
-    // From U8
-    [TICK_TYPE_U8] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_u8_i8",
-            [TICK_TYPE_I16] = NULL,  // Widening to larger signed - safe
-            [TICK_TYPE_I32] = NULL,
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = NULL,
-            [TICK_TYPE_U16] = NULL,
-            [TICK_TYPE_U32] = NULL,
-            [TICK_TYPE_U64] = NULL,
-            [TICK_TYPE_USZ] = NULL,
-        },
-    // From U16
-    [TICK_TYPE_U16] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_u16_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_u16_i16",
-            [TICK_TYPE_I32] = NULL,
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = "tick_checked_cast_u16_u8",
-            [TICK_TYPE_U16] = NULL,
-            [TICK_TYPE_U32] = NULL,
-            [TICK_TYPE_U64] = NULL,
-            [TICK_TYPE_USZ] = NULL,
-        },
-    // From U32
-    [TICK_TYPE_U32] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_u32_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_u32_i16",
-            [TICK_TYPE_I32] = "tick_checked_cast_u32_i32",
-            [TICK_TYPE_I64] = NULL,
-            [TICK_TYPE_ISZ] = NULL,
-            [TICK_TYPE_U8] = "tick_checked_cast_u32_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_u32_u16",
-            [TICK_TYPE_U32] = NULL,
-            [TICK_TYPE_U64] = NULL,
-            [TICK_TYPE_USZ] = NULL,
-        },
-    // From U64
-    [TICK_TYPE_U64] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_u64_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_u64_i16",
-            [TICK_TYPE_I32] = "tick_checked_cast_u64_i32",
-            [TICK_TYPE_I64] = "tick_checked_cast_u64_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_cast_u64_isz",
-            [TICK_TYPE_U8] = "tick_checked_cast_u64_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_u64_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_u64_u32",
-            [TICK_TYPE_U64] = NULL,
-            [TICK_TYPE_USZ] = "tick_checked_cast_u64_usz",
-        },
-    // From USZ
-    [TICK_TYPE_USZ] =
-        {
-            [TICK_TYPE_I8] = "tick_checked_cast_usz_i8",
-            [TICK_TYPE_I16] = "tick_checked_cast_usz_i16",
-            [TICK_TYPE_I32] = "tick_checked_cast_usz_i32",
-            [TICK_TYPE_I64] = "tick_checked_cast_usz_i64",
-            [TICK_TYPE_ISZ] = "tick_checked_cast_usz_isz",
-            [TICK_TYPE_U8] = "tick_checked_cast_usz_u8",
-            [TICK_TYPE_U16] = "tick_checked_cast_usz_u16",
-            [TICK_TYPE_U32] = "tick_checked_cast_usz_u32",
-            [TICK_TYPE_U64] = "tick_checked_cast_usz_u64",
-            [TICK_TYPE_USZ] = NULL,
-        },
-};
-
-// ============================================================================
-// C-Specific Type and Cast Helpers
-// ============================================================================
-
-// Check if builtin type is numeric (supports checked operations)
-static bool tick_type_is_numeric_builtin(tick_builtin_type_t type) {
-  return (type >= TICK_TYPE_I8 && type <= TICK_TYPE_USZ);
-}
-
-// Check if a cast from src to dst is a widening conversion (always safe)
-static bool is_widening_cast(tick_builtin_type_t src, tick_builtin_type_t dst) {
-  if (src == dst) return true;
-
-  // Signed to signed widening
-  if (src == TICK_TYPE_I8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
-                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_I16 &&
-      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_I32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-
-  // Unsigned to unsigned widening
-  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_U16 || dst == TICK_TYPE_U32 ||
-                              dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
-    return true;
-  if (src == TICK_TYPE_U16 &&
-      (dst == TICK_TYPE_U32 || dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
-    return true;
-  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_U64 || dst == TICK_TYPE_USZ))
-    return true;
-
-  // Unsigned to signed widening (safe if destination is larger)
-  if (src == TICK_TYPE_U8 && (dst == TICK_TYPE_I16 || dst == TICK_TYPE_I32 ||
-                              dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_U16 &&
-      (dst == TICK_TYPE_I32 || dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-  if (src == TICK_TYPE_U32 && (dst == TICK_TYPE_I64 || dst == TICK_TYPE_ISZ))
-    return true;
-
-  return false;
-}
-
-// Compute the cast strategy for a given source and destination type
-static tick_cast_strategy_t compute_cast_strategy(tick_builtin_type_t src,
-                                                  tick_builtin_type_t dst) {
-  // Non-numeric types use bare C cast
-  bool src_numeric = tick_type_is_numeric_builtin(src);
-  bool dst_numeric = tick_type_is_numeric_builtin(dst);
-  if (!src_numeric || !dst_numeric) {
-    return CAST_STRATEGY_BARE;
-  }
-
-  // Widening casts are safe - use bare C cast
-  if (is_widening_cast(src, dst)) {
-    return CAST_STRATEGY_BARE;
-  }
-
-  // Narrowing or sign-changing casts need checked cast
-  return CAST_STRATEGY_CHECKED;
-}
-
-// ============================================================================
-// Operator Mapping
-// ============================================================================
-
-static const char* binop_to_c(tick_binop_t op) {
-  // Map operators to C operators
-  // Note: Arithmetic/shift operations have runtime_func set and won't reach
-  // here
-  switch (op) {
-    case BINOP_EQ:
-      return "==";
-    case BINOP_NE:
-      return "!=";
-    case BINOP_LT:
-      return "<";
-    case BINOP_GT:
-      return ">";
-    case BINOP_LE:
-      return "<=";
-    case BINOP_GE:
-      return ">=";
-    case BINOP_LOGICAL_AND:
-      return "&&";
-    case BINOP_LOGICAL_OR:
-      return "||";
-    case BINOP_AND:
-      return "&";
-    case BINOP_OR:
-      return "|";
-    case BINOP_XOR:
-      return "^";
-    default:
-      return "?";
-  }
-}
-
-static const char* unop_to_c(tick_unop_t op) {
-  // Map operators to C operators
-  // Note: Signed negation has runtime_func set and won't reach here
-  switch (op) {
-    case UNOP_NEG:
-      return "-";
-    case UNOP_NOT:
-      return "!";
-    case UNOP_BIT_NOT:
-      return "~";
-    case UNOP_ADDR:
-      return "&";
-    case UNOP_DEREF:
-      return "*";
-    default:
-      return "?";
-  }
-}
-
-// ============================================================================
 // Type Generation
 // ============================================================================
 
@@ -775,7 +295,7 @@ static tick_err_t codegen_type(tick_ast_node_t* type, tick_writer_t* w) {
             CHECK_OK(write_str(w, ", "));
           }
           first = false;
-          CHECK_OK(codegen_type(param->param.type, w));
+          CHECK_OK(codegen_type(param->decl.type, w));
           param = param->next;
         }
       }
@@ -877,6 +397,8 @@ static tick_err_t codegen_identifier(tick_ast_node_t* node,
         return write_str(ctx->writer, "tick_debug_log");
       case TICK_AT_BUILTIN_PANIC:
         return write_str(ctx->writer, "tick_panic");
+      case TICK_AT_BUILTIN_CHECK_DEREF:
+        return write_str(ctx->writer, "tick_check_deref");
       default:
         CHECK(0, "unknown AT builtin enum value");
     }
@@ -927,7 +449,8 @@ static tick_err_t codegen_binary_expr(tick_ast_node_t* node,
   // Direct C operator (comparisons, logical, bitwise, unsigned wrapping)
   CHECK_OK(codegen_expr(node->binary_expr.left, ctx));
   CHECK_OK(write_str(ctx->writer, " "));
-  CHECK_OK(write_str(ctx->writer, binop_to_c(node->binary_expr.op)));
+  CHECK_OK(
+      write_str(ctx->writer, tick_codegen_binop_to_c(node->binary_expr.op)));
   CHECK_OK(write_str(ctx->writer, " "));
   CHECK_OK(codegen_expr(node->binary_expr.right, ctx));
   return TICK_OK;
@@ -987,21 +510,9 @@ static tick_err_t codegen_unary_expr(tick_ast_node_t* node,
   }
 
   // Direct C operator
-  CHECK_OK(write_str(ctx->writer, unop_to_c(node->unary_expr.op)));
+  CHECK_OK(write_str(ctx->writer, tick_codegen_unop_to_c(node->unary_expr.op)));
   CHECK_OK(codegen_expr(node->unary_expr.operand, ctx));
   return TICK_OK;
-}
-
-// Check if a builtin needs its first argument (format string) cast to const
-// char*
-static bool builtin_needs_format_cast(tick_at_builtin_t builtin) {
-  switch (builtin) {
-    case TICK_AT_BUILTIN_DBG:
-    case TICK_AT_BUILTIN_PANIC:
-      return true;
-    default:
-      return false;
-  }
 }
 
 static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
@@ -1025,7 +536,7 @@ static tick_err_t codegen_call_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
 
     // For builtins with format strings, cast the first argument from uint8_t*
     // to const char*
-    if (builtin_needs_format_cast(builtin) && arg_index == 0) {
+    if (tick_codegen_builtin_needs_format_cast(builtin) && arg_index == 0) {
       CHECK_OK(write_str(ctx->writer, "(const char*)"));
     }
 
@@ -1317,7 +828,7 @@ static tick_err_t codegen_cast_expr(tick_ast_node_t* node, codegen_ctx_t* ctx) {
   tick_cast_strategy_t strategy = CAST_STRATEGY_BARE;
 
   if (src_builtin != TICK_TYPE_UNKNOWN && dst_builtin != TICK_TYPE_UNKNOWN) {
-    strategy = compute_cast_strategy(src_builtin, dst_builtin);
+    strategy = tick_codegen_compute_cast_strategy(src_builtin, dst_builtin);
     if (strategy == CAST_STRATEGY_CHECKED) {
       runtime_func = CAST_FUNCS[src_builtin][dst_builtin];
     }
@@ -1804,14 +1315,14 @@ static tick_err_t codegen_function_signature(tick_ast_node_t* decl,
       }
       first = false;
 
-      CHECK_OK(codegen_type(param->param.type, ctx->writer));
-
       // Include parameter names only in implementation
       if (include_param_names) {
-        CHECK_OK(write_str(ctx->writer, " "));
-        // Parameter names get __u_ prefix
-        CHECK_OK(write_str(ctx->writer, "__u_"));
-        CHECK_OK(write_ident(ctx->writer, param->param.name));
+        // Use write_c_declarator to handle arrays and pointer-to-array
+        // correctly
+        CHECK_OK(write_c_declarator(ctx->writer, param->decl.type, param));
+      } else {
+        // Declaration without names - just emit the type
+        CHECK_OK(codegen_type(param->decl.type, ctx->writer));
       }
 
       param = param->next;
@@ -1878,7 +1389,7 @@ static tick_err_t codegen_extern_function_decl(tick_ast_node_t* decl,
         CHECK_OK(write_str(ctx->writer, ", "));
       }
       first = false;
-      CHECK_OK(codegen_type(param->param.type, ctx->writer));
+      CHECK_OK(codegen_type(param->decl.type, ctx->writer));
       param = param->next;
     }
   }
@@ -1919,7 +1430,7 @@ static tick_err_t codegen_function_pointer_var(tick_ast_node_t* decl,
         CHECK_OK(write_str(ctx->writer, ", "));
       }
       first = false;
-      CHECK_OK(codegen_type(param->param.type, ctx->writer));
+      CHECK_OK(codegen_type(param->decl.type, ctx->writer));
       param = param->next;
     }
   }
@@ -1941,10 +1452,7 @@ static tick_err_t codegen_global_var_h(tick_ast_node_t* decl,
   if (is_volatile) {
     CHECK_OK(write_str(ctx->writer, "volatile "));
   }
-  CHECK_OK(codegen_type(decl->decl.type, ctx->writer));
-  CHECK_OK(write_str(ctx->writer, " "));
-  CHECK_OK(write_decl_name(ctx->writer, decl));
-  CHECK_OK(write_array_suffix(ctx->writer, decl->decl.type));
+  CHECK_OK(write_c_declarator(ctx->writer, decl->decl.type, decl));
   CHECK_OK(write_str(ctx->writer, ";\n"));
   return TICK_OK;
 }
@@ -1978,10 +1486,7 @@ static tick_err_t codegen_global_var_c(tick_ast_node_t* decl,
     if (is_volatile) {
       CHECK_OK(write_str(ctx->writer, "volatile "));
     }
-    CHECK_OK(codegen_type(type, ctx->writer));
-    CHECK_OK(write_str(ctx->writer, " "));
-    CHECK_OK(write_decl_name(ctx->writer, decl));
-    CHECK_OK(write_array_suffix(ctx->writer, type));
+    CHECK_OK(write_c_declarator(ctx->writer, type, decl));
   }
 
   // Emit initializer

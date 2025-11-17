@@ -1,0 +1,8 @@
+# Test null pointer field access (should panic)
+
+pub let test = fn i32 {
+  # Using a cast to create a null pointer to a simple type
+  let null_ptr: *i32 = 0;
+  # Dereference it to trigger the null check
+  return *null_ptr;
+};
